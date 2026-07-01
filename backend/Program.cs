@@ -56,9 +56,7 @@ app.MapPost("/api/auth/login", (LoginRequestDto request, IJwtTokenService jwtTok
 {
     var credentials = new Dictionary<string, (string Password, string Role)>(StringComparer.OrdinalIgnoreCase)
     {
-        ["admin"] = ("admin", "Admin"),
-        ["operator"] = ("operator", "Operator"),
-        ["viewer"] = ("viewer", "Viewer"),
+        ["test"] = ("test", "Admin"),
     };
 
     if (!credentials.TryGetValue(request.Username, out var account) || account.Password != request.Password)

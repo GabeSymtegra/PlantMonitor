@@ -15,8 +15,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 
 export default function Login() {
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin");
+  const [username, setUsername] = useState("test");
+  const [password, setPassword] = useState("test");
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
