@@ -1,47 +1,70 @@
-import { DataGrid } from "@mui/x-data-grid";
+import { useEffect, useState } from "react";
+import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 
-const columns = [
-  { field: "line", headerName: "Line", width: 120 },
-  { field: "product", headerName: "Product", width: 220 },
-  { field: "status", headerName: "Status", width: 140 },
-  { field: "mode", headerName: "Mode", width: 120 },
-  { field: "length", headerName: "Length (ft)", width: 140 },
-];
+import { getProductionLines } from "../../services/dashboardService";
+import type { ProductionLine } from "../../types/ProductionLine";
 
-const rows = [
+const columns: GridColDef[] = [
   {
-    id: 1,
-    line: "Line 1",
-    product: "PVC Pipe",
-    status: "Running",
-    mode: "Auto",
-    length: 15200,
+    field: "lineNumber",
+    headerName: "Line",
+    width: 100,
   },
   {
-    id: 2,
-    line: "Line 2",
-    product: "ABS Pipe",
-    status: "Stopped",
-    mode: "Manual",
-    length: 9840,
+    field: "product",
+    headerName: "Product",
+    flex: 1,
+    minWidth: 180,
   },
   {
-    id: 3,
-    line: "Line 3",
-    product: "PEX Tubing",
-    status: "Faulted",
-    mode: "Auto",
-    length: 12350,
+    field: "status",
+    headerName: "Status",
+    width: 140,
+  },
+  {
+    field: "controlMode",
+    headerName: "Mode",
+    width: 120,
+  },
+  {
+    field: "totalLength",
+    headerName: "Length (ft)",
+    width: 150,
+  },
+  {
+    field: "runtime",
+    headerName: "Runtime",
+    width: 140,
+  },
+  {
+    field: "plcIp",
+    headerName: "PLC IP",
+    width: 150,
   },
 ];
 
 export default function LineTable() {
+  const [rows, setRows] = useState<ProductionLine[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadLines() {
+      const data = await getProductionLines();
+      setRows(data);
+      setLoading(false);
+    }
+
+    loadLines();
+  }, []);
+
   return (
     <div style={{ height: 520, width: "100%" }}>
       <DataGrid
         rows={rows}
         columns={columns}
+        loading={loading}
         pageSizeOptions={[10, 25, 50]}
+        disableRowSelectionOnClick
       />
     </div>
   );
