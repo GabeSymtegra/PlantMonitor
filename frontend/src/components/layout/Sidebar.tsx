@@ -1,6 +1,12 @@
-import { Drawer, List, ListItemButton, ListItemText } from "@mui/material";
+import {
+  Drawer,
+  Toolbar,
+  List,
+  ListItemButton,
+  ListItemText,
+} from "@mui/material";
 
-const drawerWidth = 220;
+const drawerWidth = 240;
 
 export default function Sidebar() {
   return (
@@ -8,13 +14,17 @@ export default function Sidebar() {
       variant="permanent"
       sx={{
         width: drawerWidth,
+        flexShrink: 0,
         "& .MuiDrawer-paper": {
           width: drawerWidth,
           boxSizing: "border-box",
         },
       }}
     >
+      <Toolbar />
+
       <List>
+
         <ListItemButton>
           <ListItemText primary="Dashboard" />
         </ListItemButton>
@@ -32,8 +42,13 @@ export default function Sidebar() {
         </ListItemButton>
 
         <ListItemButton>
+          <ListItemText primary="Administration" />
+        </ListItemButton>
+
+        <ListItemButton>
           <ListItemText primary="Settings" />
         </ListItemButton>
+
       </List>
     </Drawer>
   );
