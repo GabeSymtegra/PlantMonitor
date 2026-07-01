@@ -14,6 +14,8 @@ import AssessmentIcon from "@mui/icons-material/Assessment";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import SettingsIcon from "@mui/icons-material/Settings";
 
+import { NavLink } from "react-router-dom";
+
 const drawerWidth = 250;
 
 export default function Sidebar() {
@@ -23,6 +25,7 @@ export default function Sidebar() {
       sx={{
         width: drawerWidth,
         flexShrink: 0,
+
         "& .MuiDrawer-paper": {
           width: drawerWidth,
           boxSizing: "border-box",
@@ -33,67 +36,53 @@ export default function Sidebar() {
       <Toolbar />
 
       <List>
-
-        <ListItemButton selected>
-
+        <ListItemButton component={NavLink} to="/">
           <ListItemIcon>
             <DashboardIcon />
           </ListItemIcon>
 
           <ListItemText primary="Dashboard" />
-
         </ListItemButton>
 
-        <ListItemButton>
-
+        <ListItemButton component={NavLink} to="/lines">
           <ListItemIcon>
             <PrecisionManufacturingIcon />
           </ListItemIcon>
 
           <ListItemText primary="Production Lines" />
-
         </ListItemButton>
 
-        <ListItemButton>
-
+        <ListItemButton component={NavLink} to="/products">
           <ListItemIcon>
             <Inventory2Icon />
           </ListItemIcon>
 
           <ListItemText primary="Products" />
-
         </ListItemButton>
 
-        <ListItemButton>
-
+        <ListItemButton component={NavLink} to="/reports">
           <ListItemIcon>
             <AssessmentIcon />
           </ListItemIcon>
 
           <ListItemText primary="Reports" />
-
         </ListItemButton>
 
-        <ListItemButton>
-
+        <ListItemButton component={NavLink} to="/administration">
           <ListItemIcon>
             <AdminPanelSettingsIcon />
           </ListItemIcon>
 
           <ListItemText primary="Administration" />
-
         </ListItemButton>
 
-        <ListItemButton>
-
+        <ListItemButton component={NavLink} to="/settings">
           <ListItemIcon>
             <SettingsIcon />
           </ListItemIcon>
 
           <ListItemText primary="Settings" />
-
         </ListItemButton>
-
       </List>
     </Drawer>
   );

@@ -11,12 +11,8 @@ import SettingsIcon from "@mui/icons-material/Settings";
 
 export default function Navbar() {
   return (
-    <AppBar
-      position="sticky"
-      elevation={1}
-    >
+    <AppBar position="sticky" elevation={1}>
       <Toolbar>
-
         <Typography
           variant="h5"
           sx={{
@@ -29,11 +25,7 @@ export default function Navbar() {
 
         <Box sx={{ flexGrow: 1 }} />
 
-        <Chip
-          color="success"
-          label="LIVE"
-          sx={{ mr: 3 }}
-        />
+        <Chip color="success" label="LIVE" sx={{ mr: 3 }} />
 
         <Typography sx={{ mr: 2 }}>
           Gabriel
@@ -42,7 +34,6 @@ export default function Navbar() {
         <IconButton color="inherit">
           <SettingsIcon />
         </IconButton>
-
       </Toolbar>
     </AppBar>
   );
