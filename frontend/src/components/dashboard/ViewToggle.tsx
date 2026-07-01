@@ -1,6 +1,6 @@
 import { ToggleButton, ToggleButtonGroup } from "@mui/material";
 
-import { useDashboard } from "../../context/DashboardContext";
+import { useDashboard } from "../../context/useDashboard";
 
 export default function ViewToggle() {
   const { view, setView } = useDashboard();

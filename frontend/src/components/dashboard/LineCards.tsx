@@ -7,7 +7,7 @@ import {
 
 import StatusChip from "../common/StatusChip";
 
-import { useDashboard } from "../../context/DashboardContext";
+import { useDashboard } from "../../context/useDashboard";
 
 export default function LineCards() {
   const { dashboard } = useDashboard();

@@ -1,6 +1,6 @@
 import { Box, Typography } from "@mui/material";
 
-import { useDashboard } from "../context/DashboardContext";
+import { useDashboard } from "../context/useDashboard";
 
 import StatusSummary from "../components/dashboard/StatusSummary";
 import SearchBar from "../components/dashboard/SearchBar";

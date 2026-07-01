@@ -1,5 +1,7 @@
 import type { LineStatus } from "./LineStatus";
 
+export type PlcManufacturer = "AB" | "Siemens";
+
 export interface ProductionLine {
   id: number;
 
@@ -16,4 +18,8 @@ export interface ProductionLine {
   runtime: string;
 
   plcIp: string;
+
+  manufacturer: PlcManufacturer;
+
+  isActive: boolean;
 }

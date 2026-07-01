@@ -1,14 +1,26 @@
 import { Box } from "@mui/material";
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 
 import Navbar from "../components/layout/Navbar";
 import Sidebar from "../components/layout/Sidebar";
 
 export default function AppShell() {
-    return (
-        <Box sx={{ display: "flex" }}>
+    const [sidebarOpen, setSidebarOpen] = useState(true);
 
-            <Sidebar />
+    function handleToggleSidebar() {
+        setSidebarOpen((previous) => !previous);
+    }
+
+    return (
+        <Box
+            sx={{
+                display: "flex",
+                minHeight: "100vh",
+            }}
+        >
+
+            <Sidebar open={sidebarOpen} />
 
             <Box
                 sx={{
@@ -17,7 +29,10 @@ export default function AppShell() {
                     flexDirection: "column",
                 }}
             >
-                <Navbar />
+                <Navbar
+                    sidebarOpen={sidebarOpen}
+                    onToggleSidebar={handleToggleSidebar}
+                />
 
                 <Box sx={{ p: 4 }}>
 

@@ -2,7 +2,7 @@ import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 
 import StatusChip from "../common/StatusChip";
 
-import { useDashboard } from "../../context/DashboardContext";
+import { useDashboard } from "../../context/useDashboard";
 
 import type { LineStatus } from "../../types/LineStatus";
 

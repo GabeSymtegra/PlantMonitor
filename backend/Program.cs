@@ -1,6 +1,10 @@
+using backend.Services.Line;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddCors();
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<LineUpdateBroadcastService>();
 
 var app = builder.Build();
 
@@ -36,5 +40,7 @@ app.MapGet("/api/status", () =>
         }
     });
 });
+
+app.MapHub<LinesHub>("/hubs/lines");
 
 app.Run();

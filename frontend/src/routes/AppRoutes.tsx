@@ -4,7 +4,9 @@ import AppShell from "../layouts/AppShell";
 
 import Dashboard from "../pages/Dashboard";
 import Login from "../pages/Login";
+import Administration from "../pages/Administration";
 import Settings from "../pages/Settings";
+import ProtectedRoute from "./ProtectedRoute";
 
 function Placeholder({ title }: { title: string }) {
     return (
@@ -41,8 +43,10 @@ export default function AppRoutes() {
 
                     <Route
                         path="/administration"
-                        element={<Placeholder title="Administration" />}
-                    />
+                        element={<ProtectedRoute />}
+                    >
+                        <Route index element={<Administration />} />
+                    </Route>
 
                     <Route
                         path="/settings"

@@ -1,15 +1,24 @@
 import {
   createContext,
-  useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import {
+  HubConnection,
+  HubConnectionBuilder,
+  HubConnectionState,
+  LogLevel,
+} from "@microsoft/signalr";
 
 import { getDashboard } from "../services/dashboardService";
 import type { DashboardModel } from "../models/DashboardModel";
 
 export type DashboardView = "table" | "cards";
+const DASHBOARD_POLL_MS = 10000;
+const SIGNALR_HUB_URL =
+  import.meta.env.VITE_SIGNALR_HUB_URL ?? "http://localhost:5265/hubs/lines";
 
 interface DashboardContextType {
   dashboard: DashboardModel | null;
@@ -33,19 +42,83 @@ export function DashboardProvider({
   const [loading, setLoading] = useState(true);
 
   const [view, setView] = useState<DashboardView>("table");
+  const signalRConnectionRef = useRef<HubConnection | null>(null);
 
-  async function refresh() {
-    setLoading(true);
+  async function refresh(showLoader = true) {
+    if (showLoader) {
+      setLoading(true);
+    }
 
-    const data = await getDashboard();
-
-    setDashboard(data);
-
-    setLoading(false);
+    try {
+      const data = await getDashboard();
+      setDashboard(data);
+    } finally {
+      if (showLoader) {
+        setLoading(false);
+      }
+    }
   }
 
   useEffect(() => {
-    refresh();
+    let pollingTimer: ReturnType<typeof setInterval> | undefined;
+    let disposed = false;
+
+    async function loadInitialDashboard() {
+      await refresh(true);
+
+      pollingTimer = setInterval(() => {
+        void refresh(false);
+      }, DASHBOARD_POLL_MS);
+
+      const connection = new HubConnectionBuilder()
+        .withUrl(SIGNALR_HUB_URL)
+        .withAutomaticReconnect()
+        .configureLogging(LogLevel.Warning)
+        .build();
+
+      signalRConnectionRef.current = connection;
+
+      connection.on("LineUpdated", () => {
+        if (!disposed) {
+          void refresh(false);
+        }
+      });
+
+      connection.on("SnapshotRefreshRequired", () => {
+        if (!disposed) {
+          void refresh(false);
+        }
+      });
+
+      connection.onreconnected(() => {
+        if (!disposed) {
+          void refresh(false);
+        }
+      });
+
+      try {
+        await connection.start();
+      } catch {
+        // Polling fallback remains active when hub is temporarily unavailable.
+      }
+    }
+
+    void loadInitialDashboard();
+
+    return () => {
+      disposed = true;
+
+      if (pollingTimer) {
+        clearInterval(pollingTimer);
+      }
+
+      if (
+        signalRConnectionRef.current &&
+        signalRConnectionRef.current.state !== HubConnectionState.Disconnected
+      ) {
+        void signalRConnectionRef.current.stop();
+      }
+    };
   }, []);
 
   return (
@@ -63,12 +136,4 @@ export function DashboardProvider({
   );
 }
 
-export function useDashboard() {
-  const context = useContext(DashboardContext);
-
-  if (!context) {
-    throw new Error("useDashboard must be used inside DashboardProvider");
-  }
-
-  return context;
-}
+export { DashboardContext };
