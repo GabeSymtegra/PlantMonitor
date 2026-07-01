@@ -1,6 +1,10 @@
 import AppRoutes from "./routes/AppRoutes";
+import { DashboardProvider } from "./context/DashboardContext";
 
 export default function App() {
-    return <AppRoutes />;
+  return (
+    <DashboardProvider>
+      <AppRoutes />
+    </DashboardProvider>
+  );
 }
-
