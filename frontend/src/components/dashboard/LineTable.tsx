@@ -1,25 +1,34 @@
 import { useEffect, useState } from "react";
+
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 
+import StatusChip from "../common/StatusChip";
+
 import { getProductionLines } from "../../services/dashboardService";
+
 import type { ProductionLine } from "../../types/ProductionLine";
+import type { LineStatus } from "../../types/LineStatus";
 
 const columns: GridColDef[] = [
   {
     field: "lineNumber",
     headerName: "Line",
-    width: 100,
+    width: 90,
   },
   {
     field: "product",
     headerName: "Product",
     flex: 1,
-    minWidth: 180,
+    minWidth: 220,
   },
   {
     field: "status",
     headerName: "Status",
-    width: 140,
+    width: 170,
+
+    renderCell: (params) => (
+      <StatusChip status={params.value as LineStatus} />
+    ),
   },
   {
     field: "controlMode",
@@ -29,7 +38,7 @@ const columns: GridColDef[] = [
   {
     field: "totalLength",
     headerName: "Length (ft)",
-    width: 150,
+    width: 140,
   },
   {
     field: "runtime",
@@ -50,7 +59,9 @@ export default function LineTable() {
   useEffect(() => {
     async function loadLines() {
       const data = await getProductionLines();
+
       setRows(data);
+
       setLoading(false);
     }
 
@@ -58,7 +69,12 @@ export default function LineTable() {
   }, []);
 
   return (
-    <div style={{ height: 520, width: "100%" }}>
+    <div
+      style={{
+        height: 550,
+        width: "100%",
+      }}
+    >
       <DataGrid
         rows={rows}
         columns={columns}

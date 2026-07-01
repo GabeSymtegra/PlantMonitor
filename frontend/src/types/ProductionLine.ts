@@ -1,19 +1,19 @@
+import type { LineStatus } from "./LineStatus";
+
 export interface ProductionLine {
+  id: number;
 
-    id: number;
+  lineNumber: number;
 
-    lineNumber: number;
+  product: string;
 
-    product: string;
+  status: LineStatus;
 
-    status: string;
+  controlMode: "Auto" | "Manual";
 
-    controlMode: string;
+  totalLength: number;
 
-    totalLength: number;
+  runtime: string;
 
-    runtime: string;
-
-    plcIp: string;
-
+  plcIp: string;
 }
