@@ -23,6 +23,7 @@ const SIGNALR_HUB_URL =
 interface DashboardContextType {
   dashboard: DashboardModel | null;
   loading: boolean;
+  error: string | null;
   refresh: () => Promise<void>;
 
   view: DashboardView;
@@ -40,6 +41,7 @@ export function DashboardProvider({
 }) {
   const [dashboard, setDashboard] = useState<DashboardModel | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [view, setView] = useState<DashboardView>("table");
   const signalRConnectionRef = useRef<HubConnection | null>(null);
@@ -52,6 +54,9 @@ export function DashboardProvider({
     try {
       const data = await getDashboard();
       setDashboard(data);
+      setError(null);
+    } catch {
+      setError("Unable to load dashboard data. Check backend connectivity and try again.");
     } finally {
       if (showLoader) {
         setLoading(false);
@@ -126,6 +131,7 @@ export function DashboardProvider({
       value={{
         dashboard,
         loading,
+        error,
         refresh,
         view,
         setView,

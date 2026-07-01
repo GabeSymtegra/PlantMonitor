@@ -9,6 +9,7 @@ import {
 import StatusChip from "../common/StatusChip";
 
 import { useDashboard } from "../../context/useDashboard";
+import type { ProductionLine } from "../../types/ProductionLine";
 
 function MetricRow({
   label,
@@ -36,8 +37,13 @@ function MetricRow({
   );
 }
 
-export default function LineCards() {
+interface LineCardsProps {
+  lines?: ProductionLine[];
+}
+
+export default function LineCards({ lines }: LineCardsProps) {
   const { dashboard } = useDashboard();
+  const visibleLines = lines ?? dashboard?.lines ?? [];
 
   function formatStartDateTime(value: string): string {
     const parsed = new Date(value);
@@ -61,7 +67,7 @@ export default function LineCards() {
         gap: 2,
       }}
     >
-      {dashboard?.lines.map((line) => (
+      {visibleLines.map((line) => (
         <Card key={line.id}>
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>

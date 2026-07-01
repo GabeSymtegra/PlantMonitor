@@ -5,6 +5,7 @@ import StatusChip from "../common/StatusChip";
 import { useDashboard } from "../../context/useDashboard";
 
 import type { LineStatus } from "../../types/LineStatus";
+import type { ProductionLine } from "../../types/ProductionLine";
 
 function formatDateTime(value: string): string {
   const parsed = new Date(value);
@@ -91,8 +92,13 @@ const columns: GridColDef[] = [
   },
 ];
 
-export default function LineTable() {
+interface LineTableProps {
+  lines?: ProductionLine[];
+}
+
+export default function LineTable({ lines }: LineTableProps) {
   const { dashboard, loading } = useDashboard();
+  const rows = lines ?? dashboard?.lines ?? [];
 
   return (
     <div
@@ -102,7 +108,7 @@ export default function LineTable() {
       }}
     >
       <DataGrid
-        rows={dashboard?.lines ?? []}
+        rows={rows}
         columns={columns}
         loading={loading}
         pageSizeOptions={[10, 25, 50]}

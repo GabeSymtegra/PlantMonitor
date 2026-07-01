@@ -1,6 +1,39 @@
+using System.Security.Claims;
+using System.Text;
+using backend.Configuration;
+using backend.DTOs.Authentication;
+using backend.Interfaces;
 using backend.Services.Line;
+using backend.Services.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+
+builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidateLifetime = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidAudience = jwtOptions.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey)),
+            ClockSkew = TimeSpan.Zero,
+            NameClaimType = ClaimTypes.Name,
+            RoleClaimType = ClaimTypes.Role,
+        };
+    });
+builder.Services.AddAuthorization();
 
 builder.Services.AddCors();
 builder.Services.AddSignalR();
@@ -14,6 +47,34 @@ app.UseCors(policy =>
         .AllowAnyOrigin()
         .AllowAnyHeader()
         .AllowAnyMethod();
+});
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapPost("/api/auth/login", (LoginRequestDto request, IJwtTokenService jwtTokenService) =>
+{
+    var credentials = new Dictionary<string, (string Password, string Role)>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["admin"] = ("admin", "Admin"),
+        ["operator"] = ("operator", "Operator"),
+        ["viewer"] = ("viewer", "Viewer"),
+    };
+
+    if (!credentials.TryGetValue(request.Username, out var account) || account.Password != request.Password)
+    {
+        return Results.Unauthorized();
+    }
+
+    var accessToken = jwtTokenService.CreateToken(request.Username, account.Role);
+
+    return Results.Ok(new LoginResponseDto
+    {
+        AccessToken = accessToken,
+        Username = request.Username,
+        Role = account.Role,
+        ExpiresAtUtc = DateTime.UtcNow.AddMinutes(jwtOptions.ExpirationMinutes),
+    });
 });
 
 app.MapGet("/api/status", () =>
@@ -39,7 +100,7 @@ app.MapGet("/api/status", () =>
             length = 8100
         }
     });
-});
+}).RequireAuthorization();
 
 app.MapHub<LinesHub>("/hubs/lines");
 

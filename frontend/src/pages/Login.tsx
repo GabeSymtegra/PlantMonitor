@@ -2,7 +2,9 @@ import {
   Alert,
   Box,
   Button,
+  FormControlLabel,
   Paper,
+  Checkbox,
   Stack,
   TextField,
   Typography,
@@ -15,7 +17,9 @@ import { useAuth } from "../context/useAuth";
 export default function Login() {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin");
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -23,14 +27,17 @@ export default function Login() {
 
   const redirectTo = (location.state as { from?: string } | null)?.from ?? "/";
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setSubmitting(true);
 
-    const authenticated = login(username.trim(), password);
+    const authenticated = await login(username.trim(), password, rememberMe);
+
+    setSubmitting(false);
 
     if (!authenticated) {
-      setError("Invalid credentials. Use admin / admin for now.");
+      setError("Invalid credentials.");
       return;
     }
 
@@ -54,7 +61,7 @@ export default function Login() {
           </Typography>
 
           <Typography color="text.secondary">
-            Use admin/admin credentials.
+            Sign in to access protected administration features.
           </Typography>
 
           {error ? <Alert severity="error">{error}</Alert> : null}
@@ -75,7 +82,22 @@ export default function Login() {
             fullWidth
           />
 
-          <Button type="submit" variant="contained" size="large">
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={rememberMe}
+                onChange={(event) => setRememberMe(event.target.checked)}
+              />
+            }
+            label="Remember me"
+          />
+
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            disabled={submitting}
+          >
             Sign In
           </Button>
         </Stack>
