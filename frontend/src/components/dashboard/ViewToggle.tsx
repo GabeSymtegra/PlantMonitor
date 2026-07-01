@@ -1,21 +1,28 @@
 import { ToggleButton, ToggleButtonGroup } from "@mui/material";
-import { useState } from "react";
+
+import { useDashboard } from "../../context/DashboardContext";
 
 export default function ViewToggle() {
-  const [view, setView] = useState("table");
+  const { view, setView } = useDashboard();
 
   return (
     <ToggleButtonGroup
       value={view}
       exclusive
-      onChange={(_, value) => {
-        if (value) setView(value);
-      }}
       size="small"
+      onChange={(_, value) => {
+        if (value) {
+          setView(value);
+        }
+      }}
     >
-      <ToggleButton value="table">Table</ToggleButton>
+      <ToggleButton value="table">
+        Table
+      </ToggleButton>
 
-      <ToggleButton value="cards">Cards</ToggleButton>
+      <ToggleButton value="cards">
+        Cards
+      </ToggleButton>
     </ToggleButtonGroup>
   );
 }

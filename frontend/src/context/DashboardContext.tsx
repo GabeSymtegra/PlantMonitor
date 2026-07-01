@@ -9,10 +9,15 @@ import {
 import { getDashboard } from "../services/dashboardService";
 import type { DashboardModel } from "../models/DashboardModel";
 
+export type DashboardView = "table" | "cards";
+
 interface DashboardContextType {
   dashboard: DashboardModel | null;
   loading: boolean;
   refresh: () => Promise<void>;
+
+  view: DashboardView;
+  setView: (view: DashboardView) => void;
 }
 
 const DashboardContext = createContext<DashboardContextType | undefined>(
@@ -26,6 +31,8 @@ export function DashboardProvider({
 }) {
   const [dashboard, setDashboard] = useState<DashboardModel | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [view, setView] = useState<DashboardView>("table");
 
   async function refresh() {
     setLoading(true);
@@ -47,6 +54,8 @@ export function DashboardProvider({
         dashboard,
         loading,
         refresh,
+        view,
+        setView,
       }}
     >
       {children}
@@ -58,9 +67,7 @@ export function useDashboard() {
   const context = useContext(DashboardContext);
 
   if (!context) {
-    throw new Error(
-      "useDashboard must be used inside DashboardProvider"
-    );
+    throw new Error("useDashboard must be used inside DashboardProvider");
   }
 
   return context;

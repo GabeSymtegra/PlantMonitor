@@ -1,14 +1,18 @@
 import { Box, Typography } from "@mui/material";
 
+import { useDashboard } from "../context/DashboardContext";
+
 import StatusSummary from "../components/dashboard/StatusSummary";
 import SearchBar from "../components/dashboard/SearchBar";
 import ViewToggle from "../components/dashboard/ViewToggle";
 import LineTable from "../components/dashboard/LineTable";
+import LineCards from "../components/dashboard/LineCards";
 
 export default function Dashboard() {
+  const { view } = useDashboard();
+
   return (
     <Box>
-
       <Typography
         variant="h4"
         sx={{
@@ -37,8 +41,7 @@ export default function Dashboard() {
         <ViewToggle />
       </Box>
 
-      <LineTable />
-
+      {view === "table" ? <LineTable /> : <LineCards />}
     </Box>
   );
 }
