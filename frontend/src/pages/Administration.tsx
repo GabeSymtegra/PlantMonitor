@@ -180,8 +180,15 @@ export default function Administration() {
     if (selectedLineId === "new") {
       await addLine({
         ...form,
+        startDateTime: new Date().toISOString(),
         status: LineStatus.Offline,
+        timeInStatus: "00:00:00",
         controlMode: "Auto",
+        percentAutoMode: 100,
+        autoVariance: 0,
+        percentManualMode: 0,
+        manualVariance: 0,
+        totalVariance: 0,
         totalLength: 0,
         runtime: "00:00:00",
         product: form.product.trim(),
