@@ -148,3 +148,5 @@ app.MapGet("/api/configuration/access-check", (ClaimsPrincipal user) =>
 app.MapHub<LinesHub>("/hubs/lines").RequireAuthorization();
 
 app.Run();
+
+public partial class Program;

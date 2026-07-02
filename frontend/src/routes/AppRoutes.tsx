@@ -1,15 +1,16 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import AppShell from "../layouts/AppShell";
 
-import Dashboard from "../pages/Dashboard";
-import Lines from "../pages/Lines";
-import Login from "../pages/Login";
-import Administration from "../pages/Administration";
-import LineDetails from "../pages/LineDetails";
-import Settings from "../pages/Settings";
-import StatusBoard from "../pages/StatusBoard";
-import Forbidden from "../pages/Forbidden";
+const Dashboard = lazy(() => import("../pages/Dashboard"));
+const Lines = lazy(() => import("../pages/Lines"));
+const Login = lazy(() => import("../pages/Login"));
+const Administration = lazy(() => import("../pages/Administration"));
+const LineDetails = lazy(() => import("../pages/LineDetails"));
+const Settings = lazy(() => import("../pages/Settings"));
+const StatusBoard = lazy(() => import("../pages/StatusBoard"));
+const Forbidden = lazy(() => import("../pages/Forbidden"));
 import ProtectedRoute from "./ProtectedRoute";
 
 function PagePlaceholder({ title }: { title: string }) {
@@ -19,6 +20,7 @@ function PagePlaceholder({ title }: { title: string }) {
 export default function AppRoutes() {
     return (
         <BrowserRouter>
+            <Suspense fallback={<div style={{ padding: 40 }}>Loading...</div>}>
 
             <Routes>
 
@@ -65,6 +67,7 @@ export default function AppRoutes() {
                 </Route>
 
             </Routes>
+            </Suspense>
 
         </BrowserRouter>
     );
