@@ -8,6 +8,7 @@ using backend.Interfaces.Plc;
 using backend.Services.Line;
 using backend.Services.Authentication;
 using backend.Services.Plc;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -96,7 +97,30 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
-    dbContext.Database.EnsureCreated();
+
+    var hasLegacySchemaWithoutMigrations =
+        HasSqliteTable(dbContext, "line_protocol_assignments")
+        && !HasSqliteTable(dbContext, "__EFMigrationsHistory");
+
+    if (hasLegacySchemaWithoutMigrations)
+    {
+        dbContext.Database.EnsureCreated();
+    }
+    else
+    {
+        try
+        {
+            dbContext.Database.Migrate();
+        }
+        catch (SqliteException ex)
+            when (ex.SqliteErrorCode == 1
+                && ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        {
+            // Compatibility and race-safe fallback for legacy local/test SQLite files.
+            dbContext.Database.EnsureCreated();
+        }
+    }
+
     await PlcPresetSeeder.SeedAsync(dbContext);
 }
 
@@ -169,5 +193,42 @@ app.MapGet("/api/configuration/access-check", (ClaimsPrincipal user) =>
 app.MapHub<LinesHub>("/hubs/lines").RequireAuthorization();
 
 app.Run();
+
+static bool HasSqliteTable(PlantMonitorDbContext dbContext, string tableName)
+{
+    if (!string.Equals(dbContext.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+    {
+        return false;
+    }
+
+    var connection = dbContext.Database.GetDbConnection();
+    var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+    if (shouldClose)
+    {
+        connection.Open();
+    }
+
+    try
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $tableName LIMIT 1;";
+
+        var tableNameParameter = command.CreateParameter();
+        tableNameParameter.ParameterName = "$tableName";
+        tableNameParameter.Value = tableName;
+        command.Parameters.Add(tableNameParameter);
+
+        var result = command.ExecuteScalar();
+        return result is not null;
+    }
+    finally
+    {
+        if (shouldClose)
+        {
+            connection.Close();
+        }
+    }
+}
 
 public partial class Program;
