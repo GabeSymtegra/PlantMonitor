@@ -2,7 +2,8 @@
 
 ## 1. Scope
 
-This document defines the PostgreSQL data model for backend and frontend requirements in the current phase:
+This document defines the logical data model for backend and frontend requirements in the current phase.
+Current local runtime persistence uses SQLite with EF Core, and the same model is designed to map to PostgreSQL for production:
 
 - Realtime monitoring with mock PLC data.
 - Line and tag configuration management.
@@ -26,6 +27,10 @@ Configuration entities:
 - user_roles
 - lines
 - line_tag_mappings
+- plc_protocol_presets
+- plc_protocol_preset_tags
+- line_protocol_assignments
+- line_tag_overrides
 
 Telemetry entities:
 
@@ -209,6 +214,83 @@ Unique constraints:
 
 - (line_id, bucket_start_utc, bucket_minutes)
 
+### 4.10 plc_protocol_presets
+
+Purpose:
+
+- Manufacturer/preset/version catalog for baseline PLC tag templates.
+
+Columns:
+
+- id bigserial primary key
+- manufacturer varchar(64) not null
+- preset_name varchar(128) not null
+- preset_version int not null
+- description varchar(512) not null
+
+Unique constraints:
+
+- (manufacturer, preset_name, preset_version)
+
+### 4.11 plc_protocol_preset_tags
+
+Purpose:
+
+- Baseline tags attached to one protocol preset.
+
+Columns:
+
+- id bigserial primary key
+- preset_id bigint not null references plc_protocol_presets(id) on delete cascade
+- tag_key varchar(128) not null
+- plc_address varchar(256) not null
+- data_type varchar(32) not null
+- scale numeric(18,6) not null default 1.0
+- is_required boolean not null default true
+
+Unique constraints:
+
+- (preset_id, tag_key)
+
+### 4.12 line_protocol_assignments
+
+Purpose:
+
+- Active protocol selection per line.
+
+Columns:
+
+- line_id bigint primary key
+- manufacturer varchar(64) not null
+- preset_name varchar(128) not null
+- preset_version int not null
+- poll_interval_ms int not null
+- updated_at_utc timestamptz not null
+
+Constraints:
+
+- poll_interval_ms between 500 and 60000
+
+### 4.13 line_tag_overrides
+
+Purpose:
+
+- Per-line overrides merged on top of preset tags.
+
+Columns:
+
+- id bigserial primary key
+- line_id bigint not null references line_protocol_assignments(line_id) on delete cascade
+- tag_key varchar(128) not null
+- plc_address varchar(256) not null
+- data_type varchar(32) not null
+- scale numeric(18,6) not null default 1.0
+- is_required boolean not null default true
+
+Unique constraints:
+
+- (line_id, tag_key)
+
 ## 5. Indexing Strategy
 
 Required indexes:
@@ -218,6 +300,9 @@ Required indexes:
 - line_snapshots_current(status)
 - line_snapshots_history(line_id, source_timestamp_utc desc)
 - line_status_transitions(line_id, changed_at_utc desc)
+- plc_protocol_presets(manufacturer, preset_name, preset_version)
+- plc_protocol_preset_tags(preset_id, tag_key)
+- line_tag_overrides(line_id, tag_key)
 
 If using partitions, also ensure each partition has:
 
@@ -258,6 +343,8 @@ Minimum seed records for local development:
 - At least four lines matching mock dashboard line numbers and IP addresses.
 - Required tag mappings for each seeded line.
 - Initial line_snapshots_current rows for seeded lines.
+- plc_protocol_presets: AB/BasicStatus/v1 and Siemens/BasicStatus/v1.
+- Required preset tags: status, product, runtime_seconds, total_length, control_mode.
 
 ## 9. Query Contracts For API
 

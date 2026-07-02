@@ -308,6 +308,151 @@ Response codes:
 
 - 200, 400, 401, 500
 
+### 6.6 PLC Protocol Administration (M1)
+
+All endpoints in this section are Admin only.
+
+GET /api/admin/plc/presets?manufacturer=AB
+
+- Returns seeded protocol presets and baseline tag templates.
+
+Response 200:
+
+[
+	{
+		"manufacturer": "AB",
+		"presetName": "BasicStatus",
+		"presetVersion": 1,
+		"description": "Allen-Bradley baseline telemetry preset.",
+		"tags": [
+			{
+				"tagKey": "status",
+				"plcAddress": "Program:LineData.Status",
+				"dataType": "int",
+				"scale": 1.0,
+				"isRequired": true
+			}
+		]
+	}
+]
+
+GET /api/admin/lines/{lineId}/protocol-assignment
+
+- Returns configured protocol preset assignment for one line.
+
+Response 200:
+
+{
+	"lineId": 101,
+	"manufacturer": "AB",
+	"presetName": "BasicStatus",
+	"presetVersion": 1,
+	"pollIntervalMs": 1500,
+	"updatedAtUtc": "2026-07-02T15:30:00Z"
+}
+
+Response codes:
+
+- 200, 401, 403, 404
+
+PUT /api/admin/lines/{lineId}/protocol-assignment
+
+- Creates or updates protocol assignment for one line.
+
+Request:
+
+{
+	"manufacturer": "AB",
+	"presetName": "BasicStatus",
+	"presetVersion": 1,
+	"pollIntervalMs": 1500
+}
+
+Response 200:
+
+LineProtocolAssignmentDto
+
+Response codes:
+
+- 200, 400, 401, 403
+
+GET /api/admin/lines/{lineId}/effective-tags
+
+- Returns merged preset tags plus line-level overrides.
+
+Response 200:
+
+[EffectiveTagMappingDto]
+
+Response codes:
+
+- 200, 401, 403, 404
+
+POST /api/admin/lines/{lineId}/validate-tags
+
+- Validates payload against required tag keys, allowed data types, and manufacturer address format.
+
+Request:
+
+{
+	"manufacturer": "Siemens",
+	"pollIntervalMs": 2000,
+	"tags": [
+		{
+			"tagKey": "status",
+			"plcAddress": "DB12.DBW0",
+			"dataType": "int",
+			"scale": 1.0,
+			"isRequired": true
+		}
+	]
+}
+
+Response 200:
+
+{
+	"isValid": true,
+	"issues": []
+}
+
+Response 400:
+
+{
+	"isValid": false,
+	"issues": [
+		{
+			"field": "tags[0].plcAddress",
+			"message": "Siemens addresses must match DBx.DBW0/DBD0/DBX0.0 or M/I/Q area format."
+		}
+	]
+}
+
+PUT /api/admin/lines/{lineId}/tag-overrides
+
+- Replaces line-level override tags for assigned protocol.
+
+Request:
+
+{
+	"tags": [
+		{
+			"tagKey": "product",
+			"plcAddress": "Program:LineData.ProductSerial",
+			"dataType": "string",
+			"scale": 1.0,
+			"isRequired": true
+		}
+	]
+}
+
+Response 200:
+
+[EffectiveTagMappingDto]
+
+Response codes:
+
+- 200, 400, 401, 403, 404
+
 ## 7. SignalR Contract
 
 Hub route:

@@ -1,11 +1,15 @@
 using System.Security.Claims;
 using System.Text;
 using backend.Configuration;
+using backend.Data;
 using backend.DTOs.Authentication;
 using backend.Interfaces;
+using backend.Interfaces.Plc;
 using backend.Services.Line;
 using backend.Services.Authentication;
+using backend.Services.Plc;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,7 +17,16 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
 
+var connectionString = builder.Configuration.GetConnectionString("PlantMonitor")
+    ?? "Data Source=plantmonitor.db";
+
+builder.Services.AddDbContext<PlantMonitorDbContext>(options =>
+    options.UseSqlite(connectionString));
+
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+builder.Services.AddSingleton<IPlcTagAddressValidator, PlcTagAddressValidator>();
+builder.Services.AddScoped<IPlcProtocolConfigService, EfPlcProtocolConfigService>();
+builder.Services.AddControllers();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -80,10 +93,18 @@ builder.Services.AddHostedService<LineUpdateBroadcastService>();
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+    dbContext.Database.EnsureCreated();
+    await PlcPresetSeeder.SeedAsync(dbContext);
+}
+
 app.UseCors("FrontendDev");
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.MapControllers();
 
 app.MapPost("/api/auth/login", (LoginRequestDto request, IJwtTokenService jwtTokenService) =>
 {
