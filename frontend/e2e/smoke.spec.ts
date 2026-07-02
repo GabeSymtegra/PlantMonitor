@@ -15,15 +15,15 @@ async function loginAsAdmin(page: Page) {
 
 async function loginAsOperator(page: Page) {
   await login(page, "operator", "test");
-  await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("button", { name: /Logout/i })).toBeVisible();
+  await expect(page).toHaveURL(/\/status-board$/);
+  await expect(page.getByText(/Status Board/i)).toBeVisible();
 }
 
 test.describe("PlantMonitor smoke", () => {
   test("allows admin login", async ({ page }) => {
     await loginAsAdmin(page);
 
-    await expect(page.getByRole("textbox", { name: "Search Production Lines" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Search Production Lines" })).toBeVisible();
   });
 
   test("shows an error for invalid login", async ({ page }) => {
@@ -35,14 +35,16 @@ test.describe("PlantMonitor smoke", () => {
     );
   });
 
-  test("blocks operator from admin settings route", async ({ page }) => {
+  test("restricts operator to status board route", async ({ page }) => {
     await loginAsOperator(page);
 
     await page.goto("/settings");
 
-    await expect(page).toHaveURL(/\/forbidden$/);
-    await expect(page.getByRole("heading", { name: "Access Denied" })).toBeVisible();
-    await expect(page.getByText("Required role: Admin")).toBeVisible();
+    await expect(page).toHaveURL(/\/status-board$/);
+    await expect(page.getByText(/Status Board/i)).toBeVisible();
+
+    await page.getByRole("button", { name: /Logout/i }).click();
+    await expect(page).toHaveURL(/\/login$/);
   });
 
   test("persists dark mode and enforces Spec Ops colors", async ({ page }) => {

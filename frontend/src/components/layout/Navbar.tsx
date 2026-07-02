@@ -13,6 +13,7 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import LoginIcon from "@mui/icons-material/Login";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
+import PrecisionManufacturingIcon from "@mui/icons-material/PrecisionManufacturing";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
@@ -125,32 +126,52 @@ export default function Navbar() {
       <Toolbar
         sx={{
           display: "grid",
-          gridTemplateColumns: "auto 1fr auto",
+          gridTemplateColumns: {
+            xs: "1fr auto",
+            lg: "auto 1fr auto",
+          },
           alignItems: "center",
           columnGap: 2,
-          minHeight: 72,
+          rowGap: 1,
+          minHeight: { xs: 88, lg: 72 },
         }}
       >
-        <Typography
-          variant="h5"
-          sx={{
-            fontWeight: 700,
-            letterSpacing: 1,
-            whiteSpace: "nowrap",
-          }}
-        >
-          🌿 {headerTitle}
-        </Typography>
-
         <Box
           sx={{
             display: "flex",
-            justifyContent: "center",
+            alignItems: "center",
+            gap: 1,
+            minWidth: 0,
+          }}
+        >
+          <PrecisionManufacturingIcon sx={{ flexShrink: 0 }} />
+
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 700,
+              letterSpacing: 1,
+              minWidth: 0,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {headerTitle}
+          </Typography>
+        </Box>
+
+        <Box
+          sx={{
+            gridColumn: { xs: "1 / -1", lg: "auto" },
+            order: { xs: 3, lg: 0 },
+            display: "flex",
+            justifyContent: { xs: "flex-start", lg: "center" },
             alignItems: "center",
             gap: 0.75,
             overflowX: "auto",
             whiteSpace: "nowrap",
-            px: 1.5,
+            px: { xs: 0, lg: 1.5 },
             borderLeft: (theme) => `1px solid ${theme.palette.divider}`,
             borderRight: (theme) => `1px solid ${theme.palette.divider}`,
             "&::-webkit-scrollbar": {
@@ -203,9 +224,10 @@ export default function Navbar() {
           sx={{
             display: "flex",
             alignItems: "center",
-            gap: 1.75,
-            pl: 1,
+            gap: { xs: 1, md: 1.75 },
+            pl: { xs: 0, lg: 1 },
             whiteSpace: "nowrap",
+            minWidth: 0,
           }}
         >
           <Tooltip title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}>
@@ -216,7 +238,9 @@ export default function Navbar() {
 
           <Chip color="success" label="LIVE" />
 
-          <Typography>{isAuthenticated ? user?.username : "Guest"}</Typography>
+          <Typography sx={{ display: { xs: "none", md: "block" } }}>
+            {isAuthenticated ? user?.username : "Guest"}
+          </Typography>
 
           <Button
             color="inherit"

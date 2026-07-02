@@ -32,5 +32,9 @@ export default function ProtectedRoute({ requiredRoles }: ProtectedRouteProps) {
     }
   }
 
+  if (user?.role === "Operator" && location.pathname !== "/status-board") {
+    return <Navigate to="/status-board" replace state={{ from: location.pathname }} />;
+  }
+
   return <Outlet />;
 }

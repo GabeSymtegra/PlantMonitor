@@ -7,9 +7,11 @@ import {
   Button,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import LogoutIcon from "@mui/icons-material/Logout";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { useAuth } from "../context/useAuth";
 import { useDashboard } from "../context/useDashboard";
 import { useThemeMode } from "../context/useThemeMode";
 import { LineStatus } from "../types/LineStatus";
@@ -28,6 +30,7 @@ function formatNumber(value: number) {
 
 export default function StatusBoard() {
   const navigate = useNavigate();
+  const { logout, isAuthenticated } = useAuth();
   const { dashboard, loading } = useDashboard();
   const { appearance } = useThemeMode();
 
@@ -100,6 +103,21 @@ export default function StatusBoard() {
             >
               Back to App
             </Button>
+
+            {isAuthenticated ? (
+              <Button
+                variant="contained"
+                size="small"
+                color="secondary"
+                startIcon={<LogoutIcon />}
+                onClick={() => {
+                  logout();
+                  navigate("/login", { replace: true });
+                }}
+              >
+                Logout
+              </Button>
+            ) : null}
           </Stack>
         </Stack>
 

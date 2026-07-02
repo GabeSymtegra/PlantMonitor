@@ -50,4 +50,33 @@ describe("ThemeContext", () => {
       expect(screen.getByTestId("table")).toHaveTextContent("#223247");
     });
   });
+
+  it("forces Classic Plant colors when light mode is active", async () => {
+    localStorage.setItem("plantmonitor-theme-mode", "light");
+    localStorage.setItem(
+      "plantmonitor-appearance-settings",
+      JSON.stringify({
+        monitorName: "Plant",
+        headerColor: "#0B1F35",
+        backgroundColor: "#121820",
+        tableColor: "#223247",
+        textSize: "medium",
+        boldText: false,
+      })
+    );
+
+    render(
+      <AppThemeProvider>
+        <ThemeProbe />
+      </AppThemeProvider>
+    );
+
+    expect(screen.getByTestId("mode")).toHaveTextContent("light");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("header")).toHaveTextContent("#1565C0");
+      expect(screen.getByTestId("background")).toHaveTextContent("#F4F6F8");
+      expect(screen.getByTestId("table")).toHaveTextContent("#E3F2FD");
+    });
+  });
 });

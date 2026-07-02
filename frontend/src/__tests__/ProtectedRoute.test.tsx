@@ -28,6 +28,10 @@ function renderWithAuth(
     >
       <MemoryRouter initialEntries={[path]}>
         <Routes>
+          <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<div>dashboard page</div>} />
+            <Route path="/status-board" element={<div>status board page</div>} />
+          </Route>
           <Route element={<ProtectedRoute requiredRoles={options.requiredRoles} />}>
             <Route path="/settings" element={<div>settings page</div>} />
           </Route>
@@ -67,5 +71,23 @@ describe("ProtectedRoute", () => {
     });
 
     expect(screen.getByText("settings page")).toBeInTheDocument();
+  });
+
+  it("redirects operator users to status board for non-status-board routes", () => {
+    renderWithAuth("/", {
+      user: { username: "operator", role: "Operator" },
+      accessToken: "token",
+    });
+
+    expect(screen.getByText("status board page")).toBeInTheDocument();
+  });
+
+  it("allows operator users on status board route", () => {
+    renderWithAuth("/status-board", {
+      user: { username: "operator", role: "Operator" },
+      accessToken: "token",
+    });
+
+    expect(screen.getByText("status board page")).toBeInTheDocument();
   });
 });

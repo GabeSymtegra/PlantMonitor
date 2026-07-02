@@ -19,6 +19,7 @@ export default function AppShell() {
             <Box
                 sx={{
                     flexGrow: 1,
+                    minWidth: 0,
                     display: "flex",
                     flexDirection: "column",
                     backgroundColor: "background.default",
@@ -26,7 +27,7 @@ export default function AppShell() {
             >
                 <Navbar />
 
-                <Box sx={{ p: { xs: 2, md: 3 } }}>
+                <Box sx={{ p: { xs: 2, md: 3 }, minWidth: 0 }}>
 
                     <Outlet />
 

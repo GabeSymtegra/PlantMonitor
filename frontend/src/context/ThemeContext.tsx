@@ -39,6 +39,15 @@ const SPEC_OPS_COLORS: Pick<
     tableColor: "#223247",
 };
 
+const CLASSIC_PLANT_COLORS: Pick<
+    AppearanceSettings,
+    "headerColor" | "backgroundColor" | "tableColor"
+> = {
+    headerColor: DEFAULT_APPEARANCE_SETTINGS.headerColor,
+    backgroundColor: DEFAULT_APPEARANCE_SETTINGS.backgroundColor,
+    tableColor: DEFAULT_APPEARANCE_SETTINGS.tableColor,
+};
+
 interface ThemeContextType {
     mode: ThemeMode;
     isDarkMode: boolean;
@@ -122,23 +131,21 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     }, [appearance]);
 
     useEffect(() => {
-        if (mode !== "dark") {
-            return;
-        }
+        const modeColors = mode === "dark" ? SPEC_OPS_COLORS : CLASSIC_PLANT_COLORS;
 
         setAppearance((previous) => {
-            const isAlreadySpecOps =
-                previous.headerColor.toLowerCase() === SPEC_OPS_COLORS.headerColor.toLowerCase()
-                && previous.backgroundColor.toLowerCase() === SPEC_OPS_COLORS.backgroundColor.toLowerCase()
-                && previous.tableColor.toLowerCase() === SPEC_OPS_COLORS.tableColor.toLowerCase();
+            const hasModeColors =
+                previous.headerColor.toLowerCase() === modeColors.headerColor.toLowerCase()
+                && previous.backgroundColor.toLowerCase() === modeColors.backgroundColor.toLowerCase()
+                && previous.tableColor.toLowerCase() === modeColors.tableColor.toLowerCase();
 
-            if (isAlreadySpecOps) {
+            if (hasModeColors) {
                 return previous;
             }
 
             return {
                 ...previous,
-                ...SPEC_OPS_COLORS,
+                ...modeColors,
             };
         });
     }, [mode]);

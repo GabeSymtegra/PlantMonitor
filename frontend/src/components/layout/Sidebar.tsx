@@ -21,7 +21,8 @@ import { useAuth } from "../../context/useAuth";
 const drawerWidth = 64;
 
 export default function Sidebar() {
-  const { canConfigure } = useAuth();
+  const { canConfigure, user } = useAuth();
+  const isOperator = user?.role === "Operator";
 
   const iconSx = {
     minWidth: 0,
@@ -64,29 +65,35 @@ export default function Sidebar() {
       <Toolbar />
 
       <List sx={{ pt: 1 }}>
-        <Tooltip title="Dashboard" placement="right">
-          <ListItemButton component={NavLink} to="/" sx={itemSx}>
-            <ListItemIcon sx={iconSx}>
-              <DashboardIcon />
-            </ListItemIcon>
-          </ListItemButton>
-        </Tooltip>
+        {!isOperator ? (
+          <Tooltip title="Dashboard" placement="right">
+            <ListItemButton component={NavLink} to="/" sx={itemSx}>
+              <ListItemIcon sx={iconSx}>
+                <DashboardIcon />
+              </ListItemIcon>
+            </ListItemButton>
+          </Tooltip>
+        ) : null}
 
-        <Tooltip title="Products" placement="right">
-          <ListItemButton component={NavLink} to="/products" sx={itemSx}>
-            <ListItemIcon sx={iconSx}>
-              <Inventory2Icon />
-            </ListItemIcon>
-          </ListItemButton>
-        </Tooltip>
+        {!isOperator ? (
+          <Tooltip title="Products" placement="right">
+            <ListItemButton component={NavLink} to="/products" sx={itemSx}>
+              <ListItemIcon sx={iconSx}>
+                <Inventory2Icon />
+              </ListItemIcon>
+            </ListItemButton>
+          </Tooltip>
+        ) : null}
 
-        <Tooltip title="Reports" placement="right">
-          <ListItemButton component={NavLink} to="/reports" sx={itemSx}>
-            <ListItemIcon sx={iconSx}>
-              <AssessmentIcon />
-            </ListItemIcon>
-          </ListItemButton>
-        </Tooltip>
+        {!isOperator ? (
+          <Tooltip title="Reports" placement="right">
+            <ListItemButton component={NavLink} to="/reports" sx={itemSx}>
+              <ListItemIcon sx={iconSx}>
+                <AssessmentIcon />
+              </ListItemIcon>
+            </ListItemButton>
+          </Tooltip>
+        ) : null}
 
         <Tooltip title="Status Board" placement="right">
           <ListItemButton component={NavLink} to="/status-board" sx={itemSx}>
