@@ -22,6 +22,23 @@ This document defines release gates for shipping PlantMonitor to a server-hosted
 5. Release checklist in docs/QA-Matrix.md marked complete.
 6. Server deployment runbook steps validated on a staging-like host.
 
+## CI Required Checks Mapping
+- Workflow: .github/workflows/ci.yml
+- Job: build-test
+- Required command coverage:
+  - dotnet build backend/backend.csproj --configuration Release --no-restore
+  - dotnet test backend.Tests/backend.Tests.csproj --configuration Release --no-build
+  - npm run test:run (frontend)
+  - npm run build (frontend)
+  - npm run test:e2e (frontend)
+
+## Branch Protection Guidance
+- Protect main with required status check: build-test.
+- Require pull request before merge.
+- Require branch to be up to date before merge.
+- Disable force-push and branch deletion on protected branches.
+- Include release/* protection once release branches are created.
+
 ## Artifact Expectations
 - Backend release binaries (self-contained or framework-dependent, documented choice).
 - Frontend production build assets.

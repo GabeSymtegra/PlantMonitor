@@ -69,6 +69,9 @@ Primary operating model:
   - Dashboard table header visibility
 - Added Playwright configuration at frontend/playwright.config.ts with managed backend/frontend web servers for local and CI runs.
 - Added GitHub Actions pipeline at .github/workflows/ci.yml to run backend build/tests, frontend unit tests/build, and Playwright smoke tests.
+- Stabilized test tooling boundaries so Vitest only discovers src test files and does not execute e2e Playwright specs.
+- Stabilized local Playwright smoke execution with single-worker mode and deterministic login assertions.
+- Verified backend package graph no longer contains Microsoft.OpenApi; NU1903 warning path no longer appears in direct/transitive package listing.
 
 ## Release Readiness Roadmap (Items 1-6)
 
@@ -182,7 +185,7 @@ Immediate next coding slice:
 1. Capture and log before/after bundle size metrics with threshold targets for release gate.
 2. Expand smoke coverage for status-board rendering and reconnect behavior under simulated backend interruption.
 3. Add release command references to README and script docs.
-4. Add CI branch protection guidance and required-check mapping in docs/Release.md.
+4. Add release checklist completion evidence template for each deploy candidate.
 
 ---
 Last updated: 2026-07-02

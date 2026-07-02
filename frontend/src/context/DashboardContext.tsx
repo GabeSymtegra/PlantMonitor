@@ -41,6 +41,7 @@ export function DashboardProvider({
   children: ReactNode;
 }) {
   const { isAuthenticated, accessToken } = useAuth();
+  const authToken = accessToken;
   const [dashboard, setDashboard] = useState<DashboardModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,12 +71,14 @@ export function DashboardProvider({
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
     let disposed = false;
 
-    if (!isAuthenticated || !accessToken) {
+    if (!isAuthenticated || !authToken) {
       setDashboard(null);
       setError(null);
       setLoading(false);
       return;
     }
+
+    const token: string = authToken;
 
     async function loadInitialDashboard() {
       await refresh(true);
@@ -86,7 +89,7 @@ export function DashboardProvider({
 
       const connection = new HubConnectionBuilder()
         .withUrl(SIGNALR_HUB_URL, {
-          accessTokenFactory: () => accessToken,
+          accessTokenFactory: () => token,
         })
         .withAutomaticReconnect()
         .configureLogging(LogLevel.Warning)
@@ -135,7 +138,7 @@ export function DashboardProvider({
         void signalRConnectionRef.current.stop();
       }
     };
-  }, [accessToken, isAuthenticated]);
+  }, [authToken, isAuthenticated]);
 
   return (
     <DashboardContext.Provider
