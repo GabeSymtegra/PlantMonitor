@@ -1,4 +1,5 @@
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import { getContrastRatio } from "@mui/material/styles";
 import { useNavigate } from "react-router-dom";
 
 import StatusChip from "../common/StatusChip";
@@ -114,6 +115,11 @@ export default function LineTable({ lines }: LineTableProps) {
   const { appearance } = useThemeMode();
   const rows = lines ?? dashboard?.lines ?? [];
   const navigate = useNavigate();
+  const tableHeaderTextColor =
+    getContrastRatio(appearance.tableColor, "#FFFFFF") >=
+    getContrastRatio(appearance.tableColor, "#0F172A")
+      ? "#FFFFFF"
+      : "#0F172A";
 
   return (
     <div
@@ -131,6 +137,7 @@ export default function LineTable({ lines }: LineTableProps) {
           backgroundColor: (theme) => theme.palette.background.paper,
           "& .MuiDataGrid-columnHeaders": {
             backgroundColor: appearance.tableColor,
+            color: tableHeaderTextColor,
           },
           "& .MuiDataGrid-columnHeaderTitle": {
             fontWeight: appearance.boldText ? 700 : 600,

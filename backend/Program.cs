@@ -59,7 +59,17 @@ builder.Services.AddCors(options =>
     options.AddPolicy("FrontendDev", policy =>
     {
         policy
-            .WithOrigins("http://127.0.0.1:5173", "http://localhost:5173")
+            .SetIsOriginAllowed(origin =>
+            {
+                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    return false;
+                }
+
+                return uri.Scheme is "http" or "https"
+                    && (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+                        || uri.Host == "127.0.0.1");
+            })
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();

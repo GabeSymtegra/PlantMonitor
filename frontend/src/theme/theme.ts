@@ -1,4 +1,4 @@
-import { createTheme } from "@mui/material/styles";
+import { createTheme, getContrastRatio } from "@mui/material/styles";
 
 import type { AppearanceSettings, ThemeMode } from "../context/ThemeContext";
 
@@ -14,15 +14,25 @@ function resolveBaseFontSize(textSize: AppearanceSettings["textSize"]) {
     return 15;
 }
 
+function getReadableTextColor(background: string) {
+    const whiteContrast = getContrastRatio(background, "#FFFFFF");
+    const darkContrast = getContrastRatio(background, "#0F172A");
+
+    return whiteContrast >= darkContrast ? "#FFFFFF" : "#0F172A";
+}
+
 export function getAppTheme(mode: ThemeMode, appearance: AppearanceSettings) {
     const baseFontSize = resolveBaseFontSize(appearance.textSize);
     const defaultWeight = appearance.boldText ? 600 : 400;
+    const headerTextColor = getReadableTextColor(appearance.headerColor);
+    const tableHeaderTextColor = getReadableTextColor(appearance.tableColor);
 
     return createTheme({
         palette: {
             mode,
             primary: {
                 main: appearance.headerColor,
+                contrastText: headerTextColor,
             },
             secondary: {
                 main: mode === "dark" ? "#66BB6A" : "#2E7D32",
@@ -65,6 +75,7 @@ export function getAppTheme(mode: ThemeMode, appearance: AppearanceSettings) {
                     root: {
                         backgroundImage: "none",
                         backgroundColor: appearance.headerColor,
+                        color: headerTextColor,
                     },
                 },
             },
@@ -79,6 +90,7 @@ export function getAppTheme(mode: ThemeMode, appearance: AppearanceSettings) {
                 styleOverrides: {
                     head: {
                         backgroundColor: appearance.tableColor,
+                        color: tableHeaderTextColor,
                     },
                 },
             },

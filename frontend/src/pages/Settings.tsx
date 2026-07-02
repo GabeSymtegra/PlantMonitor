@@ -11,6 +11,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { getContrastRatio } from "@mui/material/styles";
 import LaunchIcon from "@mui/icons-material/Launch";
 import { useNavigate } from "react-router-dom";
 
@@ -25,6 +26,13 @@ const textSizeOptions: Array<{ value: TextSize; label: string }> = [
   { value: "medium", label: "Medium" },
   { value: "large", label: "Large" },
 ];
+
+function getReadableTextColor(background: string) {
+  const whiteContrast = getContrastRatio(background, "#FFFFFF");
+  const darkContrast = getContrastRatio(background, "#0F172A");
+
+  return whiteContrast >= darkContrast ? "#FFFFFF" : "#0F172A";
+}
 
 const themePresets: Array<{
   id: string;
@@ -43,9 +51,9 @@ const themePresets: Array<{
     },
   },
   {
-    id: "night-ops",
-    label: "Night Ops",
-    description: "Low-glare dark floor display",
+    id: "spec-ops",
+    label: "Spec Ops",
+    description: "Low-glare dark tactical display",
     colors: {
       headerColor: "#0B1F35",
       backgroundColor: "#121820",
@@ -140,6 +148,9 @@ export default function Settings() {
                   appearance.headerColor.toLowerCase() === preset.colors.headerColor.toLowerCase() &&
                   appearance.backgroundColor.toLowerCase() === preset.colors.backgroundColor.toLowerCase() &&
                   appearance.tableColor.toLowerCase() === preset.colors.tableColor.toLowerCase();
+                const headerChipText = getReadableTextColor(preset.colors.headerColor);
+                const backgroundChipText = getReadableTextColor(preset.colors.backgroundColor);
+                const tableChipText = getReadableTextColor(preset.colors.tableColor);
 
                 return (
                   <Button
@@ -151,6 +162,9 @@ export default function Settings() {
                       textTransform: "none",
                       py: 1,
                       px: 1.4,
+                      ...(isActive && {
+                        color: (theme) => theme.palette.primary.contrastText,
+                      }),
                     }}
                   >
                     <Stack alignItems="flex-start" spacing={0.4}>
@@ -166,7 +180,7 @@ export default function Settings() {
                         size="small"
                         sx={{
                           bgcolor: preset.colors.headerColor,
-                          color: "#fff",
+                          color: headerChipText,
                           fontWeight: 700,
                         }}
                       />
@@ -175,7 +189,7 @@ export default function Settings() {
                         size="small"
                         sx={{
                           bgcolor: preset.colors.backgroundColor,
-                          color: "#111",
+                          color: backgroundChipText,
                           fontWeight: 700,
                         }}
                       />
@@ -184,7 +198,7 @@ export default function Settings() {
                         size="small"
                         sx={{
                           bgcolor: preset.colors.tableColor,
-                          color: "#111",
+                          color: tableChipText,
                           fontWeight: 700,
                         }}
                       />

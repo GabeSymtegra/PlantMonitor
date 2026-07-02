@@ -30,6 +30,15 @@ export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
     boldText: false,
 };
 
+const SPEC_OPS_COLORS: Pick<
+    AppearanceSettings,
+    "headerColor" | "backgroundColor" | "tableColor"
+> = {
+    headerColor: "#0B1F35",
+    backgroundColor: "#121820",
+    tableColor: "#223247",
+};
+
 interface ThemeContextType {
     mode: ThemeMode;
     isDarkMode: boolean;
@@ -111,6 +120,28 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance));
     }, [appearance]);
+
+    useEffect(() => {
+        if (mode !== "dark") {
+            return;
+        }
+
+        setAppearance((previous) => {
+            const isAlreadySpecOps =
+                previous.headerColor.toLowerCase() === SPEC_OPS_COLORS.headerColor.toLowerCase()
+                && previous.backgroundColor.toLowerCase() === SPEC_OPS_COLORS.backgroundColor.toLowerCase()
+                && previous.tableColor.toLowerCase() === SPEC_OPS_COLORS.tableColor.toLowerCase();
+
+            if (isAlreadySpecOps) {
+                return previous;
+            }
+
+            return {
+                ...previous,
+                ...SPEC_OPS_COLORS,
+            };
+        });
+    }, [mode]);
 
     function setMode(nextMode: ThemeMode) {
         setModeState(nextMode);
