@@ -15,7 +15,6 @@ import LaunchIcon from "@mui/icons-material/Launch";
 import { useNavigate } from "react-router-dom";
 
 import {
-  DEFAULT_APPEARANCE_SETTINGS,
   type AppearanceSettings,
   type TextSize,
 } from "../context/ThemeContext";
@@ -251,17 +250,6 @@ export default function Settings() {
         <Stack direction="row" spacing={1.5}>
           <Button variant="outlined" onClick={resetAppearance}>
             Reset Appearance
-          </Button>
-
-          <Button
-            variant="text"
-            onClick={() =>
-              updateAppearance({
-                ...DEFAULT_APPEARANCE_SETTINGS,
-              })
-            }
-          >
-            Restore Defaults
           </Button>
         </Stack>
       </Stack>

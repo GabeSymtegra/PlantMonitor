@@ -9,6 +9,7 @@ import Administration from "../pages/Administration";
 import LineDetails from "../pages/LineDetails";
 import Settings from "../pages/Settings";
 import StatusBoard from "../pages/StatusBoard";
+import Forbidden from "../pages/Forbidden";
 import ProtectedRoute from "./ProtectedRoute";
 
 function PagePlaceholder({ title }: { title: string }) {
@@ -23,37 +24,43 @@ export default function AppRoutes() {
 
                 <Route path="/login" element={<Login />} />
 
-                <Route path="/status-board" element={<StatusBoard />} />
+                <Route element={<ProtectedRoute />}>
 
-                <Route element={<AppShell />}>
+                    <Route path="/status-board" element={<StatusBoard />} />
 
-                    <Route path="/" element={<Dashboard />} />
+                    <Route element={<AppShell />}>
 
-                    <Route path="/lines" element={<Lines />} />
+                        <Route path="/" element={<Dashboard />} />
 
-                    <Route path="/lines/:id" element={<LineDetails />} />
+                        <Route path="/lines" element={<Lines />} />
 
-                    <Route
-                        path="/products"
-                        element={<PagePlaceholder title="Products" />}
-                    />
+                        <Route path="/lines/:id" element={<LineDetails />} />
 
-                    <Route
-                        path="/reports"
-                        element={<PagePlaceholder title="Reports" />}
-                    />
+                        <Route path="/forbidden" element={<Forbidden />} />
 
-                    <Route
-                        path="/administration"
-                        element={<ProtectedRoute />}
-                    >
-                        <Route index element={<Administration />} />
+                        <Route
+                            path="/products"
+                            element={<PagePlaceholder title="Products" />}
+                        />
+
+                        <Route
+                            path="/reports"
+                            element={<PagePlaceholder title="Reports" />}
+                        />
+
+                        <Route element={<ProtectedRoute requiredRoles={["Admin"]} />}>
+                            <Route
+                                path="/administration"
+                                element={<Administration />}
+                            />
+
+                            <Route
+                                path="/settings"
+                                element={<Settings />}
+                            />
+                        </Route>
+
                     </Route>
-
-                    <Route
-                        path="/settings"
-                        element={<Settings />}
-                    />
 
                 </Route>
 

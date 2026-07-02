@@ -14,6 +14,7 @@ import {
 
 import { getDashboard } from "../services/dashboardService";
 import type { DashboardModel } from "../models/DashboardModel";
+import { useAuth } from "./useAuth";
 
 export type DashboardView = "table" | "cards";
 const DASHBOARD_POLL_MS = 10000;
@@ -39,6 +40,7 @@ export function DashboardProvider({
 }: {
   children: ReactNode;
 }) {
+  const { isAuthenticated, accessToken } = useAuth();
   const [dashboard, setDashboard] = useState<DashboardModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +70,13 @@ export function DashboardProvider({
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
     let disposed = false;
 
+    if (!isAuthenticated || !accessToken) {
+      setDashboard(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     async function loadInitialDashboard() {
       await refresh(true);
 
@@ -76,7 +85,9 @@ export function DashboardProvider({
       }, DASHBOARD_POLL_MS);
 
       const connection = new HubConnectionBuilder()
-        .withUrl(SIGNALR_HUB_URL)
+        .withUrl(SIGNALR_HUB_URL, {
+          accessTokenFactory: () => accessToken,
+        })
         .withAutomaticReconnect()
         .configureLogging(LogLevel.Warning)
         .build();
@@ -124,7 +135,7 @@ export function DashboardProvider({
         void signalRConnectionRef.current.stop();
       }
     };
-  }, []);
+  }, [accessToken, isAuthenticated]);
 
   return (
     <DashboardContext.Provider

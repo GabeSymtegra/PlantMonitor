@@ -21,7 +21,7 @@ export default function Login() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const { login } = useAuth();
+  const { login, authError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -37,7 +37,7 @@ export default function Login() {
     setSubmitting(false);
 
     if (!authenticated) {
-      setError("Invalid credentials.");
+      setError(authError ?? "Invalid credentials.");
       return;
     }
 

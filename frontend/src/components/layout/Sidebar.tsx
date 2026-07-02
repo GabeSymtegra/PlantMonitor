@@ -21,7 +21,7 @@ import { useAuth } from "../../context/useAuth";
 const drawerWidth = 64;
 
 export default function Sidebar() {
-  const { isAuthenticated } = useAuth();
+  const { canConfigure } = useAuth();
 
   const iconSx = {
     minWidth: 0,
@@ -96,7 +96,7 @@ export default function Sidebar() {
           </ListItemButton>
         </Tooltip>
 
-        {isAuthenticated ? (
+        {canConfigure ? (
           <Tooltip title="Administration" placement="right">
             <ListItemButton component={NavLink} to="/administration" sx={itemSx}>
               <ListItemIcon sx={iconSx}>
@@ -106,13 +106,15 @@ export default function Sidebar() {
           </Tooltip>
         ) : null}
 
-        <Tooltip title="Settings" placement="right">
-          <ListItemButton component={NavLink} to="/settings" sx={itemSx}>
-            <ListItemIcon sx={iconSx}>
-              <SettingsIcon />
-            </ListItemIcon>
-          </ListItemButton>
-        </Tooltip>
+        {canConfigure ? (
+          <Tooltip title="Settings" placement="right">
+            <ListItemButton component={NavLink} to="/settings" sx={itemSx}>
+              <ListItemIcon sx={iconSx}>
+                <SettingsIcon />
+              </ListItemIcon>
+            </ListItemButton>
+          </Tooltip>
+        ) : null}
       </List>
     </Drawer>
   );

@@ -19,6 +19,22 @@ builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/lines"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -33,21 +49,28 @@ builder.Services
             RoleClaimType = ClaimTypes.Role,
         };
     });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
+});
 
-builder.Services.AddCors();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FrontendDev", policy =>
+    {
+        policy
+            .WithOrigins("http://127.0.0.1:5173", "http://localhost:5173")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<LineUpdateBroadcastService>();
 
 var app = builder.Build();
 
-app.UseCors(policy =>
-{
-    policy
-        .AllowAnyOrigin()
-        .AllowAnyHeader()
-        .AllowAnyMethod();
-});
+app.UseCors("FrontendDev");
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -57,6 +80,8 @@ app.MapPost("/api/auth/login", (LoginRequestDto request, IJwtTokenService jwtTok
     var credentials = new Dictionary<string, (string Password, string Role)>(StringComparer.OrdinalIgnoreCase)
     {
         ["test"] = ("test", "Admin"),
+        ["operator"] = ("test", "Operator"),
+        ["viewer"] = ("test", "Viewer"),
     };
 
     if (!credentials.TryGetValue(request.Username, out var account) || account.Password != request.Password)
@@ -100,6 +125,16 @@ app.MapGet("/api/status", () =>
     });
 }).RequireAuthorization();
 
-app.MapHub<LinesHub>("/hubs/lines");
+app.MapGet("/api/configuration/access-check", (ClaimsPrincipal user) =>
+{
+    return Results.Ok(new
+    {
+        Message = "Configuration access granted.",
+        Username = user.Identity?.Name,
+        Role = user.FindFirstValue(ClaimTypes.Role),
+    });
+}).RequireAuthorization("AdminOnly");
+
+app.MapHub<LinesHub>("/hubs/lines").RequireAuthorization();
 
 app.Run();
