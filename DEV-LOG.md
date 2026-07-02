@@ -58,6 +58,17 @@ Primary operating model:
 ### Frontend Performance Baseline Kickoff
 - Introduced route-level lazy loading in AppRoutes to begin chunk separation.
 - Build now emits split route chunks for multiple pages, reducing single-bundle concentration and starting item 5 performance work.
+- Added explicit Rollup manual chunk groups in Vite config for React, MUI, DataGrid, and SignalR dependencies.
+
+### E2E Smoke and CI Gate
+- Added Playwright smoke suite at frontend/e2e/smoke.spec.ts covering:
+  - Valid admin login and dashboard load
+  - Invalid login error behavior
+  - Operator block on admin-only settings route
+  - Dark mode persistence and enforced Spec Ops colors
+  - Dashboard table header visibility
+- Added Playwright configuration at frontend/playwright.config.ts with managed backend/frontend web servers for local and CI runs.
+- Added GitHub Actions pipeline at .github/workflows/ci.yml to run backend build/tests, frontend unit tests/build, and Playwright smoke tests.
 
 ## Release Readiness Roadmap (Items 1-6)
 
@@ -168,10 +179,10 @@ Exit criteria:
 
 ## Next Implementation Slice
 Immediate next coding slice:
-1. Expand E2E browser smoke suite (login, dark mode persistence, admin guard, dashboard table).
-2. Add manual chunk strategy in vite.config.ts and capture before/after bundle metrics.
+1. Capture and log before/after bundle size metrics with threshold targets for release gate.
+2. Expand smoke coverage for status-board rendering and reconnect behavior under simulated backend interruption.
 3. Add release command references to README and script docs.
-4. Add CI hooks for backend tests + frontend tests + smoke tests.
+4. Add CI branch protection guidance and required-check mapping in docs/Release.md.
 
 ---
 Last updated: 2026-07-02
