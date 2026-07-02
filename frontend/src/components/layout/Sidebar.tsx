@@ -4,7 +4,7 @@ import {
   List,
   ListItemButton,
   ListItemIcon,
-  ListItemText,
+  Tooltip,
 } from "@mui/material";
 
 import DashboardIcon from "@mui/icons-material/Dashboard";
@@ -12,20 +12,15 @@ import Inventory2Icon from "@mui/icons-material/Inventory2";
 import AssessmentIcon from "@mui/icons-material/Assessment";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import SettingsIcon from "@mui/icons-material/Settings";
+import DepartureBoardIcon from "@mui/icons-material/DepartureBoard";
 
 import { NavLink } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
 
-const drawerWidth = 220;
-const collapsedDrawerWidth = 60;
+const drawerWidth = 64;
 
-interface SidebarProps {
-  open: boolean;
-}
-
-export default function Sidebar({ open }: SidebarProps) {
-  const currentWidth = open ? drawerWidth : collapsedDrawerWidth;
+export default function Sidebar() {
   const { isAuthenticated } = useAuth();
 
   const iconSx = {
@@ -36,21 +31,6 @@ export default function Sidebar({ open }: SidebarProps) {
     "& .MuiSvgIcon-root": {
       fontSize: 20,
     },
-  };
-
-  const textSx = {
-    opacity: open ? 1 : 0,
-    maxWidth: open ? 150 : 0,
-    whiteSpace: "nowrap",
-    "& .MuiListItemText-primary": {
-      fontSize: 14,
-      fontWeight: 500,
-      color: "text.secondary",
-    },
-    transition: (theme) =>
-      theme.transitions.create(["opacity", "max-width"], {
-        duration: theme.transitions.duration.shorter,
-      }),
   };
 
   const itemSx = {
@@ -65,73 +45,74 @@ export default function Sidebar({ open }: SidebarProps) {
     <Drawer
       variant="permanent"
       sx={{
-        width: currentWidth,
+        width: drawerWidth,
         flexShrink: 0,
-        transition: (theme) =>
-          theme.transitions.create("width", {
-            easing: theme.transitions.easing.sharp,
-            duration: theme.transitions.duration.standard,
-          }),
         overflowX: "hidden",
 
         "& .MuiDrawer-paper": {
-          width: currentWidth,
+          width: drawerWidth,
           boxSizing: "border-box",
           overflowX: "hidden",
-          borderRight: "1px solid rgba(0, 0, 0, 0.08)",
-          backgroundColor: "rgba(255, 255, 255, 0.92)",
-          transition: (theme) =>
-            theme.transitions.create(["width", "border-right"], {
-              easing: theme.transitions.easing.sharp,
-              duration: theme.transitions.duration.standard,
-            }),
+          borderRight: (theme) => `1px solid ${theme.palette.divider}`,
+          backgroundColor: (theme) =>
+            theme.palette.mode === "dark"
+              ? "rgba(23, 28, 34, 0.92)"
+              : "rgba(255, 255, 255, 0.92)",
         },
       }}
     >
       <Toolbar />
 
       <List sx={{ pt: 1 }}>
-        <ListItemButton component={NavLink} to="/" sx={itemSx}>
-          <ListItemIcon sx={iconSx}>
-            <DashboardIcon />
-          </ListItemIcon>
+        <Tooltip title="Dashboard" placement="right">
+          <ListItemButton component={NavLink} to="/" sx={itemSx}>
+            <ListItemIcon sx={iconSx}>
+              <DashboardIcon />
+            </ListItemIcon>
+          </ListItemButton>
+        </Tooltip>
 
-          <ListItemText primary="Dashboard" sx={textSx} />
-        </ListItemButton>
+        <Tooltip title="Products" placement="right">
+          <ListItemButton component={NavLink} to="/products" sx={itemSx}>
+            <ListItemIcon sx={iconSx}>
+              <Inventory2Icon />
+            </ListItemIcon>
+          </ListItemButton>
+        </Tooltip>
 
-        <ListItemButton component={NavLink} to="/products" sx={itemSx}>
-          <ListItemIcon sx={iconSx}>
-            <Inventory2Icon />
-          </ListItemIcon>
+        <Tooltip title="Reports" placement="right">
+          <ListItemButton component={NavLink} to="/reports" sx={itemSx}>
+            <ListItemIcon sx={iconSx}>
+              <AssessmentIcon />
+            </ListItemIcon>
+          </ListItemButton>
+        </Tooltip>
 
-          <ListItemText primary="Products" sx={textSx} />
-        </ListItemButton>
-
-        <ListItemButton component={NavLink} to="/reports" sx={itemSx}>
-          <ListItemIcon sx={iconSx}>
-            <AssessmentIcon />
-          </ListItemIcon>
-
-          <ListItemText primary="Reports" sx={textSx} />
-        </ListItemButton>
+        <Tooltip title="Status Board" placement="right">
+          <ListItemButton component={NavLink} to="/status-board" sx={itemSx}>
+            <ListItemIcon sx={iconSx}>
+              <DepartureBoardIcon />
+            </ListItemIcon>
+          </ListItemButton>
+        </Tooltip>
 
         {isAuthenticated ? (
-          <ListItemButton component={NavLink} to="/administration" sx={itemSx}>
-            <ListItemIcon sx={iconSx}>
-              <AdminPanelSettingsIcon />
-            </ListItemIcon>
-
-            <ListItemText primary="Administration" sx={textSx} />
-          </ListItemButton>
+          <Tooltip title="Administration" placement="right">
+            <ListItemButton component={NavLink} to="/administration" sx={itemSx}>
+              <ListItemIcon sx={iconSx}>
+                <AdminPanelSettingsIcon />
+              </ListItemIcon>
+            </ListItemButton>
+          </Tooltip>
         ) : null}
 
-        <ListItemButton component={NavLink} to="/settings" sx={itemSx}>
-          <ListItemIcon sx={iconSx}>
-            <SettingsIcon />
-          </ListItemIcon>
-
-          <ListItemText primary="Settings" sx={textSx} />
-        </ListItemButton>
+        <Tooltip title="Settings" placement="right">
+          <ListItemButton component={NavLink} to="/settings" sx={itemSx}>
+            <ListItemIcon sx={iconSx}>
+              <SettingsIcon />
+            </ListItemIcon>
+          </ListItemButton>
+        </Tooltip>
       </List>
     </Drawer>
   );

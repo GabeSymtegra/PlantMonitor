@@ -26,6 +26,7 @@ import type { PlcManufacturer, ProductionLine } from "../types/ProductionLine";
 
 type LineConfigForm = {
   lineNumber: number;
+  lineName: string;
   product: string;
   plcIp: string;
   manufacturer: PlcManufacturer;
@@ -34,11 +35,14 @@ type LineConfigForm = {
 
 const emptyLineForm: LineConfigForm = {
   lineNumber: 1,
+  lineName: "",
   product: "",
   plcIp: "",
   manufacturer: "AB",
   isActive: true,
 };
+
+const productSerialPattern = /^\d{3}-\d{3}-\d{2}-\d{1}$/;
 
 function isValidIpv4Address(value: string): boolean {
   const ipv4Pattern =
@@ -48,7 +52,7 @@ function isValidIpv4Address(value: string): boolean {
 }
 
 function formatLineTitle(line: ProductionLine) {
-  return `Line ${line.lineNumber} - ${line.product || "Unassigned"}`;
+  return `Line ${line.lineNumber} - ${line.lineName}`;
 }
 
 export default function Administration() {
@@ -95,6 +99,7 @@ export default function Administration() {
     if (selected) {
       const lineForm: LineConfigForm = {
         lineNumber: selected.lineNumber,
+        lineName: selected.lineName,
         product: selected.product,
         plcIp: selected.plcIp,
         manufacturer: selected.manufacturer,
@@ -117,10 +122,19 @@ export default function Administration() {
 
   function validateForm(): string | null {
     const trimmedProduct = form.product.trim();
+    const trimmedLineName = form.lineName.trim();
     const trimmedIp = form.plcIp.trim();
+
+    if (!trimmedLineName) {
+      return "Line name is required.";
+    }
 
     if (!form.product.trim()) {
       return "Product is required.";
+    }
+
+    if (!productSerialPattern.test(trimmedProduct)) {
+      return "Product serial must match xxx-xxx-xx-x using digits.";
     }
 
     if (!trimmedIp) {
@@ -180,6 +194,7 @@ export default function Administration() {
     if (selectedLineId === "new") {
       await addLine({
         ...form,
+        lineName: form.lineName.trim(),
         startDateTime: new Date().toISOString(),
         status: LineStatus.Offline,
         timeInStatus: "00:00:00",
@@ -198,6 +213,7 @@ export default function Administration() {
     } else {
       await updateLine(selectedLineId, {
         lineNumber: form.lineNumber,
+        lineName: form.lineName.trim(),
         product: form.product.trim(),
         manufacturer: form.manufacturer,
         plcIp: form.plcIp.trim(),
@@ -238,7 +254,7 @@ export default function Administration() {
                 variant={selectedLineId === line.id ? "contained" : "outlined"}
                 onClick={() => handleSelectLine(line.id)}
               >
-                {formatLineTitle(line)}
+                {`Line ${line.lineNumber} - ${line.lineName}`}
               </Button>
             ))}
           </Box>
@@ -291,6 +307,14 @@ export default function Administration() {
               fullWidth
             />
 
+            <TextField
+              label="Line Name"
+              value={form.lineName}
+              onChange={(event) => updateForm("lineName", event.target.value)}
+              fullWidth
+              placeholder="Main Extruder"
+            />
+
             <FormControl fullWidth>
               <InputLabel id="manufacturer-label">Manufacturer</InputLabel>
               <Select
@@ -309,10 +333,11 @@ export default function Administration() {
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
             <TextField
-              label="Product"
+              label="Product Serial"
               value={form.product}
               onChange={(event) => updateForm("product", event.target.value)}
               fullWidth
+              placeholder="123-456-78-9"
             />
 
             <TextField

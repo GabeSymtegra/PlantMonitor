@@ -3,15 +3,16 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AppShell from "../layouts/AppShell";
 
 import Dashboard from "../pages/Dashboard";
+import Lines from "../pages/Lines";
 import Login from "../pages/Login";
 import Administration from "../pages/Administration";
+import LineDetails from "../pages/LineDetails";
 import Settings from "../pages/Settings";
+import StatusBoard from "../pages/StatusBoard";
 import ProtectedRoute from "./ProtectedRoute";
 
-function Placeholder({ title }: { title: string }) {
-    return (
-        <h1 style={{ padding: 40 }}>{title}</h1>
-    );
+function PagePlaceholder({ title }: { title: string }) {
+    return <h1 style={{ padding: 40 }}>{title}</h1>;
 }
 
 export default function AppRoutes() {
@@ -22,23 +23,24 @@ export default function AppRoutes() {
 
                 <Route path="/login" element={<Login />} />
 
+                <Route path="/status-board" element={<StatusBoard />} />
+
                 <Route element={<AppShell />}>
 
                     <Route path="/" element={<Dashboard />} />
 
-                    <Route
-                        path="/lines"
-                        element={<Placeholder title="Production Lines" />}
-                    />
+                    <Route path="/lines" element={<Lines />} />
+
+                    <Route path="/lines/:id" element={<LineDetails />} />
 
                     <Route
                         path="/products"
-                        element={<Placeholder title="Products" />}
+                        element={<PagePlaceholder title="Products" />}
                     />
 
                     <Route
                         path="/reports"
-                        element={<Placeholder title="Reports" />}
+                        element={<PagePlaceholder title="Reports" />}
                     />
 
                     <Route

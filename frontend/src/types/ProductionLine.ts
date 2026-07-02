@@ -7,6 +7,8 @@ export interface ProductionLine {
 
   lineNumber: number;
 
+  lineName: string;
+
   product: string;
 
   startDateTime: string;

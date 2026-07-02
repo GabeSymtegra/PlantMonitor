@@ -1,4 +1,5 @@
 import type { DashboardModel } from "../models/DashboardModel";
+import type { LineDetailModel } from "../models/LineDetailModel";
 import type { ProductionLine } from "../types/ProductionLine";
 import { LineStatus } from "../types/LineStatus";
 
@@ -9,7 +10,8 @@ const defaultLines: ProductionLine[] = [
   {
     id: 1,
     lineNumber: 1,
-    product: "PVC Pipe",
+    lineName: "North Extruder",
+    product: "401-883-52-1",
     startDateTime: "2026-07-01T06:00:00",
     status: LineStatus.Running,
     timeInStatus: "02:12:14",
@@ -28,7 +30,8 @@ const defaultLines: ProductionLine[] = [
   {
     id: 2,
     lineNumber: 2,
-    product: "ABS Pipe",
+    lineName: "South Extruder",
+    product: "993-102-75-4",
     startDateTime: "2026-07-01T07:20:00",
     status: LineStatus.Stopped,
     timeInStatus: "00:18:09",
@@ -47,7 +50,8 @@ const defaultLines: ProductionLine[] = [
   {
     id: 3,
     lineNumber: 3,
-    product: "PEX Tubing",
+    lineName: "Main Puller",
+    product: "550-214-87-2",
     startDateTime: "2026-07-01T05:45:00",
     status: LineStatus.Faulted,
     timeInStatus: "00:04:12",
@@ -66,7 +70,8 @@ const defaultLines: ProductionLine[] = [
   {
     id: 4,
     lineNumber: 4,
-    product: "HDPE Pipe",
+    lineName: "Reserve Line",
+    product: "120-997-61-8",
     startDateTime: "2026-07-01T00:00:00",
     status: LineStatus.Offline,
     timeInStatus: "03:02:10",
@@ -93,9 +98,12 @@ function toFixedNumber(value: number, decimals = 1): number {
 }
 
 function normalizeLine(line: Partial<ProductionLine>, fallbackId: number): ProductionLine {
+  const normalizedLineNumber = line.lineNumber ?? fallbackId;
+
   return {
     id: line.id ?? fallbackId,
-    lineNumber: line.lineNumber ?? fallbackId,
+    lineNumber: normalizedLineNumber,
+    lineName: line.lineName?.trim() || `Line ${normalizedLineNumber}`,
     product: line.product ?? "Unassigned",
     startDateTime: line.startDateTime ?? new Date().toISOString(),
     status: line.status ?? LineStatus.Offline,
@@ -255,5 +263,66 @@ export async function getDashboard(): Promise<DashboardModel> {
   return {
     lines,
     lastUpdated: new Date(),
+  };
+}
+
+export async function getLineById(id: number): Promise<ProductionLine | null> {
+  const lines = applyMockTelemetry(getStoredLines());
+  return lines.find((line) => line.id === id) ?? null;
+}
+
+function buildDiameterSensors(line: ProductionLine): LineDetailModel["diameterSensors"] {
+  return Array.from({ length: 6 }, (_, index) => {
+    const sensorId = index + 1;
+    const pulse = Math.sin((Date.now() + line.id * 1400 + sensorId * 600) / 6500);
+    const deviationMm = Number((pulse * 0.6).toFixed(3));
+    const absoluteDeviation = Math.abs(deviationMm);
+
+    let status: "Normal" | "Warning" | "Fault" = "Normal";
+
+    if (absoluteDeviation > 0.5) {
+      status = "Fault";
+    } else if (absoluteDeviation > 0.25) {
+      status = "Warning";
+    }
+
+    return {
+      id: `DIA-${line.id}-${sensorId}`,
+      label: `Diameter Sensor ${sensorId}`,
+      diameterMm: Number((45 + sensorId * 0.4 + pulse * 0.2).toFixed(3)),
+      status,
+      deviationMm,
+    };
+  });
+}
+
+export async function getLineDetail(id: number): Promise<LineDetailModel | null> {
+  const line = await getLineById(id);
+
+  if (!line) {
+    return null;
+  }
+
+  const phase = (Date.now() + line.id * 1000) / 5000;
+
+  return {
+    line,
+    pressuresPsi: {
+      extruder: Number((168 + Math.sin(phase) * 7).toFixed(1)),
+      dieHead: Number((142 + Math.cos(phase * 0.9) * 6).toFixed(1)),
+      cooling: Number((78 + Math.sin(phase * 1.2) * 4).toFixed(1)),
+    },
+    temperaturesC: {
+      zone1: Number((188 + Math.sin(phase * 0.8) * 3).toFixed(1)),
+      zone2: Number((194 + Math.cos(phase * 0.7) * 3).toFixed(1)),
+      zone3: Number((201 + Math.sin(phase * 0.6) * 2.5).toFixed(1)),
+      die: Number((206 + Math.cos(phase * 0.65) * 2).toFixed(1)),
+    },
+    motorSpeedsRpm: {
+      puller: Number((1200 + Math.sin(phase) * 65).toFixed(0)),
+      cutter: Number((980 + Math.cos(phase * 1.1) * 55).toFixed(0)),
+    },
+    diameterSensors: buildDiameterSensors(line),
+    updatedAt: new Date().toISOString(),
   };
 }

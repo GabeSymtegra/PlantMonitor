@@ -1,9 +1,8 @@
-import { Alert, Box, Button, Typography } from "@mui/material";
+import { Alert, Box, Button } from "@mui/material";
 import { useMemo, useState } from "react";
 
 import { useDashboard } from "../context/useDashboard";
 
-import StatusSummary from "../components/dashboard/StatusSummary";
 import SearchBar from "../components/dashboard/SearchBar";
 import ViewToggle from "../components/dashboard/ViewToggle";
 import LineTable from "../components/dashboard/LineTable";
@@ -24,6 +23,7 @@ export default function Dashboard() {
     return lines.filter((line) => {
       const searchTargets = [
         line.lineNumber.toString(),
+        line.lineName,
         line.product,
         line.status,
         line.controlMode,
@@ -39,18 +39,6 @@ export default function Dashboard() {
 
   return (
     <Box>
-      <Typography
-        variant="h4"
-        sx={{
-          mb: 4,
-          fontWeight: 700,
-        }}
-      >
-        Plant Status Dashboard
-      </Typography>
-
-      <StatusSummary />
-
       <Box
         sx={{
           display: "flex",

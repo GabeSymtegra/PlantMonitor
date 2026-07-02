@@ -4,26 +4,111 @@ import {
   Typography,
   Box,
   Chip,
-  IconButton,
   Button,
+  IconButton,
+  Tooltip,
 } from "@mui/material";
 
-import MenuIcon from "@mui/icons-material/Menu";
-import MenuOpenIcon from "@mui/icons-material/MenuOpen";
 import LogoutIcon from "@mui/icons-material/Logout";
 import LoginIcon from "@mui/icons-material/Login";
-import { useNavigate } from "react-router-dom";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
+import LightModeIcon from "@mui/icons-material/LightMode";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
+import { useDashboard } from "../../context/useDashboard";
+import { useThemeMode } from "../../context/useThemeMode";
+import { LineStatus } from "../../types/LineStatus";
 
-interface NavbarProps {
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
-}
+const statusColors: Record<LineStatus, string> = {
+  [LineStatus.Running]: "#2E7D32",
+  [LineStatus.Stopped]: "#ED6C02",
+  [LineStatus.Faulted]: "#D32F2F",
+  [LineStatus.Offline]: "#616161",
+  [LineStatus.Maintenance]: "#1565C0",
+};
 
-export default function Navbar({ sidebarOpen, onToggleSidebar }: NavbarProps) {
+const statusOrder: LineStatus[] = [
+  LineStatus.Running,
+  LineStatus.Stopped,
+  LineStatus.Faulted,
+  LineStatus.Offline,
+  LineStatus.Maintenance,
+];
+
+export default function Navbar() {
   const { isAuthenticated, user, logout } = useAuth();
+  const { dashboard } = useDashboard();
+  const { isDarkMode, toggleMode, appearance } = useThemeMode();
+  const location = useLocation();
   const navigate = useNavigate();
+
+  const monitorName = appearance.monitorName.trim() || "Plant";
+
+  function getHeaderTitle(pathname: string): string {
+    if (pathname === "/") {
+      return `${monitorName} Monitor Dashboard`;
+    }
+
+    if (pathname.startsWith("/administration")) {
+      return `${monitorName} Monitor Administration`;
+    }
+
+    if (pathname.startsWith("/settings")) {
+      return `${monitorName} Monitor Settings`;
+    }
+
+    if (pathname.startsWith("/status-board")) {
+      return `${monitorName} Monitor Status Board`;
+    }
+
+    if (pathname.startsWith("/lines/")) {
+      return `${monitorName} Monitor Line Details`;
+    }
+
+    if (pathname.startsWith("/lines")) {
+      return `${monitorName} Monitor Production Lines`;
+    }
+
+    if (pathname.startsWith("/products")) {
+      return `${monitorName} Monitor Products`;
+    }
+
+    if (pathname.startsWith("/reports")) {
+      return `${monitorName} Monitor Reports`;
+    }
+
+    if (pathname.startsWith("/login")) {
+      return `${monitorName} Monitor Login`;
+    }
+
+    return `${monitorName} Monitor`;
+  }
+
+  const headerTitle = getHeaderTitle(location.pathname);
+
+  const lines = dashboard?.lines ?? [];
+  const statusCounts = lines.reduce(
+    (counts, line) => {
+      counts[line.status] += 1;
+      return counts;
+    },
+    {
+      [LineStatus.Running]: 0,
+      [LineStatus.Stopped]: 0,
+      [LineStatus.Faulted]: 0,
+      [LineStatus.Offline]: 0,
+      [LineStatus.Maintenance]: 0,
+    }
+  );
+
+  const updatedValue = dashboard?.lastUpdated
+    ? dashboard.lastUpdated.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "--:--:--";
 
   function handleAuthClick() {
     if (isAuthenticated) {
@@ -37,41 +122,110 @@ export default function Navbar({ sidebarOpen, onToggleSidebar }: NavbarProps) {
 
   return (
     <AppBar position="sticky" elevation={1}>
-      <Toolbar>
-        <IconButton
-          color="inherit"
-          onClick={onToggleSidebar}
-          sx={{ mr: 2 }}
-          aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          {sidebarOpen ? <MenuOpenIcon /> : <MenuIcon />}
-        </IconButton>
-
+      <Toolbar
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto",
+          alignItems: "center",
+          columnGap: 2,
+          minHeight: 72,
+        }}
+      >
         <Typography
           variant="h5"
           sx={{
             fontWeight: 700,
             letterSpacing: 1,
+            whiteSpace: "nowrap",
           }}
         >
-          🌿 PlantMonitor
+          🌿 {headerTitle}
         </Typography>
 
-        <Box sx={{ flexGrow: 1 }} />
-
-        <Chip color="success" label="LIVE" sx={{ mr: 3 }} />
-
-        <Typography sx={{ mr: 2 }}>
-          {isAuthenticated ? user?.username : "Guest"}
-        </Typography>
-
-        <Button
-          color="inherit"
-          onClick={handleAuthClick}
-          startIcon={isAuthenticated ? <LogoutIcon /> : <LoginIcon />}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: 0.75,
+            overflowX: "auto",
+            whiteSpace: "nowrap",
+            px: 1.5,
+            borderLeft: (theme) => `1px solid ${theme.palette.divider}`,
+            borderRight: (theme) => `1px solid ${theme.palette.divider}`,
+            "&::-webkit-scrollbar": {
+              height: 4,
+            },
+          }}
         >
-          {isAuthenticated ? "Logout" : "Login"}
-        </Button>
+          {statusOrder.map((status) => (
+            <Button
+              key={status}
+              size="small"
+              onClick={() =>
+                navigate(`/lines?status=${encodeURIComponent(status)}`)
+              }
+              sx={{
+                minWidth: "auto",
+                px: 1.2,
+                py: 0.35,
+                lineHeight: 1,
+                color: "#fff",
+                backgroundColor: statusColors[status],
+                borderRadius: 2,
+                fontSize: 12,
+                fontWeight: 700,
+                textTransform: "none",
+                "&:hover": {
+                  backgroundColor: statusColors[status],
+                  filter: "brightness(0.92)",
+                },
+              }}
+            >
+              {status} {statusCounts[status]}
+            </Button>
+          ))}
+
+          <Chip
+            size="small"
+            label={`Updated ${updatedValue}`}
+            sx={{
+              bgcolor: (theme) =>
+                theme.palette.mode === "dark"
+                  ? "rgba(255,255,255,0.12)"
+                  : "rgba(0,0,0,0.12)",
+              color: "inherit",
+            }}
+          />
+        </Box>
+
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1.75,
+            pl: 1,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <Tooltip title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}>
+            <IconButton color="inherit" size="small" onClick={toggleMode}>
+              {isDarkMode ? <LightModeIcon /> : <DarkModeIcon />}
+            </IconButton>
+          </Tooltip>
+
+          <Chip color="success" label="LIVE" />
+
+          <Typography>{isAuthenticated ? user?.username : "Guest"}</Typography>
+
+          <Button
+            color="inherit"
+            onClick={handleAuthClick}
+            startIcon={isAuthenticated ? <LogoutIcon /> : <LoginIcon />}
+          >
+            {isAuthenticated ? "Logout" : "Login"}
+          </Button>
+        </Box>
       </Toolbar>
     </AppBar>
   );

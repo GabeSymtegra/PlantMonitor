@@ -5,6 +5,7 @@ import {
   Typography,
   Box,
 } from "@mui/material";
+import { useNavigate } from "react-router-dom";
 
 import StatusChip from "../common/StatusChip";
 
@@ -44,6 +45,7 @@ interface LineCardsProps {
 export default function LineCards({ lines }: LineCardsProps) {
   const { dashboard } = useDashboard();
   const visibleLines = lines ?? dashboard?.lines ?? [];
+  const navigate = useNavigate();
 
   function formatStartDateTime(value: string): string {
     const parsed = new Date(value);
@@ -68,14 +70,25 @@ export default function LineCards({ lines }: LineCardsProps) {
       }}
     >
       {visibleLines.map((line) => (
-        <Card key={line.id}>
+        <Card
+          key={line.id}
+          onClick={() => navigate(`/lines/${line.id}`)}
+          sx={{
+            cursor: "pointer",
+            transition: "transform 120ms ease, box-shadow 120ms ease",
+            "&:hover": {
+              transform: "translateY(-2px)",
+              boxShadow: 5,
+            },
+          }}
+        >
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              Line #{line.lineNumber}
+              Line #{line.lineNumber} - {line.lineName}
             </Typography>
 
             <Typography gutterBottom sx={{ mb: 2 }}>
-              {line.product}
+              Serial: {line.product}
             </Typography>
 
             <Box sx={{ display: "grid", rowGap: 0.75, mb: 2 }}>
