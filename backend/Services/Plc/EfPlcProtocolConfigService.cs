@@ -44,8 +44,10 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
 
         if (!string.IsNullOrWhiteSpace(manufacturer))
         {
-            var normalizedManufacturer = manufacturer.Trim().ToLower();
-            query = query.Where(p => p.Manufacturer.ToLower() == normalizedManufacturer);
+            var normalizedManufacturer = NormalizeManufacturer(manufacturer).ToLower();
+            query = query.Where(p =>
+                p.Manufacturer.ToLower() == normalizedManufacturer
+                || (normalizedManufacturer == "allenbradley" && p.Manufacturer.ToLower() == "ab"));
         }
 
         var presets = query
@@ -76,8 +78,10 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             return false;
         }
 
+        var requestedManufacturer = NormalizeManufacturer(request.Manufacturer).ToLower();
         var presetExists = _dbContext.PlcProtocolPresets.Any(p =>
-            p.Manufacturer.ToLower() == request.Manufacturer.Trim().ToLower()
+            (p.Manufacturer.ToLower() == requestedManufacturer
+                || (requestedManufacturer == "allenbradley" && p.Manufacturer.ToLower() == "ab"))
             && p.PresetName.ToLower() == request.PresetName.Trim().ToLower()
             && p.PresetVersion == request.PresetVersion);
 
@@ -125,11 +129,15 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             return null;
         }
 
+        var normalizedAssignmentManufacturer = NormalizeManufacturer(assignment.Manufacturer).ToLower();
+        var isAllenBradley = normalizedAssignmentManufacturer == "allenbradley";
+
         var preset = _dbContext.PlcProtocolPresets
             .AsNoTracking()
             .Include(p => p.Tags)
             .SingleOrDefault(p =>
-                p.Manufacturer.ToLower() == assignment.Manufacturer.ToLower()
+                (p.Manufacturer.ToLower() == normalizedAssignmentManufacturer
+                    || (isAllenBradley && p.Manufacturer.ToLower() == "ab"))
                 && p.PresetName.ToLower() == assignment.PresetName.ToLower()
                 && p.PresetVersion == assignment.PresetVersion);
 
@@ -178,7 +186,7 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             issues.Add(new TagValidationIssueDto
             {
                 Field = "manufacturer",
-                Message = "Manufacturer must be AB or Siemens.",
+                Message = "Manufacturer must be AllenBradley or Siemens.",
             });
         }
 
@@ -315,7 +323,7 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
     {
         return new PlcPresetDto
         {
-            Manufacturer = preset.Manufacturer,
+            Manufacturer = NormalizeManufacturer(preset.Manufacturer),
             PresetName = preset.PresetName,
             PresetVersion = preset.PresetVersion,
             Description = preset.Description,
@@ -331,12 +339,19 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         return new LineProtocolAssignmentDto
         {
             LineId = assignment.LineId,
-            Manufacturer = assignment.Manufacturer,
+            Manufacturer = NormalizeManufacturer(assignment.Manufacturer),
             PresetName = assignment.PresetName,
             PresetVersion = assignment.PresetVersion,
             PollIntervalMs = assignment.PollIntervalMs,
             UpdatedAtUtc = assignment.UpdatedAtUtc,
         };
+    }
+
+    private static string NormalizeManufacturer(string manufacturer)
+    {
+        return manufacturer.Trim().Equals("AB", StringComparison.OrdinalIgnoreCase)
+            ? "AllenBradley"
+            : manufacturer.Trim();
     }
 
     private static EffectiveTagMappingDto MapTag(PlcProtocolPresetTagEntity tag)

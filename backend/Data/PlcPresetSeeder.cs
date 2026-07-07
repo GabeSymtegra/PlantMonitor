@@ -16,7 +16,7 @@ public static class PlcPresetSeeder
         {
             new()
             {
-                Manufacturer = "AB",
+                Manufacturer = "AllenBradley",
                 PresetName = "BasicStatus",
                 PresetVersion = 1,
                 Description = "Allen-Bradley baseline telemetry preset.",

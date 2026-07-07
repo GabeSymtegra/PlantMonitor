@@ -13,6 +13,7 @@ import {
   Switch,
   TextField,
   Typography,
+  CircularProgress,
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 
@@ -21,6 +22,11 @@ import {
   getAllLines,
   updateLine,
 } from "../services/dashboardService";
+import {
+  testPlcConnection,
+  type PlcConnectionResult,
+} from "../services/plcConnectionService";
+import { ApiRequestError } from "../services/api/client";
 import { LineStatus } from "../types/LineStatus";
 import type { PlcManufacturer, ProductionLine } from "../types/ProductionLine";
 
@@ -38,7 +44,7 @@ const emptyLineForm: LineConfigForm = {
   lineName: "",
   product: "",
   plcIp: "",
-  manufacturer: "AB",
+  manufacturer: "AllenBradley",
   isActive: true,
 };
 
@@ -61,6 +67,8 @@ export default function Administration() {
   const [form, setForm] = useState<LineConfigForm>(emptyLineForm);
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<PlcConnectionResult | null>(null);
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.isActive),
@@ -114,6 +122,11 @@ export default function Administration() {
     key: K,
     value: LineConfigForm[K]
   ) {
+    if (key === "manufacturer" || key === "plcIp") {
+      setConnectionResult(null);
+      setSuccess("");
+    }
+
     setForm((previous) => ({
       ...previous,
       [key]: value,
@@ -234,6 +247,48 @@ export default function Administration() {
     }
   }
 
+  async function handleTestConnection() {
+    setError("");
+    setSuccess("");
+    setTestingConnection(true);
+
+    try {
+      const result = await testPlcConnection({
+        driver: form.manufacturer,
+        ipAddress: form.plcIp.trim(),
+      });
+
+      setConnectionResult(result);
+
+      if (result.isConnected) {
+        setSuccess("PLC connection verified successfully.");
+      } else {
+        setError(result.message);
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? requestError.message
+          : requestError instanceof Error
+            ? requestError.message
+            : "PLC connection test failed.";
+
+      setConnectionResult({
+        isConnected: false,
+        driver: form.manufacturer,
+        ipAddress: form.plcIp.trim(),
+        message,
+      });
+      setError(message);
+    } finally {
+      setTestingConnection(false);
+    }
+  }
+
+  const canTestConnection = isValidIpv4Address(form.plcIp) && !testingConnection;
+  const isNewLine = selectedLineId === "new";
+  const canSaveLine = !isNewLine || connectionResult?.isConnected === true;
+
   return (
     <Stack spacing={3}>
       <Typography variant="h4" sx={{ fontWeight: 700 }}>
@@ -293,8 +348,20 @@ export default function Administration() {
 
           <Divider />
 
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          {success ? <Alert severity="success">{success}</Alert> : null}
+          {error ? (
+            <Alert severity="error">
+              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                {error}
+              </Typography>
+            </Alert>
+          ) : null}
+          {success ? (
+            <Alert severity="success">
+              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                {success}
+              </Typography>
+            </Alert>
+          ) : null}
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
             <TextField
@@ -316,16 +383,16 @@ export default function Administration() {
             />
 
             <FormControl fullWidth>
-              <InputLabel id="manufacturer-label">Manufacturer</InputLabel>
+              <InputLabel id="manufacturer-label">PLC Driver</InputLabel>
               <Select
                 labelId="manufacturer-label"
-                label="Manufacturer"
+                label="PLC Driver"
                 value={form.manufacturer}
                 onChange={(event) =>
                   updateForm("manufacturer", event.target.value as PlcManufacturer)
                 }
               >
-                <MenuItem value="AB">AB</MenuItem>
+                <MenuItem value="AllenBradley">AllenBradley</MenuItem>
                 <MenuItem value="Siemens">Siemens</MenuItem>
               </Select>
             </FormControl>
@@ -386,6 +453,68 @@ export default function Administration() {
             Administration is used for network and line configuration.
           </Alert>
 
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2,
+              borderColor: connectionResult?.isConnected ? "success.main" : "divider",
+              backgroundColor: connectionResult?.isConnected ? "success.50" : "background.paper",
+            }}
+          >
+            <Stack spacing={2}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                PLC Connection Test
+              </Typography>
+
+              <Typography color="text.secondary">
+                Test the selected driver against the entered PLC IP before saving the line.
+              </Typography>
+
+              {connectionResult ? (
+                <Alert severity={connectionResult.isConnected ? "success" : "error"}>
+                  <Stack spacing={0.5}>
+                    <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                      {connectionResult.message}
+                    </Typography>
+                    <Typography variant="body2">
+                      Driver: {connectionResult.driver} | IP: {connectionResult.ipAddress}
+                    </Typography>
+                    {connectionResult.controllerName ? (
+                      <Typography variant="body2">
+                        Controller: {connectionResult.controllerName}
+                      </Typography>
+                    ) : null}
+                    {connectionResult.firmware ? (
+                      <Typography variant="body2">Firmware: {connectionResult.firmware}</Typography>
+                    ) : null}
+                    {typeof connectionResult.responseTimeMs === "number" ? (
+                      <Typography variant="body2">
+                        Response time: {connectionResult.responseTimeMs} ms
+                      </Typography>
+                    ) : null}
+                  </Stack>
+                </Alert>
+              ) : null}
+
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="flex-end">
+                <Button
+                  variant="outlined"
+                  onClick={handleTestConnection}
+                  disabled={!canTestConnection}
+                >
+                  {testingConnection ? (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <CircularProgress size={16} color="inherit" />
+                      <span>Testing...</span>
+                    </Stack>
+                  ) : (
+                    "Test Connection"
+                  )}
+                </Button>
+              </Stack>
+            </Stack>
+          </Paper>
+
           <FormControlLabel
             control={
               <Switch
@@ -397,7 +526,7 @@ export default function Administration() {
           />
 
           <Stack direction="row" justifyContent="flex-end">
-            <Button variant="contained" onClick={handleSave}>
+            <Button variant="contained" onClick={handleSave} disabled={!canSaveLine}>
               {selectedLineId === "new" ? "Add Line" : "Save Changes"}
             </Button>
           </Stack>

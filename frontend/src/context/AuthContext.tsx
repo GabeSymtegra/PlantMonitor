@@ -1,7 +1,7 @@
 import { createContext, useMemo, useState, type ReactNode } from "react";
 
 import type { User } from "../models/User";
-import { apiPost } from "../services/api/client";
+import { ApiRequestError, apiPost } from "../services/api/client";
 
 interface LoginResponse {
   accessToken: string;
@@ -105,14 +105,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setAccessToken(null);
 
-      if (error instanceof Error) {
-        if (error.message.includes("Failed to fetch")) {
-          setAuthError("Cannot reach backend server. Start backend and try again.");
-        } else if (error.message.includes("401")) {
+      if (error instanceof ApiRequestError) {
+        if (error.status === 401) {
           setAuthError("Invalid username or password.");
+        } else if (error.status === 403) {
+          setAuthError("You do not have access to this account.");
+        } else if (typeof error.status === "number") {
+          setAuthError(`Login failed. Backend returned HTTP ${error.status}.`);
         } else {
-          setAuthError("Login failed. Please try again.");
+          setAuthError("Cannot reach backend server. Start backend and try again.");
         }
+      } else if (error instanceof Error) {
+        setAuthError("Login failed. Please try again.");
       } else {
         setAuthError("Login failed. Please try again.");
       }

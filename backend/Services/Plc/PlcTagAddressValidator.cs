@@ -47,7 +47,7 @@ public sealed class PlcTagAddressValidator : IPlcTagAddressValidator
             return valid;
         }
 
-        message = "Unsupported manufacturer. Use AB or Siemens.";
+        message = "Unsupported manufacturer. Use AllenBradley or Siemens.";
         return false;
     }
 }

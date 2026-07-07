@@ -24,7 +24,7 @@ const defaultLines: ProductionLine[] = [
     totalLength: 15200,
     runtime: "12:43:18",
     plcIp: "192.168.1.101",
-    manufacturer: "AB",
+    manufacturer: "AllenBradley",
     isActive: true,
   },
   {
@@ -44,7 +44,7 @@ const defaultLines: ProductionLine[] = [
     totalLength: 9840,
     runtime: "08:15:44",
     plcIp: "192.168.1.102",
-    manufacturer: "AB",
+    manufacturer: "AllenBradley",
     isActive: true,
   },
   {
@@ -99,6 +99,10 @@ function toFixedNumber(value: number, decimals = 1): number {
 
 function normalizeLine(line: Partial<ProductionLine>, fallbackId: number): ProductionLine {
   const normalizedLineNumber = line.lineNumber ?? fallbackId;
+  const normalizedManufacturer =
+    typeof line.manufacturer === "string" && line.manufacturer.trim().toLowerCase() === "ab"
+      ? "AllenBradley"
+      : line.manufacturer ?? "AllenBradley";
 
   return {
     id: line.id ?? fallbackId,
@@ -117,7 +121,7 @@ function normalizeLine(line: Partial<ProductionLine>, fallbackId: number): Produ
     totalLength: line.totalLength ?? 0,
     runtime: line.runtime ?? "00:00:00",
     plcIp: line.plcIp ?? "0.0.0.0",
-    manufacturer: line.manufacturer ?? "AB",
+    manufacturer: normalizedManufacturer,
     isActive: line.isActive ?? true,
   };
 }

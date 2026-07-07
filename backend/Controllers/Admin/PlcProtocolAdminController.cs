@@ -11,10 +11,14 @@ namespace backend.Controllers.Admin;
 public sealed class PlcProtocolAdminController : ControllerBase
 {
     private readonly IPlcProtocolConfigService _protocolConfigService;
+    private readonly IPlcConnectionService _connectionService;
 
-    public PlcProtocolAdminController(IPlcProtocolConfigService protocolConfigService)
+    public PlcProtocolAdminController(
+        IPlcProtocolConfigService protocolConfigService,
+        IPlcConnectionService connectionService)
     {
         _protocolConfigService = protocolConfigService;
+        _connectionService = connectionService;
     }
 
     [HttpGet("plc/presets")]
@@ -84,5 +88,13 @@ public sealed class PlcProtocolAdminController : ControllerBase
         }
 
         return Ok(effectiveTags);
+    }
+
+    [HttpPost("plc/test-connection")]
+    public async Task<ActionResult<PlcConnectionResult>> TestConnection([FromBody] PlcConnectionRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _connectionService.TestConnectionAsync(request, cancellationToken);
+
+        return Ok(result);
     }
 }

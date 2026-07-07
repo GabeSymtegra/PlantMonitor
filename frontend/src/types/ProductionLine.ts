@@ -1,6 +1,6 @@
 import type { LineStatus } from "./LineStatus";
 
-export type PlcManufacturer = "AB" | "Siemens";
+export type PlcManufacturer = "AllenBradley" | "Siemens";
 
 export interface ProductionLine {
   id: number;

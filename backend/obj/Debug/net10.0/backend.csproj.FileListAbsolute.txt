@@ -1,7 +1,6 @@
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\appsettings.Development.json
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\appsettings.json
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\backend.staticwebassets.endpoints.json
-C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\backend.exe
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\backend.deps.json
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\backend.runtimeconfig.json
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\backend.dll
@@ -158,3 +157,7 @@ C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\runtimes\ios-arm64\
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\runtimes\iossimulator-arm64\native\e_sqlite3.a
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\runtimes\iossimulator-x64\native\e_sqlite3.a
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\runtimes\iossimulator-x86\native\e_sqlite3.a
+C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\libplctag.dll
+C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\libplctag.NativeImport.dll
+C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\S7.Net.dll
+C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\backend.exe

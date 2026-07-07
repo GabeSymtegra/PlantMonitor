@@ -117,7 +117,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
-            manufacturer = "AB",
+            manufacturer = "AllenBradley",
             presetName = "BasicStatus",
             presetVersion = 1,
             pollIntervalMs = 1500,
@@ -131,7 +131,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
         var payload = await assignmentResponse.Content.ReadFromJsonAsync<JsonObject>();
         Assert.NotNull(payload);
         Assert.Equal(101, payload?["lineId"]?.GetValue<int>());
-        Assert.Equal("AB", payload?["manufacturer"]?.GetValue<string>());
+        Assert.Equal("AllenBradley", payload?["manufacturer"]?.GetValue<string>());
         Assert.Equal("BasicStatus", payload?["presetName"]?.GetValue<string>());
         Assert.Equal(1500, payload?["pollIntervalMs"]?.GetValue<int>());
     }

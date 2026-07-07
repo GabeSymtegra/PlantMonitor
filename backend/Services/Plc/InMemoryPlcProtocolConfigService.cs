@@ -42,8 +42,10 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
             return _presets;
         }
 
+        var normalizedManufacturer = NormalizeManufacturer(manufacturer);
+
         return _presets
-            .Where(p => p.Manufacturer.Equals(manufacturer, StringComparison.OrdinalIgnoreCase))
+            .Where(p => NormalizeManufacturer(p.Manufacturer).Equals(normalizedManufacturer, StringComparison.OrdinalIgnoreCase))
             .ToList();
     }
 
@@ -84,7 +86,7 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
             _assignments[lineId] = new LineProtocolAssignmentDto
             {
                 LineId = lineId,
-                Manufacturer = preset.Manufacturer,
+                Manufacturer = NormalizeManufacturer(preset.Manufacturer),
                 PresetName = preset.PresetName,
                 PresetVersion = preset.PresetVersion,
                 PollIntervalMs = request.PollIntervalMs,
@@ -158,7 +160,7 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
             issues.Add(new TagValidationIssueDto
             {
                 Field = "manufacturer",
-                Message = "Manufacturer must be AB or Siemens.",
+                Message = "Manufacturer must be AllenBradley or Siemens.",
             });
         }
 
@@ -282,10 +284,19 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
 
     private PlcPresetDto? FindPreset(string manufacturer, string presetName, int presetVersion)
     {
+        var normalizedManufacturer = NormalizeManufacturer(manufacturer);
+
         return _presets.FirstOrDefault(p =>
-            p.Manufacturer.Equals(manufacturer, StringComparison.OrdinalIgnoreCase)
+            NormalizeManufacturer(p.Manufacturer).Equals(normalizedManufacturer, StringComparison.OrdinalIgnoreCase)
             && p.PresetName.Equals(presetName, StringComparison.OrdinalIgnoreCase)
             && p.PresetVersion == presetVersion);
+    }
+
+    private static string NormalizeManufacturer(string manufacturer)
+    {
+        return manufacturer.Trim().Equals("AB", StringComparison.OrdinalIgnoreCase)
+            ? "AllenBradley"
+            : manufacturer.Trim();
     }
 
     private static EffectiveTagMappingDto CloneTag(EffectiveTagMappingDto source)
@@ -306,7 +317,7 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
         [
             new PlcPresetDto
             {
-                Manufacturer = "AB",
+                Manufacturer = "AllenBradley",
                 PresetName = "BasicStatus",
                 PresetVersion = 1,
                 Description = "Allen-Bradley baseline telemetry preset.",

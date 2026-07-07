@@ -15,6 +15,35 @@
           }
         }
       },
+      "libplctag/1.5.2": {
+        "type": "package",
+        "dependencies": {
+          "libplctag.NativeImport": "1.0.41"
+        },
+        "compile": {
+          "lib/netstandard2.0/libplctag.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/libplctag.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "libplctag.NativeImport/1.0.41": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.0/libplctag.NativeImport.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/libplctag.NativeImport.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "Microsoft.AspNetCore.Authentication.JwtBearer/10.0.9": {
         "type": "package",
         "dependencies": {
@@ -640,6 +669,19 @@
           }
         }
       },
+      "S7netplus/0.20.0": {
+        "type": "package",
+        "compile": {
+          "lib/net7.0/S7.Net.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net7.0/S7.Net.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "SQLitePCLRaw.bundle_e_sqlite3/3.0.0": {
         "type": "package",
         "dependencies": {
@@ -972,6 +1014,36 @@
         "lib/netstandard2.0/Humanizer.dll",
         "lib/netstandard2.0/Humanizer.xml",
         "logo.png"
+      ]
+    },
+    "libplctag/1.5.2": {
+      "sha512": "v16WtxKMr6YiPc/ws5C/MdhOvZgLrlDwJ1FQPB4PLrWNpBQXr8fUXaHI12rl3sNyJZ2ocB+zeSPUDFT8zK4pDA==",
+      "type": "package",
+      "path": "libplctag/1.5.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lib/netstandard2.0/libplctag.dll",
+        "lib/netstandard2.0/libplctag.xml",
+        "libplctag.1.5.2.nupkg.sha512",
+        "libplctag.nuspec",
+        "packageIcon.png"
+      ]
+    },
+    "libplctag.NativeImport/1.0.41": {
+      "sha512": "cm7TXwCMg4lALRtP/XJzxI4db9qYcRPB7kglPfDOqiNE1PQ4O/gOC5KPCwoGhIw07FBKvVDnl5sjbXS3iK2tEw==",
+      "type": "package",
+      "path": "libplctag.nativeimport/1.0.41",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lib/netstandard2.0/libplctag.NativeImport.dll",
+        "lib/netstandard2.0/libplctag.NativeImport.xml",
+        "libplctag.nativeimport.1.0.41.nupkg.sha512",
+        "libplctag.nativeimport.nuspec",
+        "packageIcon.png"
       ]
     },
     "Microsoft.AspNetCore.Authentication.JwtBearer/10.0.9": {
@@ -2425,6 +2497,31 @@
         "packageIcon.png"
       ]
     },
+    "S7netplus/0.20.0": {
+      "sha512": "XAubZ076bhWHQZlnBkzwQO4WxqF5ofwhrkDxfBhGbeD1JC1jBDn3EbWIqMLW6+G0RsxzxirSjLERCQZPfjwGdw==",
+      "type": "package",
+      "path": "s7netplus/0.20.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net452/S7.Net.dll",
+        "lib/net452/S7.Net.xml",
+        "lib/net462/S7.Net.dll",
+        "lib/net462/S7.Net.xml",
+        "lib/net5.0/S7.Net.dll",
+        "lib/net5.0/S7.Net.xml",
+        "lib/net6.0/S7.Net.dll",
+        "lib/net6.0/S7.Net.xml",
+        "lib/net7.0/S7.Net.dll",
+        "lib/net7.0/S7.Net.xml",
+        "lib/netstandard1.3/S7.Net.dll",
+        "lib/netstandard1.3/S7.Net.xml",
+        "lib/netstandard2.0/S7.Net.dll",
+        "lib/netstandard2.0/S7.Net.xml",
+        "s7netplus.0.20.0.nupkg.sha512",
+        "s7netplus.nuspec"
+      ]
+    },
     "SQLitePCLRaw.bundle_e_sqlite3/3.0.0": {
       "sha512": "fve56V3V/IBJT34ak0pFiJTAl/djHeQNd7/s7e1BlvpAnQT51uu7gk+2kFLe3UEVkCm3nfvODujRDjz5qsNE7A==",
       "type": "package",
@@ -2746,7 +2843,9 @@
       "Microsoft.EntityFrameworkCore >= 10.0.9",
       "Microsoft.EntityFrameworkCore.Design >= 10.0.9",
       "Microsoft.EntityFrameworkCore.Sqlite >= 10.0.9",
-      "SQLitePCLRaw.bundle_e_sqlite3 >= 3.0.0"
+      "S7NetPlus >= 0.20.0",
+      "SQLitePCLRaw.bundle_e_sqlite3 >= 3.0.0",
+      "libplctag >= 1.5.2"
     ]
   },
   "packageFolders": {
@@ -2812,9 +2911,17 @@
             "target": "Package",
             "version": "[10.0.9, )"
           },
+          "S7NetPlus": {
+            "target": "Package",
+            "version": "[0.20.0, )"
+          },
           "SQLitePCLRaw.bundle_e_sqlite3": {
             "target": "Package",
             "version": "[3.0.0, )"
+          },
+          "libplctag": {
+            "target": "Package",
+            "version": "[1.5.2, )"
           }
         },
         "imports": [

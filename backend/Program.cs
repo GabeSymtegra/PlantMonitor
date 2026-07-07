@@ -3,6 +3,7 @@ using System.Text;
 using backend.Configuration;
 using backend.Data;
 using backend.DTOs.Authentication;
+using backend.DTOs.Plc;
 using backend.Interfaces;
 using backend.Interfaces.Plc;
 using backend.Services.Line;
@@ -27,6 +28,10 @@ builder.Services.AddDbContext<PlantMonitorDbContext>(options =>
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 builder.Services.AddSingleton<IPlcTagAddressValidator, PlcTagAddressValidator>();
 builder.Services.AddScoped<IPlcProtocolConfigService, EfPlcProtocolConfigService>();
+builder.Services.AddSingleton<IPlcDriver, AllenBradleyPlcDriver>();
+builder.Services.AddSingleton<IPlcDriver, SiemensPlcDriver>();
+builder.Services.AddSingleton<IPlcConnectionService>(serviceProvider =>
+    new PlcConnectionService(serviceProvider.GetServices<IPlcDriver>().ToArray()));
 builder.Services.AddControllers();
 
 builder.Services
