@@ -97,4 +97,104 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         return Ok(result);
     }
+
+    [HttpPost("plc/browse-tags")]
+    public async Task<ActionResult<IReadOnlyCollection<PlcTagBrowseItemDto>>> BrowseTags(
+        [FromBody] PlcTagBrowseRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryResolveDriverAndIp(request.Driver, request.IpAddress, out var driver, out var errorResult))
+        {
+            return errorResult!;
+        }
+
+        var tags = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Search, cancellationToken);
+        return Ok(tags);
+    }
+
+    [HttpPost("plc/read-tag")]
+    public async Task<ActionResult<PlcTagReadResultDto>> ReadTag(
+        [FromBody] PlcTagReadRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryResolveDriverAndIp(request.Driver, request.IpAddress, out var driver, out var errorResult))
+        {
+            return errorResult!;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TagName))
+        {
+            return BadRequest(new { message = "Tag name is required." });
+        }
+
+        var result = await driver!.ReadTagAsync(request.IpAddress.Trim(), request.TagName.Trim(), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("plc/read-tags")]
+    public async Task<ActionResult<IReadOnlyCollection<PlcTagReadResultDto>>> ReadTags(
+        [FromBody] PlcTagReadManyRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryResolveDriverAndIp(request.Driver, request.IpAddress, out var driver, out var errorResult))
+        {
+            return errorResult!;
+        }
+
+        if (request.TagNames is null || request.TagNames.Count == 0)
+        {
+            return BadRequest(new { message = "At least one tag name is required." });
+        }
+
+        var result = await driver!.ReadTagsAsync(request.IpAddress.Trim(), request.TagNames, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("plc/write-tag")]
+    public async Task<ActionResult<PlcTagWriteResultDto>> WriteTag(
+        [FromBody] PlcTagWriteRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryResolveDriverAndIp(request.Driver, request.IpAddress, out var driver, out var errorResult))
+        {
+            return errorResult!;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TagName))
+        {
+            return BadRequest(new { message = "Tag name is required." });
+        }
+
+        var result = await driver!.WriteTagAsync(
+            request.IpAddress.Trim(),
+            request.TagName.Trim(),
+            request.Value,
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    private bool TryResolveDriverAndIp(
+        string driverName,
+        string ipAddress,
+        out IPlcDriver? driver,
+        out ActionResult? errorResult)
+    {
+        driver = null;
+        errorResult = null;
+
+        if (!_connectionService.TryResolveDriver(driverName, out driver, out var driverError))
+        {
+            errorResult = BadRequest(new { message = driverError });
+            return false;
+        }
+
+        if (!_connectionService.IsValidIpAddress(ipAddress))
+        {
+            errorResult = BadRequest(new { message = "Invalid IP address. Enter a valid IPv4 address." });
+            return false;
+        }
+
+        return true;
+    }
 }

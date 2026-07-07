@@ -6,6 +6,9 @@ namespace backend.Services.Plc;
 
 public sealed class PlcConnectionService : IPlcConnectionService
 {
+    private const string DriverErrorMessage = "Wrong driver selected. Choose AllenBradley or Siemens.";
+    private const string InvalidIpMessage = "Invalid IP address. Enter a valid IPv4 address.";
+
     private readonly IReadOnlyDictionary<string, IPlcDriver> _drivers;
 
     public PlcConnectionService(params IPlcDriver[] drivers)
@@ -15,22 +18,42 @@ public sealed class PlcConnectionService : IPlcConnectionService
 
     public async Task<PlcConnectionResult> TestConnectionAsync(PlcConnectionRequest request, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.Driver))
+        if (!TryResolveDriver(request.Driver, out var driver, out var driverError))
         {
-            return CreateFailure(request, "Wrong driver selected. Choose AllenBradley or Siemens.");
+            return CreateFailure(request, driverError ?? DriverErrorMessage);
         }
 
-        if (!_drivers.TryGetValue(request.Driver.Trim(), out var driver))
+        if (!IsValidIpAddress(request.IpAddress))
         {
-            return CreateFailure(request, "Wrong driver selected. Choose AllenBradley or Siemens.");
+            return CreateFailure(request, InvalidIpMessage);
         }
 
-        if (!IPAddress.TryParse(request.IpAddress?.Trim(), out _))
+        return await driver!.TestConnectionAsync(request.IpAddress.Trim(), cancellationToken);
+    }
+
+    public bool TryResolveDriver(string? driverName, out IPlcDriver? driver, out string? errorMessage)
+    {
+        driver = null;
+        errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(driverName))
         {
-            return CreateFailure(request, "Invalid IP address. Enter a valid IPv4 address.");
+            errorMessage = DriverErrorMessage;
+            return false;
         }
 
-        return await driver.TestConnectionAsync(request.IpAddress.Trim(), cancellationToken);
+        if (!_drivers.TryGetValue(driverName.Trim(), out driver))
+        {
+            errorMessage = DriverErrorMessage;
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool IsValidIpAddress(string? ipAddress)
+    {
+        return IPAddress.TryParse(ipAddress?.Trim(), out _);
     }
 
     private static PlcConnectionResult CreateFailure(PlcConnectionRequest request, string message)

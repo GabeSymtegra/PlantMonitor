@@ -109,6 +109,48 @@ public sealed class PlcConnectionServiceTests
 
             return Task.FromResult(result);
         }
+
+        public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(
+            string ipAddress,
+            string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>([]);
+        }
+
+        public Task<PlcTagReadResultDto> ReadTagAsync(
+            string ipAddress,
+            string tagName,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new PlcTagReadResultDto
+            {
+                Name = tagName,
+                LastReadUtc = DateTime.UtcNow,
+            });
+        }
+
+        public Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(
+            string ipAddress,
+            IReadOnlyCollection<string> tagNames,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyCollection<PlcTagReadResultDto>>([]);
+        }
+
+        public Task<PlcTagWriteResultDto> WriteTagAsync(
+            string ipAddress,
+            string tagName,
+            string value,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new PlcTagWriteResultDto
+            {
+                Name = tagName,
+                Success = true,
+                AttemptedAtUtc = DateTime.UtcNow,
+            });
+        }
     }
 }
 
@@ -193,6 +235,18 @@ public sealed class PlcConnectionApiFactory : WebApplicationFactory<Program>
                 ResponseTimeMs = 88,
                 Message = "Connected to test PLC.",
             });
+        }
+
+        public bool TryResolveDriver(string? driverName, out IPlcDriver? driver, out string? errorMessage)
+        {
+            driver = null;
+            errorMessage = "Wrong driver selected. Choose AllenBradley or Siemens.";
+            return false;
+        }
+
+        public bool IsValidIpAddress(string? ipAddress)
+        {
+            return true;
         }
     }
 }
