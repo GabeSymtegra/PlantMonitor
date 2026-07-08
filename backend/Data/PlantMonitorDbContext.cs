@@ -14,6 +14,7 @@ public sealed class PlantMonitorDbContext : DbContext
     public DbSet<PlcProtocolPresetTagEntity> PlcProtocolPresetTags => Set<PlcProtocolPresetTagEntity>();
     public DbSet<LineProtocolAssignmentEntity> LineProtocolAssignments => Set<LineProtocolAssignmentEntity>();
     public DbSet<LineTagOverrideEntity> LineTagOverrides => Set<LineTagOverrideEntity>();
+    public DbSet<LineTagCatalogEntryEntity> LineTagCatalogEntries => Set<LineTagCatalogEntryEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -63,6 +64,22 @@ public sealed class PlantMonitorDbContext : DbContext
             entity.Property(x => x.DataType).HasMaxLength(32).IsRequired();
             entity.Property(x => x.Scale).HasPrecision(18, 6);
             entity.HasIndex(x => new { x.LineId, x.TagKey }).IsUnique();
+        });
+
+        modelBuilder.Entity<LineTagCatalogEntryEntity>(entity =>
+        {
+            entity.ToTable("line_tag_catalog_entries");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.LogicalKey).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.DisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.Driver).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.PlcAddress).HasMaxLength(256).IsRequired();
+            entity.Property(x => x.DataType).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Unit).HasMaxLength(32);
+            entity.Property(x => x.Description).HasMaxLength(512);
+            entity.Property(x => x.Scale).HasPrecision(18, 6);
+            entity.HasIndex(x => new { x.LineId, x.LogicalKey }).IsUnique();
+            entity.HasIndex(x => new { x.LineId, x.PlcAddress }).IsUnique();
         });
     }
 }

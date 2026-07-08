@@ -160,4 +160,3 @@ C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\runtimes\iossimulat
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\libplctag.dll
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\libplctag.NativeImport.dll
 C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\S7.Net.dll
-C:\Users\Gabe\Desktop\PlantMonitor\backend\bin\Debug\net10.0\backend.exe
