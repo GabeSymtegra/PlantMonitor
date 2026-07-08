@@ -2,11 +2,21 @@ using backend.DTOs.Plc;
 using backend.Interfaces.Plc;
 using libplctag;
 using libplctag.DataTypes.Simple;
+using System.Text.Json;
+using TagInfo = libplctag.DataTypes.TagInfo;
 
 namespace backend.Services.Plc;
 
 public sealed class AllenBradleyPlcDriver : IPlcDriver
 {
+    private const ushort BoolTypeCode = 0x00C1;
+    private const ushort SintTypeCode = 0x00C2;
+    private const ushort IntTypeCode = 0x00C3;
+    private const ushort DintTypeCode = 0x00C4;
+    private const ushort LintTypeCode = 0x00C5;
+    private const ushort RealTypeCode = 0x00CA;
+    private const ushort LrealTypeCode = 0x00CB;
+
     private static readonly IReadOnlyList<FillerTagDefinition> FillerTags =
     [
         new("Machine", "folder", true, null, null, true),
@@ -106,61 +116,31 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
         string? search = null,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var query = FillerTags.AsEnumerable();
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            query = query.Where(tag => tag.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase));
-        }
-
-        var tags = query
-            .Select(tag => new PlcTagBrowseItemDto
-            {
-                Name = tag.Name,
-                DataType = tag.DataType,
-                IsFolder = tag.IsFolder,
-                ParentPath = tag.ParentPath,
-                CanRead = tag.IsFolder ? null : true,
-                CanWrite = tag.IsFolder ? null : tag.CanWrite,
-            })
-            .OrderBy(tag => tag.IsFolder ? 0 : 1)
-            .ThenBy(tag => tag.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>(tags);
+        return BrowseLiveTagsAsync(ipAddress, search, cancellationToken);
     }
 
-    public Task<PlcTagReadResultDto> ReadTagAsync(
+    public async Task<PlcTagReadResultDto> ReadTagAsync(
         string ipAddress,
         string tagName,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var tag = FillerTags.FirstOrDefault(x =>
-            !x.IsFolder && x.Name.Equals(tagName.Trim(), StringComparison.OrdinalIgnoreCase));
+        var discoveredTags = await DiscoverTagsAsync(ipAddress, cancellationToken);
+        var tag = discoveredTags.FirstOrDefault(x =>
+            x.Name.Equals(tagName.Trim(), StringComparison.OrdinalIgnoreCase));
 
         if (tag is null)
         {
-            return Task.FromResult(new PlcTagReadResultDto
+            return new PlcTagReadResultDto
             {
                 Name = tagName,
                 LastReadUtc = DateTime.UtcNow,
-                Error = "Tag was not found in filler mode.",
-            });
+                Error = "Tag was not found on the controller.",
+            };
         }
 
-        return Task.FromResult(new PlcTagReadResultDto
-        {
-            Name = tag.Name,
-            DataType = tag.DataType,
-            Value = tag.SampleValue,
-            LastReadUtc = DateTime.UtcNow,
-            CanRead = true,
-            CanWrite = tag.CanWrite,
-        });
+        return await ReadLiveTagAsync(ipAddress, tag, cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(
@@ -228,4 +208,364 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
         string? ParentPath,
         string? SampleValue,
         bool IsFolder);
+
+    private static async Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseLiveTagsAsync(
+        string ipAddress,
+        string? search,
+        CancellationToken cancellationToken)
+    {
+        var discoveredTags = await DiscoverTagsAsync(ipAddress, cancellationToken);
+        var searchTerm = search?.Trim();
+
+        return discoveredTags
+            .Where(tag => string.IsNullOrWhiteSpace(searchTerm)
+                || tag.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+            .Select(tag => new PlcTagBrowseItemDto
+            {
+                Name = tag.Name,
+                DataType = MapDataType(tag.Type),
+                IsFolder = false,
+                ParentPath = BuildParentPath(tag.Name),
+                CanRead = true,
+                CanWrite = false,
+            })
+            .OrderBy(tag => tag.ParentPath is null ? 0 : 1)
+            .ThenBy(tag => tag.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static async Task<TagInfo[]> DiscoverTagsAsync(string ipAddress, CancellationToken cancellationToken)
+    {
+        var probeTag = new TagTagInfo
+        {
+            Name = "@tags",
+            Gateway = ipAddress,
+            Path = "1,0",
+            PlcType = PlcType.ControlLogix,
+            Protocol = Protocol.ab_eip,
+        };
+
+        await Task.Run(() => probeTag.Initialize(), cancellationToken);
+        await Task.Run(probeTag.Read, cancellationToken);
+
+        return probeTag.Value ?? [];
+    }
+
+    private static async Task<PlcTagReadResultDto> ReadScalarTagAsync(
+        string ipAddress,
+        TagInfo tag,
+        CancellationToken cancellationToken)
+    {
+        var dataType = MapDataType(tag.Type);
+
+        try
+        {
+            var value = tag.Type switch
+            {
+                BoolTypeCode => await ReadScalarAsync(new TagBool(), ipAddress, tag.Name, cancellationToken),
+                SintTypeCode => await ReadScalarAsync(new TagSint(), ipAddress, tag.Name, cancellationToken),
+                IntTypeCode => await ReadScalarAsync(new TagInt(), ipAddress, tag.Name, cancellationToken),
+                DintTypeCode => await ReadScalarAsync(new TagDint(), ipAddress, tag.Name, cancellationToken),
+                LintTypeCode => await ReadScalarAsync(new TagLint(), ipAddress, tag.Name, cancellationToken),
+                RealTypeCode => await ReadScalarAsync(new TagReal(), ipAddress, tag.Name, cancellationToken),
+                LrealTypeCode => await ReadScalarAsync(new TagLreal(), ipAddress, tag.Name, cancellationToken),
+                _ => null,
+            };
+
+            if (value is null)
+            {
+                return new PlcTagReadResultDto
+                {
+                    Name = tag.Name,
+                    DataType = dataType,
+                    LastReadUtc = DateTime.UtcNow,
+                    CanRead = false,
+                    CanWrite = false,
+                    Error = $"Read is not currently supported for {dataType} tags in this view.",
+                };
+            }
+
+            return new PlcTagReadResultDto
+            {
+                Name = tag.Name,
+                DataType = dataType,
+                Value = value,
+                LastReadUtc = DateTime.UtcNow,
+                CanRead = true,
+                CanWrite = false,
+            };
+        }
+        catch (Exception exception)
+        {
+            return new PlcTagReadResultDto
+            {
+                Name = tag.Name,
+                DataType = dataType,
+                LastReadUtc = DateTime.UtcNow,
+                CanRead = false,
+                CanWrite = false,
+                Error = $"Unable to read tag value: {exception.Message}",
+            };
+        }
+    }
+
+    private static async Task<PlcTagReadResultDto> ReadLiveTagAsync(
+        string ipAddress,
+        TagInfo tag,
+        CancellationToken cancellationToken)
+    {
+        if (IsSupportedScalarType(tag.Type) && IsScalarTag(tag))
+        {
+            return await ReadScalarTagAsync(ipAddress, tag, cancellationToken);
+        }
+
+        return await ReadRawTagAsync(ipAddress, tag, cancellationToken);
+    }
+
+    private static async Task<PlcTagReadResultDto> ReadRawTagAsync(
+        string ipAddress,
+        TagInfo tag,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rawTag = new Tag
+            {
+                Name = tag.Name,
+                Gateway = ipAddress,
+                Path = "1,0",
+                PlcType = PlcType.ControlLogix,
+                Protocol = Protocol.ab_eip,
+            };
+
+            var size = ResolveTagByteSize(tag);
+            rawTag.SetSize(size);
+
+            await Task.Run(rawTag.Initialize, cancellationToken);
+            await Task.Run(rawTag.Read, cancellationToken);
+
+            var buffer = rawTag.GetBuffer();
+            var value = FormatRawTagValue(tag, buffer);
+
+            return new PlcTagReadResultDto
+            {
+                Name = tag.Name,
+                DataType = MapDataType(tag.Type),
+                Value = value,
+                LastReadUtc = DateTime.UtcNow,
+                CanRead = true,
+                CanWrite = false,
+            };
+        }
+        catch (Exception exception)
+        {
+            var message = exception.Message;
+
+            if (message.Contains("ErrorNotFound", StringComparison.OrdinalIgnoreCase))
+            {
+                return new PlcTagReadResultDto
+                {
+                    Name = tag.Name,
+                    DataType = MapDataType(tag.Type),
+                    Value = BuildStructuredReadDiagnosticPayload(tag),
+                    LastReadUtc = DateTime.UtcNow,
+                    CanRead = false,
+                    CanWrite = false,
+                    Error = "Direct read for this discovered symbol returned ErrorNotFound. This is usually a controller object or structured tag that requires member expansion.",
+                };
+            }
+
+            return new PlcTagReadResultDto
+            {
+                Name = tag.Name,
+                DataType = MapDataType(tag.Type),
+                Value = BuildStructuredReadDiagnosticPayload(tag),
+                LastReadUtc = DateTime.UtcNow,
+                CanRead = false,
+                CanWrite = false,
+                Error = $"Unable to read tag value: {message}",
+            };
+        }
+    }
+
+    private static async Task<string?> ReadScalarAsync<TTag>(
+        TTag tag,
+        string ipAddress,
+        string tagName,
+        CancellationToken cancellationToken)
+        where TTag : class, new()
+    {
+        var tagType = typeof(TTag);
+
+        tagType.GetProperty("Name")?.SetValue(tag, tagName);
+        tagType.GetProperty("Gateway")?.SetValue(tag, ipAddress);
+        tagType.GetProperty("Path")?.SetValue(tag, "1,0");
+        tagType.GetProperty("PlcType")?.SetValue(tag, PlcType.ControlLogix);
+        tagType.GetProperty("Protocol")?.SetValue(tag, Protocol.ab_eip);
+
+        await Task.Run(() => tagType.GetMethod("Initialize")?.Invoke(tag, null), cancellationToken);
+        await Task.Run(() => tagType.GetMethod("Read")?.Invoke(tag, null), cancellationToken);
+
+        var value = tagType.GetProperty("Value")?.GetValue(tag);
+        return value?.ToString();
+    }
+
+    private static int ResolveTagByteSize(TagInfo tag)
+    {
+        if (tag.Length > 0)
+        {
+            return tag.Length;
+        }
+
+        var elementSize = GetPrimitiveByteSize(tag.Type);
+        var elementCount = GetElementCount(tag.Dimensions);
+        return Math.Max(1, elementSize * elementCount);
+    }
+
+    private static string FormatRawTagValue(TagInfo tag, byte[] buffer)
+    {
+        if (IsSupportedScalarType(tag.Type))
+        {
+            if (IsScalarTag(tag))
+            {
+                return FormatPrimitiveScalar(tag.Type, buffer);
+            }
+
+            var arrayValues = FormatPrimitiveArray(tag.Type, buffer, GetElementCount(tag.Dimensions));
+            return JsonSerializer.Serialize(arrayValues);
+        }
+
+        var payload = new
+        {
+            kind = "raw",
+            byteLength = buffer.Length,
+            dimensions = tag.Dimensions,
+            hex = BitConverter.ToString(buffer),
+        };
+
+        return JsonSerializer.Serialize(payload);
+    }
+
+    private static string BuildStructuredReadDiagnosticPayload(TagInfo tag)
+    {
+        var payload = new
+        {
+            kind = "metadata",
+            tag = tag.Name,
+            dataType = MapDataType(tag.Type),
+            byteLength = ResolveTagByteSize(tag),
+            dimensions = tag.Dimensions,
+            note = "The symbol was discovered successfully, but this top-level address is not directly readable as a scalar value.",
+        };
+
+        return JsonSerializer.Serialize(payload);
+    }
+
+    private static string FormatPrimitiveScalar(ushort typeCode, byte[] buffer)
+    {
+        return typeCode switch
+        {
+            BoolTypeCode => (buffer[0] != 0).ToString(),
+            SintTypeCode => ((sbyte)buffer[0]).ToString(),
+            IntTypeCode => BitConverter.ToInt16(buffer, 0).ToString(),
+            DintTypeCode => BitConverter.ToInt32(buffer, 0).ToString(),
+            LintTypeCode => BitConverter.ToInt64(buffer, 0).ToString(),
+            RealTypeCode => BitConverter.ToSingle(buffer, 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            LrealTypeCode => BitConverter.ToDouble(buffer, 0).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => BitConverter.ToString(buffer),
+        };
+    }
+
+    private static object[] FormatPrimitiveArray(ushort typeCode, byte[] buffer, int elementCount)
+    {
+        var elementSize = GetPrimitiveByteSize(typeCode);
+        var values = new object[elementCount];
+
+        for (var index = 0; index < elementCount; index++)
+        {
+            var offset = index * elementSize;
+            values[index] = typeCode switch
+            {
+                BoolTypeCode => buffer[offset] != 0,
+                SintTypeCode => (sbyte)buffer[offset],
+                IntTypeCode => BitConverter.ToInt16(buffer, offset),
+                DintTypeCode => BitConverter.ToInt32(buffer, offset),
+                LintTypeCode => BitConverter.ToInt64(buffer, offset),
+                RealTypeCode => BitConverter.ToSingle(buffer, offset),
+                LrealTypeCode => BitConverter.ToDouble(buffer, offset),
+                _ => BitConverter.ToString(buffer, offset, elementSize),
+            };
+        }
+
+        return values;
+    }
+
+    private static int GetPrimitiveByteSize(ushort typeCode)
+    {
+        return typeCode switch
+        {
+            BoolTypeCode => 1,
+            SintTypeCode => 1,
+            IntTypeCode => 2,
+            DintTypeCode => 4,
+            LintTypeCode => 8,
+            RealTypeCode => 4,
+            LrealTypeCode => 8,
+            _ => 1,
+        };
+    }
+
+    private static int GetElementCount(uint[]? dimensions)
+    {
+        if (dimensions is null || dimensions.Length == 0)
+        {
+            return 1;
+        }
+
+        var count = 1;
+
+        foreach (var dimension in dimensions)
+        {
+            count *= (int)Math.Max(1, dimension);
+        }
+
+        return count;
+    }
+
+    private static string MapDataType(ushort typeCode)
+    {
+        return typeCode switch
+        {
+            BoolTypeCode => "bool",
+            SintTypeCode => "sint",
+            IntTypeCode => "int",
+            DintTypeCode => "dint",
+            LintTypeCode => "lint",
+            RealTypeCode => "real",
+            LrealTypeCode => "lreal",
+            _ => $"type-{typeCode}",
+        };
+    }
+
+    private static bool IsSupportedScalarType(ushort typeCode)
+    {
+        return typeCode is BoolTypeCode
+            or SintTypeCode
+            or IntTypeCode
+            or DintTypeCode
+            or LintTypeCode
+            or RealTypeCode
+            or LrealTypeCode;
+    }
+
+    private static bool IsScalarTag(TagInfo tag)
+    {
+        return tag.Dimensions is null || tag.Dimensions.Length == 0 || tag.Dimensions.All(dimension => dimension <= 1);
+    }
+
+    private static string? BuildParentPath(string tagName)
+    {
+        var separatorIndex = tagName.LastIndexOf('.');
+        return separatorIndex > 0 ? tagName[..separatorIndex] : null;
+    }
 }

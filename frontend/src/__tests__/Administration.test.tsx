@@ -20,8 +20,22 @@ vi.mock("../services/plcConnectionService", () => ({
   }),
 }));
 
+vi.mock("../services/plcTagBrowserService", () => ({
+  browsePlcTags: vi.fn().mockResolvedValue([]),
+  readPlcTag: vi.fn().mockResolvedValue({
+    name: "Test_Motor_val",
+    dataType: "int",
+    value: "6000",
+    lastReadUtc: "2026-07-08T17:30:18.2126248Z",
+    canRead: true,
+    canWrite: false,
+    error: null,
+  }),
+}));
+
 import Administration from "../pages/Administration";
 import { testPlcConnection } from "../services/plcConnectionService";
+import { browsePlcTags, readPlcTag } from "../services/plcTagBrowserService";
 
 describe("Administration", () => {
   beforeEach(() => {
@@ -111,5 +125,177 @@ describe("Administration", () => {
     });
 
     expect(screen.getByText(/is connected: false/i)).toBeInTheDocument();
+  });
+
+  it("keeps the tag browser hidden until tags are discovered", async () => {
+    vi.mocked(browsePlcTags).mockResolvedValueOnce([]);
+
+    render(
+      <MemoryRouter>
+        <Administration />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText(/line name/i), {
+      target: { value: "Main Extruder" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/plc ip address/i), {
+      target: { value: "192.168.100.50" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
+
+    await waitFor(() => {
+      expect(browsePlcTags).toHaveBeenCalledWith({
+        driver: "AllenBradley",
+        ipAddress: "192.168.100.50",
+      });
+    });
+
+    expect(screen.queryByText(/plc tag browser/i)).not.toBeInTheDocument();
+  });
+
+  it("reveals the tag browser and reads a selected tag after discovery", async () => {
+    vi.mocked(browsePlcTags).mockResolvedValueOnce([
+      {
+        name: "Test_Motor_val",
+        dataType: "int",
+        isFolder: false,
+        parentPath: null,
+        canRead: true,
+        canWrite: false,
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <Administration />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText(/line name/i), {
+      target: { value: "Main Extruder" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/plc ip address/i), {
+      target: { value: "192.168.100.50" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/plc tag browser/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test_motor_val/i }));
+
+    await waitFor(() => {
+      expect(readPlcTag).toHaveBeenCalledWith({
+        driver: "AllenBradley",
+        ipAddress: "192.168.100.50",
+        tagName: "Test_Motor_val",
+      });
+    });
+
+    expect(screen.getByDisplayValue("6000")).toBeInTheDocument();
+  });
+
+  it("shows Siemens fallback messaging when configured tags are returned", async () => {
+    vi.mocked(testPlcConnection).mockResolvedValueOnce({
+      isConnected: true,
+      driver: "Siemens",
+      ipAddress: "192.168.100.1",
+      controllerName: "Siemens S7-1200 / S7-1500 CPU",
+      firmware: null,
+      responseTimeMs: 61,
+      message: "Connected to Siemens PLC.",
+    });
+
+    vi.mocked(browsePlcTags).mockResolvedValueOnce([
+      {
+        name: "Machine.Status",
+        dataType: "int",
+        isFolder: false,
+        parentPath: "Machine",
+        canRead: true,
+        canWrite: false,
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <Administration />
+      </MemoryRouter>
+    );
+
+    fireEvent.mouseDown(screen.getByLabelText(/plc driver/i));
+    fireEvent.click(screen.getByRole("option", { name: "Siemens" }));
+
+    fireEvent.change(screen.getByLabelText(/line name/i), {
+      target: { value: "Secondary Line" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/plc ip address/i), {
+      target: { value: "192.168.100.1" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/showing available configured siemens tags/i)).toBeInTheDocument();
+    });
+  });
+
+  it("renders structured tag metadata and read guidance when direct value read is unavailable", async () => {
+    vi.mocked(browsePlcTags).mockResolvedValueOnce([
+      {
+        name: "Map:anlg_in",
+        dataType: "type-4201",
+        isFolder: false,
+        parentPath: null,
+        canRead: true,
+        canWrite: false,
+      },
+    ]);
+
+    vi.mocked(readPlcTag).mockResolvedValueOnce({
+      name: "Map:anlg_in",
+      dataType: "type-4201",
+      value: "{\"kind\":\"metadata\",\"tag\":\"Map:anlg_in\",\"note\":\"The symbol was discovered successfully, but this top-level address is not directly readable as a scalar value.\"}",
+      lastReadUtc: "2026-07-08T18:02:03.8786863Z",
+      canRead: false,
+      canWrite: false,
+      error: "Direct read for this discovered symbol returned ErrorNotFound. This is usually a controller object or structured tag that requires member expansion.",
+    });
+
+    render(
+      <MemoryRouter>
+        <Administration />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText(/line name/i), {
+      target: { value: "Main Extruder" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/plc ip address/i), {
+      target: { value: "192.168.100.50" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/plc tag browser/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /map:anlg_in/i }));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/"kind": "metadata"/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByDisplayValue(/metadata\/diagnostic payload returned because a direct value read was not available/i)).toBeInTheDocument();
+    expect(screen.getByText(/direct read for this discovered symbol returned errornotfound/i)).toBeInTheDocument();
   });
 });

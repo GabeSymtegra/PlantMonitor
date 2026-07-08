@@ -2,10 +2,14 @@ import {
   Alert,
   Box,
   Button,
+  CircularProgress,
   Divider,
   FormControl,
   FormControlLabel,
   InputLabel,
+  List,
+  ListItemButton,
+  ListItemText,
   MenuItem,
   Paper,
   Select,
@@ -13,7 +17,6 @@ import {
   Switch,
   TextField,
   Typography,
-  CircularProgress,
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 
@@ -26,6 +29,12 @@ import {
   testPlcConnection,
   type PlcConnectionResult,
 } from "../services/plcConnectionService";
+import {
+  browsePlcTags,
+  readPlcTag,
+  type PlcTagBrowseItem,
+  type PlcTagReadResult,
+} from "../services/plcTagBrowserService";
 import { ApiRequestError } from "../services/api/client";
 import { LineStatus } from "../types/LineStatus";
 import type { PlcManufacturer, ProductionLine } from "../types/ProductionLine";
@@ -91,6 +100,36 @@ function formatRequestError(requestError: ApiRequestError): string {
   return lines.join("\n");
 }
 
+function formatTagValueDisplay(value?: string | null): string {
+  if (!value) {
+    return "Unavailable";
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function describeTagReadability(result: PlcTagReadResult): string {
+  if (result.canRead === true) {
+    return "Direct value read succeeded.";
+  }
+
+  if (result.error) {
+    return "Metadata/diagnostic payload returned because a direct value read was not available.";
+  }
+
+  return "Direct value read was not available.";
+}
+
 export default function Administration() {
   const [lines, setLines] = useState<ProductionLine[]>([]);
   const [selectedLineId, setSelectedLineId] = useState<number | "new">("new");
@@ -99,6 +138,14 @@ export default function Administration() {
   const [success, setSuccess] = useState<string>("");
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState<PlcConnectionResult | null>(null);
+  const [browsingTags, setBrowsingTags] = useState(false);
+  const [readingTagName, setReadingTagName] = useState<string | null>(null);
+  const [tagSearch, setTagSearch] = useState("");
+  const [tagBrowserError, setTagBrowserError] = useState("");
+  const [tagBrowserStatus, setTagBrowserStatus] = useState("");
+  const [discoveredTags, setDiscoveredTags] = useState<PlcTagBrowseItem[]>([]);
+  const [selectedTag, setSelectedTag] = useState<PlcTagBrowseItem | null>(null);
+  const [selectedTagResult, setSelectedTagResult] = useState<PlcTagReadResult | null>(null);
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.isActive),
@@ -113,6 +160,21 @@ export default function Administration() {
     return lines.find((line) => line.id === selectedLineId) ?? null;
   }, [lines, selectedLineId]);
 
+  const filteredTags = useMemo(() => {
+    const search = tagSearch.trim().toLowerCase();
+
+    if (!search) {
+      return discoveredTags;
+    }
+
+    return discoveredTags.filter((tag) => {
+      const parentPath = tag.parentPath?.toLowerCase() ?? "";
+      return tag.name.toLowerCase().includes(search) || parentPath.includes(search);
+    });
+  }, [discoveredTags, tagSearch]);
+
+  const hasDiscoveredTags = discoveredTags.length > 0;
+
   useEffect(() => {
     void loadLines();
   }, []);
@@ -122,10 +184,22 @@ export default function Administration() {
     setLines(fetchedLines);
   }
 
+  function resetTagBrowser() {
+    setBrowsingTags(false);
+    setReadingTagName(null);
+    setTagSearch("");
+    setTagBrowserError("");
+    setTagBrowserStatus("");
+    setDiscoveredTags([]);
+    setSelectedTag(null);
+    setSelectedTagResult(null);
+  }
+
   function handleSelectLine(value: number | "new") {
     setSelectedLineId(value);
     setError("");
     setSuccess("");
+    resetTagBrowser();
 
     if (value === "new") {
       setForm(emptyLineForm);
@@ -155,6 +229,7 @@ export default function Administration() {
     if (key === "manufacturer" || key === "plcIp") {
       setConnectionResult(null);
       setSuccess("");
+      resetTagBrowser();
     }
 
     setForm((previous) => ({
@@ -280,6 +355,7 @@ export default function Administration() {
   async function handleTestConnection() {
     setError("");
     setSuccess("");
+    setTagBrowserError("");
     setTestingConnection(true);
 
     try {
@@ -292,7 +368,9 @@ export default function Administration() {
 
       if (result.isConnected) {
         setSuccess("PLC connection verified successfully.");
+        await discoverTags(result.driver, form.plcIp.trim());
       } else {
+        resetTagBrowser();
         setError(formatConnectionTaskTrace(result));
       }
     } catch (requestError) {
@@ -309,9 +387,83 @@ export default function Administration() {
         ipAddress: form.plcIp.trim(),
         message,
       });
+      resetTagBrowser();
       setError(message);
     } finally {
       setTestingConnection(false);
+    }
+  }
+
+  async function discoverTags(driver: PlcConnectionResult["driver"], ipAddress: string) {
+    resetTagBrowser();
+    setBrowsingTags(true);
+
+    try {
+      const tags = await browsePlcTags({
+        driver,
+        ipAddress,
+      });
+
+      if (tags.length === 0) {
+        setTagBrowserStatus(
+          driver === "Siemens"
+            ? "Siemens connection succeeded, but no configured fallback tags are available yet. Live Siemens symbol browsing will require an external symbol source."
+            : "PLC connection succeeded, but no readable/discoverable tags were returned for this controller filter."
+        );
+        return;
+      }
+
+      setDiscoveredTags(tags);
+      setTagBrowserStatus(
+        driver === "Siemens"
+          ? "Showing available configured Siemens tags. Live Siemens symbol browsing is not available from the current driver alone."
+          : `Discovered ${tags.length} controller tag${tags.length === 1 ? "" : "s"}. Select a tag to read its current value.`
+      );
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Tag discovery failed.";
+
+      setTagBrowserError(message);
+    } finally {
+      setBrowsingTags(false);
+    }
+  }
+
+  async function handleSelectTag(tag: PlcTagBrowseItem) {
+    setSelectedTag(tag);
+    setSelectedTagResult(null);
+    setReadingTagName(tag.name);
+
+    try {
+      const result = await readPlcTag({
+        driver: form.manufacturer,
+        ipAddress: form.plcIp.trim(),
+        tagName: tag.name,
+      });
+
+      setSelectedTagResult(result);
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Tag read failed.";
+
+      setSelectedTagResult({
+        name: tag.name,
+        dataType: tag.dataType,
+        lastReadUtc: new Date().toISOString(),
+        canRead: false,
+        canWrite: false,
+        error: message,
+      });
+    } finally {
+      setReadingTagName(null);
     }
   }
 
@@ -547,6 +699,163 @@ export default function Administration() {
               </Stack>
             </Stack>
           </Paper>
+
+          {browsingTags ? (
+            <Alert severity="info">
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={16} color="inherit" />
+                <Typography variant="body2">Discovering available PLC tags...</Typography>
+              </Stack>
+            </Alert>
+          ) : null}
+
+          {tagBrowserError ? (
+            <Alert severity="warning">
+              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                {tagBrowserError}
+              </Typography>
+            </Alert>
+          ) : null}
+
+          {tagBrowserStatus && !hasDiscoveredTags ? (
+            <Alert severity="info">
+              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                {tagBrowserStatus}
+              </Typography>
+            </Alert>
+          ) : null}
+
+          {hasDiscoveredTags ? (
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Stack spacing={2}>
+                <Stack
+                  direction={{ xs: "column", md: "row" }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: "flex-start", md: "center" }}
+                  spacing={2}
+                >
+                  <Stack spacing={0.5}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      PLC Tag Browser
+                    </Typography>
+                    <Typography color="text.secondary">
+                      {tagBrowserStatus}
+                    </Typography>
+                  </Stack>
+
+                  <TextField
+                    label="Search Tags"
+                    value={tagSearch}
+                    onChange={(event) => setTagSearch(event.target.value)}
+                    size="small"
+                    sx={{ minWidth: { xs: "100%", md: 260 } }}
+                  />
+                </Stack>
+
+                <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="stretch">
+                  <Paper variant="outlined" sx={{ flex: 1, minHeight: 320 }}>
+                    <List sx={{ maxHeight: 320, overflowY: "auto", p: 0 }}>
+                      {filteredTags.map((tag) => (
+                        <ListItemButton
+                          key={tag.name}
+                          selected={selectedTag?.name === tag.name}
+                          onClick={() => void handleSelectTag(tag)}
+                        >
+                          <ListItemText
+                            primary={tag.name}
+                            secondary={`${tag.dataType} | ${tag.parentPath ?? "root"}`}
+                          />
+                        </ListItemButton>
+                      ))}
+                    </List>
+
+                    {!filteredTags.length ? (
+                      <Box sx={{ p: 2 }}>
+                        <Typography color="text.secondary">
+                          No tags match the current search.
+                        </Typography>
+                      </Box>
+                    ) : null}
+                  </Paper>
+
+                  <Paper variant="outlined" sx={{ flex: 1, p: 2, minHeight: 320 }}>
+                    <Stack spacing={1.5}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                        Tag Details
+                      </Typography>
+
+                      {!selectedTag ? (
+                        <Typography color="text.secondary">
+                          Select a tag to read its current value.
+                        </Typography>
+                      ) : null}
+
+                      {selectedTag && readingTagName === selectedTag.name ? (
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <CircularProgress size={16} />
+                          <Typography color="text.secondary">
+                            Reading {selectedTag.name}...
+                          </Typography>
+                        </Stack>
+                      ) : null}
+
+                      {selectedTagResult ? (
+                        <>
+                          <TextField label="Tag Name" value={selectedTagResult.name} fullWidth disabled />
+                          <TextField label="Data Type" value={selectedTagResult.dataType} fullWidth disabled />
+                          <TextField
+                            label="Parent Path"
+                            value={selectedTag?.parentPath ?? "root"}
+                            fullWidth
+                            disabled
+                          />
+                          <TextField
+                            label="Value / Payload"
+                            value={formatTagValueDisplay(selectedTagResult.value)}
+                            fullWidth
+                            disabled
+                            multiline
+                            minRows={6}
+                            InputProps={{
+                              sx: {
+                                alignItems: "flex-start",
+                                fontFamily: "Consolas, 'Courier New', monospace",
+                              },
+                            }}
+                          />
+                          <TextField
+                            label="Last Read Time (UTC)"
+                            value={selectedTagResult.lastReadUtc}
+                            fullWidth
+                            disabled
+                          />
+                          <TextField
+                            label="Readable"
+                            value={String(selectedTagResult.canRead ?? false)}
+                            fullWidth
+                            disabled
+                          />
+                          <TextField
+                            label="Read Status"
+                            value={describeTagReadability(selectedTagResult)}
+                            fullWidth
+                            disabled
+                          />
+                          {selectedTagResult.error ? (
+                            <Alert severity="info">
+                              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                                {selectedTagResult.error}
+                              </Typography>
+                            </Alert>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </Stack>
+                  </Paper>
+                </Stack>
+              </Stack>
+            </Paper>
+          ) : null}
 
           <FormControlLabel
             control={
