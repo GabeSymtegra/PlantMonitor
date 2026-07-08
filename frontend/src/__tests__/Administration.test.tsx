@@ -28,6 +28,16 @@ describe("Administration", () => {
     vi.clearAllMocks();
   });
 
+  it("defaults product serial for a new line", async () => {
+    render(
+      <MemoryRouter>
+        <Administration />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByLabelText(/product serial/i)).toHaveValue("000-000-00-0");
+  });
+
   it("enables Save Line only after a successful PLC connection test", async () => {
     render(
       <MemoryRouter>
@@ -67,5 +77,39 @@ describe("Administration", () => {
     });
 
     expect(screen.getByRole("button", { name: /add line/i })).toBeEnabled();
+  });
+
+  it("shows isConnected in the frontend error trace when plc test fails", async () => {
+    vi.mocked(testPlcConnection).mockResolvedValueOnce({
+      isConnected: false,
+      driver: "AllenBradley",
+      ipAddress: "192.168.100.50",
+      controllerName: "CompactLogix / ControlLogix controller",
+      firmware: null,
+      responseTimeMs: 121,
+      message: "Connected transport, but browse handshake failed.",
+    });
+
+    render(
+      <MemoryRouter>
+        <Administration />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText(/line name/i), {
+      target: { value: "Main Extruder" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/plc ip address/i), {
+      target: { value: "192.168.100.50" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/task 4 result: isconnected = false/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/is connected: false/i)).toBeInTheDocument();
   });
 });

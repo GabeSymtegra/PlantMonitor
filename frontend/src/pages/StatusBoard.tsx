@@ -44,11 +44,9 @@ export default function StatusBoard() {
       })
     : "--:--:--";
 
-  const lines = dashboard?.lines ?? [];
-
   const sortedLines = useMemo(
-    () => [...lines].sort((a, b) => a.lineNumber - b.lineNumber),
-    [lines]
+    () => [...(dashboard?.lines ?? [])].sort((a, b) => a.lineNumber - b.lineNumber),
+    [dashboard?.lines]
   );
 
   return (

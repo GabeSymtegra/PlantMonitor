@@ -23,15 +23,15 @@ export default function Lines() {
     ? (requestedStatus as LineStatus)
     : null;
 
-  const lines = dashboard?.lines ?? [];
-
   const visibleLines = useMemo(() => {
+    const lines = dashboard?.lines ?? [];
+
     if (!statusFilter) {
       return lines;
     }
 
     return lines.filter((line) => line.status === statusFilter);
-  }, [lines, statusFilter]);
+  }, [dashboard?.lines, statusFilter]);
 
   function handleSetStatus(status: LineStatus | null) {
     if (!status) {

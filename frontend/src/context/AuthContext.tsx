@@ -1,7 +1,12 @@
-import { createContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { User } from "../models/User";
-import { ApiRequestError, apiPost } from "../services/api/client";
+import {
+  AUTH_EXPIRED_EVENT,
+  ApiRequestError,
+  apiPost,
+  setApiAccessToken,
+} from "../services/api/client";
 
 interface LoginResponse {
   accessToken: string;
@@ -43,6 +48,7 @@ function readStoredUser(): User | null {
     return JSON.parse(serialized) as User;
   } catch {
     localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_USER_STORAGE_KEY);
     return null;
   }
 }
@@ -54,12 +60,38 @@ function readStoredToken(): string | null {
   );
 }
 
+function clearStoredAuth() {
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  sessionStorage.removeItem(SESSION_USER_STORAGE_KEY);
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => readStoredUser());
   const [accessToken, setAccessToken] = useState<string | null>(() =>
     readStoredToken()
   );
   const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setApiAccessToken(accessToken);
+  }, [accessToken]);
+
+  useEffect(() => {
+    function handleAuthExpired() {
+      setUser(null);
+      setAccessToken(null);
+      setAuthError("Your session expired. Sign in again.");
+      clearStoredAuth();
+    }
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+
+    return () => {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    };
+  }, []);
 
   async function login(
     username: string,
@@ -121,10 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthError("Login failed. Please try again.");
       }
 
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      sessionStorage.removeItem(SESSION_USER_STORAGE_KEY);
-      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      clearStoredAuth();
       return false;
     }
   }
@@ -133,10 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setAccessToken(null);
     setAuthError(null);
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-    sessionStorage.removeItem(SESSION_USER_STORAGE_KEY);
-    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    clearStoredAuth();
   }
 
   const value = useMemo(

@@ -42,7 +42,7 @@ type LineConfigForm = {
 const emptyLineForm: LineConfigForm = {
   lineNumber: 1,
   lineName: "",
-  product: "",
+  product: "000-000-00-0",
   plcIp: "",
   manufacturer: "AllenBradley",
   isActive: true,
@@ -59,6 +59,36 @@ function isValidIpv4Address(value: string): boolean {
 
 function formatLineTitle(line: ProductionLine) {
   return `Line ${line.lineNumber} - ${line.lineName}`;
+}
+
+function formatConnectionTaskTrace(result: PlcConnectionResult): string {
+  const lines = [
+    `Task 1 complete: prepared ${result.driver} PLC connection test`,
+    `Task 2 complete: sent connection request for ${result.ipAddress}`,
+    `Task 3 complete: received PLC response`,
+    `Task 4 result: isConnected = ${String(result.isConnected)}`,
+    `Task 5 detail: ${result.message}`,
+  ];
+
+  if (result.controllerName) {
+    lines.push(`Task 6 detail: controller = ${result.controllerName}`);
+  }
+
+  if (typeof result.responseTimeMs === "number") {
+    lines.push(`Task 7 detail: responseTimeMs = ${result.responseTimeMs}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatRequestError(requestError: ApiRequestError): string {
+  const lines = [requestError.message];
+
+  if (requestError.responseBody) {
+    lines.push(`Response body: ${requestError.responseBody}`);
+  }
+
+  return lines.join("\n");
 }
 
 export default function Administration() {
@@ -263,12 +293,12 @@ export default function Administration() {
       if (result.isConnected) {
         setSuccess("PLC connection verified successfully.");
       } else {
-        setError(result.message);
+        setError(formatConnectionTaskTrace(result));
       }
     } catch (requestError) {
       const message =
         requestError instanceof ApiRequestError
-          ? requestError.message
+          ? formatRequestError(requestError)
           : requestError instanceof Error
             ? requestError.message
             : "PLC connection test failed.";
@@ -475,6 +505,9 @@ export default function Administration() {
                   <Stack spacing={0.5}>
                     <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
                       {connectionResult.message}
+                    </Typography>
+                    <Typography variant="body2">
+                      Is Connected: {String(connectionResult.isConnected)}
                     </Typography>
                     <Typography variant="body2">
                       Driver: {connectionResult.driver} | IP: {connectionResult.ipAddress}

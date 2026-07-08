@@ -2,6 +2,11 @@ const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
   "http://localhost:5265/api";
 
+const TOKEN_STORAGE_KEY = "plantmonitor-auth-token";
+export const AUTH_EXPIRED_EVENT = "plantmonitor-auth-expired";
+
+let currentAccessToken: string | null = null;
+
 export class ApiRequestError extends Error {
   public readonly method: string;
   public readonly url: string;
@@ -28,6 +33,10 @@ function buildUrl(endpoint: string): string {
   return `${API_BASE}${endpoint}`;
 }
 
+export function setApiAccessToken(token: string | null) {
+  currentAccessToken = token;
+}
+
 function buildRequestTrace(
   method: string,
   url: string,
@@ -45,8 +54,9 @@ function buildRequestTrace(
 
 function getAuthHeaders(): HeadersInit {
   const token =
-    localStorage.getItem("plantmonitor-auth-token") ??
-    sessionStorage.getItem("plantmonitor-auth-token");
+    currentAccessToken ??
+    localStorage.getItem(TOKEN_STORAGE_KEY) ??
+    sessionStorage.getItem(TOKEN_STORAGE_KEY);
 
   if (!token) {
     return {};
@@ -55,6 +65,18 @@ function getAuthHeaders(): HeadersInit {
   return {
     Authorization: `Bearer ${token}`,
   };
+}
+
+function dispatchAuthExpiredIfNeeded(url: string, status: number) {
+  if (status !== 401 || url.endsWith("/auth/login")) {
+    return;
+  }
+
+  currentAccessToken = null;
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+  }
 }
 
 async function handleResponse<T>(
@@ -66,6 +88,9 @@ async function handleResponse<T>(
     const errorText = await response.text();
     const statusText = response.statusText || "Request failed";
     const responseDetails = errorText || statusText;
+
+    dispatchAuthExpiredIfNeeded(url, response.status);
+
     throw new ApiRequestError({
       method,
       url,
