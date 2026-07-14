@@ -19,6 +19,8 @@ import { LineStatus } from "../types/LineStatus";
 const statusColorMap: Record<LineStatus, string> = {
   [LineStatus.Running]: "#2E7D32",
   [LineStatus.Stopped]: "#ED6C02",
+  [LineStatus.Bleedout]: "#0F766E",
+  [LineStatus.Startup]: "#7C3AED",
   [LineStatus.Faulted]: "#D32F2F",
   [LineStatus.Offline]: "#616161",
   [LineStatus.Maintenance]: "#1565C0",

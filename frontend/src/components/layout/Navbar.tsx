@@ -24,6 +24,8 @@ import { LineStatus } from "../../types/LineStatus";
 const statusColors: Record<LineStatus, string> = {
   [LineStatus.Running]: "#2E7D32",
   [LineStatus.Stopped]: "#ED6C02",
+  [LineStatus.Bleedout]: "#0F766E",
+  [LineStatus.Startup]: "#7C3AED",
   [LineStatus.Faulted]: "#D32F2F",
   [LineStatus.Offline]: "#616161",
   [LineStatus.Maintenance]: "#1565C0",
@@ -32,6 +34,8 @@ const statusColors: Record<LineStatus, string> = {
 const statusOrder: LineStatus[] = [
   LineStatus.Running,
   LineStatus.Stopped,
+  LineStatus.Bleedout,
+  LineStatus.Startup,
   LineStatus.Faulted,
   LineStatus.Offline,
   LineStatus.Maintenance,
@@ -97,6 +101,8 @@ export default function Navbar() {
     {
       [LineStatus.Running]: 0,
       [LineStatus.Stopped]: 0,
+      [LineStatus.Bleedout]: 0,
+      [LineStatus.Startup]: 0,
       [LineStatus.Faulted]: 0,
       [LineStatus.Offline]: 0,
       [LineStatus.Maintenance]: 0,

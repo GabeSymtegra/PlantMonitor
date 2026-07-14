@@ -103,6 +103,10 @@ function toLineStatus(value: string): LineStatus {
       return LineStatus.Running;
     case LineStatus.Stopped:
       return LineStatus.Stopped;
+    case LineStatus.Bleedout:
+      return LineStatus.Bleedout;
+    case LineStatus.Startup:
+      return LineStatus.Startup;
     case LineStatus.Faulted:
       return LineStatus.Faulted;
     case LineStatus.Maintenance:

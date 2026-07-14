@@ -304,6 +304,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
         lock (_gate)
         {
+            state.LastKnownControlMode = controlMode;
             state.LastTickUtc = now;
             state.ProductionLength = productionLength;
         }
@@ -399,6 +400,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         var phase = (now - state.Metadata.StartTimeUtc).TotalSeconds / 30d + state.LineId;
 
         var mode = Math.Sin(phase * 0.31) > -0.2 ? ControlMode.Auto : ControlMode.Manual;
+        state.LastKnownControlMode = mode;
         var isStopped = Math.Sin(phase * 0.17) < -0.92;
         state.Status = isStopped ? "Stopped" : "Running";
 
@@ -592,20 +594,8 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
 
         var normalized = rawState.Trim().ToLowerInvariant();
-        if (normalized.Contains("fault", StringComparison.OrdinalIgnoreCase) || normalized == "3")
-        {
-            state = "Faulted";
-            return true;
-        }
-
-        // PLC state conventions: 0=Stopped, 1=Running, 2=Bleedout.
-        if (normalized == "2" || normalized.Contains("bleedout", StringComparison.OrdinalIgnoreCase))
-        {
-            state = "Maintenance";
-            return true;
-        }
-
-        if (normalized.Contains("stop", StringComparison.OrdinalIgnoreCase) || normalized == "0")
+        // PLC state conventions: 0=Stopped, 1=Running, 2=Bleedout, 3=Startup, 4=Faulted, 5=Maintenance.
+        if (normalized == "0" || normalized.Contains("stop", StringComparison.OrdinalIgnoreCase))
         {
             state = "Stopped";
             return true;
@@ -614,6 +604,30 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         if (normalized == "1" || normalized.Contains("run", StringComparison.OrdinalIgnoreCase))
         {
             state = "Running";
+            return true;
+        }
+
+        if (normalized == "2" || normalized.Contains("bleedout", StringComparison.OrdinalIgnoreCase))
+        {
+            state = "Bleedout";
+            return true;
+        }
+
+        if (normalized == "3" || normalized.Contains("startup", StringComparison.OrdinalIgnoreCase))
+        {
+            state = "Startup";
+            return true;
+        }
+
+        if (normalized == "4" || normalized.Contains("fault", StringComparison.OrdinalIgnoreCase))
+        {
+            state = "Faulted";
+            return true;
+        }
+
+        if (normalized == "5" || normalized.Contains("maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            state = "Maintenance";
             return true;
         }
 
@@ -688,7 +702,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         {
             Metadata = state.Metadata,
             LastUpdateUtc = lastUpdateUtc,
-            CurrentMode = ControlMode.Manual,
+            CurrentMode = state.LastKnownControlMode,
             CurrentProductionLength = state.ProductionLength,
             AutoTimeSeconds = 0d,
             ManualTimeSeconds = 0d,
@@ -876,6 +890,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         public ProductionStatisticsEngine Engine { get; }
         public DateTime LastTickUtc { get; set; }
         public double ProductionLength { get; set; }
+        public ControlMode LastKnownControlMode { get; set; } = ControlMode.Manual;
         public bool HasPersistedCurrentStop { get; set; }
 
         public LineRuntimeState(
