@@ -219,6 +219,15 @@ app.MapGet("/api/production-runs", async (
     return Results.Ok(rows);
 }).RequireAuthorization();
 
+app.MapGet("/api/reports/events", async (
+    [AsParameters] RuntimeEventsQuery query,
+    IProductionRuntimeService runtimeService,
+    CancellationToken cancellationToken) =>
+{
+    var rows = await runtimeService.GetRuntimeEventsAsync(query.LineId, query.Take, cancellationToken);
+    return Results.Ok(rows);
+}).RequireAuthorization();
+
 app.MapGet("/api/recipe-tolerances", (
     [AsParameters] RecipeToleranceQuery query,
     IRecipeToleranceService toleranceService) =>
@@ -372,6 +381,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS IX_completed_production_run_zone_stats_RunId_Z
     ON completed_production_run_zone_stats (RunId, Zone, Segment);
 ");
     }
+
+    if (!HasSqliteTable(dbContext, "runtime_events"))
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+CREATE TABLE IF NOT EXISTS runtime_events (
+    Id TEXT NOT NULL PRIMARY KEY,
+    LineId INTEGER NOT NULL,
+    LineNumber INTEGER NOT NULL,
+    LineName TEXT NOT NULL,
+    EventType TEXT NOT NULL,
+    PreviousValue TEXT NOT NULL,
+    CurrentValue TEXT NOT NULL,
+    OccurredAtUtc TEXT NOT NULL,
+    CreatedAtUtc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS IX_runtime_events_LineId
+    ON runtime_events (LineId);
+CREATE INDEX IF NOT EXISTS IX_runtime_events_OccurredAtUtc
+    ON runtime_events (OccurredAtUtc);
+");
+    }
 }
 
 static void EnsureSqliteColumn(PlantMonitorDbContext dbContext, string tableName, string columnName, string columnDefinition)
@@ -436,4 +466,10 @@ public sealed class RecipeToleranceQuery
 {
     public string? RecipeId { get; init; }
     public string? ProductId { get; init; }
+}
+
+public sealed class RuntimeEventsQuery
+{
+    public int? LineId { get; init; }
+    public int Take { get; init; } = 100;
 }

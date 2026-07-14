@@ -71,7 +71,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             }
 
             var snapshot = GetSnapshotOrFallback(state);
-            var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - state.Metadata.StartTimeUtc).TotalSeconds);
+            var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - state.StatusEnteredUtc).TotalSeconds);
 
             var sensors = Enum.GetValues<MeasurementZone>()
                 .Select(zone =>
@@ -191,6 +191,43 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }).ToList();
     }
 
+    public async Task<IReadOnlyCollection<RuntimeEventDto>> GetRuntimeEventsAsync(
+        int? lineId,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 1000);
+
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+
+        var query = dbContext.RuntimeEvents
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (lineId.HasValue)
+        {
+            query = query.Where(x => x.LineId == lineId.Value);
+        }
+
+        var rows = await query
+            .OrderByDescending(x => x.OccurredAtUtc)
+            .Take(normalizedTake)
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(x => new RuntimeEventDto
+        {
+            Id = x.Id,
+            LineId = x.LineId,
+            LineNumber = x.LineNumber,
+            LineName = x.LineName,
+            EventType = x.EventType,
+            PreviousValue = x.PreviousValue,
+            CurrentValue = x.CurrentValue,
+            OccurredAtUtc = x.OccurredAtUtc,
+        }).ToList();
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
@@ -298,15 +335,35 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             state.CurrentProductId = product.Trim();
         }
 
-        state.Status = TryResolveMachineState(catalogMap, readMap, out var machineStatus)
+        var nextStatus = TryResolveMachineState(catalogMap, readMap, out var machineStatus)
             ? machineStatus
             : "Running";
 
+        string previousStatus;
+        string currentStatus;
+        ControlMode previousMode;
+        ControlMode currentMode;
+
         lock (_gate)
         {
+            previousStatus = state.Status;
+            previousMode = state.LastKnownControlMode;
+            UpdateStatus(state, nextStatus, now);
             state.LastKnownControlMode = controlMode;
             state.LastTickUtc = now;
             state.ProductionLength = productionLength;
+            currentStatus = state.Status;
+            currentMode = state.LastKnownControlMode;
+        }
+
+        if (!string.Equals(previousStatus, currentStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            await PersistRuntimeEventAsync(state, "StatusSwitch", previousStatus, currentStatus, now, cancellationToken);
+        }
+
+        if (previousMode != currentMode)
+        {
+            await PersistRuntimeEventAsync(state, "ModeSwitch", previousMode.ToString(), currentMode.ToString(), now, cancellationToken);
         }
 
         if (IsStopState(state.Status))
@@ -358,6 +415,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             state.HasPersistedCurrentStop = false;
             state.Engine.StartRun(nextMetadata);
             state.LastTickUtc = now;
+            state.StatusEnteredUtc = now;
         }
     }
 
@@ -402,7 +460,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         var mode = Math.Sin(phase * 0.31) > -0.2 ? ControlMode.Auto : ControlMode.Manual;
         state.LastKnownControlMode = mode;
         var isStopped = Math.Sin(phase * 0.17) < -0.92;
-        state.Status = isStopped ? "Stopped" : "Running";
+        UpdateStatus(state, isStopped ? "Stopped" : "Running", now);
 
         if (isStopped)
         {
@@ -652,7 +710,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
     private static DashboardLineDto ToDashboardLine(LineRuntimeState state)
     {
         var snapshot = GetSnapshotOrFallback(state);
-        var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - state.Metadata.StartTimeUtc).TotalSeconds);
+        var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - state.StatusEnteredUtc).TotalSeconds);
         var autoModeVariance = CalculateWeightedVariance(snapshot.AutoQuality.Zones.Values);
         var manualModeVariance = CalculateWeightedVariance(snapshot.ManualQuality.Zones.Values);
         var totalVariance = CalculateWeightedVariance(snapshot.OverallZones.Values);
@@ -827,6 +885,51 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
     }
 
+    private async Task PersistRuntimeEventAsync(
+        LineRuntimeState state,
+        string eventType,
+        string previousValue,
+        string currentValue,
+        DateTime occurredAtUtc,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(previousValue, currentValue, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+
+            dbContext.RuntimeEvents.Add(new RuntimeEventEntity
+            {
+                Id = Guid.NewGuid(),
+                LineId = state.LineId,
+                LineNumber = state.LineNumber,
+                LineName = state.LineName,
+                EventType = eventType,
+                PreviousValue = previousValue,
+                CurrentValue = currentValue,
+                OccurredAtUtc = occurredAtUtc,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to persist runtime event for line {LineId}. Type={EventType} {Previous}->{Current}",
+                state.LineId,
+                eventType,
+                previousValue,
+                currentValue);
+        }
+    }
+
     private static List<CompletedProductionRunZoneStatEntity> BuildZoneStats(ProductionStatisticsSnapshot snapshot)
     {
         var rows = new List<CompletedProductionRunZoneStatEntity>();
@@ -866,6 +969,16 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             || status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static void UpdateStatus(LineRuntimeState state, string nextStatus, DateTime now)
+    {
+        if (!string.Equals(state.Status, nextStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            state.StatusEnteredUtc = now;
+        }
+
+        state.Status = nextStatus;
+    }
+
     private static string ZoneToLabel(MeasurementZone zone)
     {
         return zone switch
@@ -889,6 +1002,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         public string CurrentProductId { get; set; }
         public ProductionStatisticsEngine Engine { get; }
         public DateTime LastTickUtc { get; set; }
+        public DateTime StatusEnteredUtc { get; set; }
         public double ProductionLength { get; set; }
         public ControlMode LastKnownControlMode { get; set; } = ControlMode.Manual;
         public bool HasPersistedCurrentStop { get; set; }
@@ -912,6 +1026,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             Engine = new ProductionStatisticsEngine();
             Engine.StartRun(metadata);
             LastTickUtc = metadata.StartTimeUtc;
+            StatusEnteredUtc = metadata.StartTimeUtc;
         }
     }
 }

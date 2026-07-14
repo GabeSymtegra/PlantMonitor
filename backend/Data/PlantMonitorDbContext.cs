@@ -19,6 +19,7 @@ public sealed class PlantMonitorDbContext : DbContext
     public DbSet<RecipeToleranceEntity> RecipeTolerances => Set<RecipeToleranceEntity>();
     public DbSet<CompletedProductionRunEntity> CompletedProductionRuns => Set<CompletedProductionRunEntity>();
     public DbSet<CompletedProductionRunZoneStatEntity> CompletedProductionRunZoneStats => Set<CompletedProductionRunZoneStatEntity>();
+    public DbSet<RuntimeEventEntity> RuntimeEvents => Set<RuntimeEventEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -132,6 +133,18 @@ public sealed class PlantMonitorDbContext : DbContext
             entity.Property(x => x.Zone).HasMaxLength(32).IsRequired();
             entity.Property(x => x.Segment).HasMaxLength(16).IsRequired();
             entity.HasIndex(x => new { x.RunId, x.Zone, x.Segment }).IsUnique();
+        });
+
+        modelBuilder.Entity<RuntimeEventEntity>(entity =>
+        {
+            entity.ToTable("runtime_events");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.LineName).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.EventType).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.PreviousValue).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.CurrentValue).HasMaxLength(64).IsRequired();
+            entity.HasIndex(x => x.LineId);
+            entity.HasIndex(x => x.OccurredAtUtc);
         });
     }
 }

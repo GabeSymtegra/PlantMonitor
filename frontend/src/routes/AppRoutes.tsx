@@ -11,6 +11,7 @@ const LineDetails = lazy(() => import("../pages/LineDetails"));
 const Settings = lazy(() => import("../pages/Settings"));
 const StatusBoard = lazy(() => import("../pages/StatusBoard"));
 const Forbidden = lazy(() => import("../pages/Forbidden"));
+const Reports = lazy(() => import("../pages/Reports"));
 import ProtectedRoute from "./ProtectedRoute";
 
 function PagePlaceholder({ title }: { title: string }) {
@@ -47,7 +48,7 @@ export default function AppRoutes() {
 
                         <Route
                             path="/reports"
-                            element={<PagePlaceholder title="Reports" />}
+                            element={<Reports />}
                         />
 
                         <Route element={<ProtectedRoute requiredRoles={["Admin"]} />}>
