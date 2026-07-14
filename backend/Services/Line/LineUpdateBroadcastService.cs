@@ -27,7 +27,7 @@ public class LineUpdateBroadcastService : BackgroundService
                     "SnapshotRefreshRequired",
                     new
                     {
-                        reason = "mock-tick",
+                        reason = "runtime-stats-tick",
                         timestampUtc = DateTime.UtcNow,
                     },
                     stoppingToken);

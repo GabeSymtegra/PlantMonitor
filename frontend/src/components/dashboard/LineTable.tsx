@@ -20,23 +20,22 @@ function formatDateTime(value: string): string {
   return parsed.toLocaleString();
 }
 
+function formatNumberOrUnknown(value: unknown, decimals = 2): string {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue.toFixed(decimals) : "??";
+}
+
+function formatPercentOrUnknown(value: unknown, decimals = 1): string {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? `${numberValue.toFixed(decimals)}%` : "??";
+}
+
 const baseColumns: GridColDef[] = [
-  {
-    field: "lineNumber",
-    headerName: "Line #",
-    width: 85,
-  },
   {
     field: "lineName",
     headerName: "Line Name",
     minWidth: 165,
     width: 185,
-  },
-  {
-    field: "product",
-    headerName: "Product Serial",
-    minWidth: 160,
-    width: 180,
   },
   {
     field: "startDateTime",
@@ -55,14 +54,17 @@ const baseColumns: GridColDef[] = [
   },
   {
     field: "timeInStatus",
-    headerName: "Time",
-    width: 130,
+    headerName: "Time in Status",
+    width: 140,
   },
   {
     field: "totalLength",
-    headerName: "Total Length",
-    width: 125,
-    valueFormatter: (value) => `${Number(value ?? 0).toLocaleString()} ft`,
+    headerName: "Total Length in Status",
+    width: 180,
+    valueFormatter: (value) => {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? `${numberValue.toLocaleString()} ft` : "??";
+    },
   },
   {
     field: "controlMode",
@@ -71,33 +73,33 @@ const baseColumns: GridColDef[] = [
   },
   {
     field: "percentAutoMode",
-    headerName: "%Auto Mode",
+    headerName: "% Auto",
     width: 115,
-    valueFormatter: (value) => `${Number(value ?? 0).toFixed(1)}%`,
+    valueFormatter: (value) => formatPercentOrUnknown(value, 1),
   },
   {
     field: "autoVariance",
-    headerName: "Auto Variance",
-    width: 120,
-    valueFormatter: (value) => Number(value ?? 0).toFixed(2),
+    headerName: "Var in Auto Mode",
+    width: 145,
+    valueFormatter: (value) => formatNumberOrUnknown(value, 2),
   },
   {
     field: "percentManualMode",
-    headerName: "%Man Mode",
+    headerName: "% Manual",
     width: 115,
-    valueFormatter: (value) => `${Number(value ?? 0).toFixed(1)}%`,
+    valueFormatter: (value) => formatPercentOrUnknown(value, 1),
   },
   {
     field: "manualVariance",
-    headerName: "Man Variance",
-    width: 120,
-    valueFormatter: (value) => Number(value ?? 0).toFixed(2),
+    headerName: "% Manual Varience",
+    width: 140,
+    valueFormatter: (value) => formatNumberOrUnknown(value, 2),
   },
   {
     field: "totalVariance",
-    headerName: "Total Variance",
+    headerName: "Total Varience",
     width: 125,
-    valueFormatter: (value) => Number(value ?? 0).toFixed(2),
+    valueFormatter: (value) => formatNumberOrUnknown(value, 2),
   },
 ];
 

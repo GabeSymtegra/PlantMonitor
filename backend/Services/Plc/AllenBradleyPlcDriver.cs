@@ -46,9 +46,28 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
             };
 
             await Task.Run(() => probeTag.Initialize(), cancellationToken);
-            await Task.Run(probeTag.Read, cancellationToken);
+            var discoveredTags = 0;
 
-            var discoveredTags = probeTag.Value?.Length ?? 0;
+            try
+            {
+                await Task.Run(probeTag.Read, cancellationToken);
+                discoveredTags = probeTag.Value?.Length ?? 0;
+            }
+            catch (Exception discoveryException) when (IsDiscoveryUnsupported(discoveryException))
+            {
+                stopwatch.Stop();
+
+                return new PlcConnectionResult
+                {
+                    IsConnected = true,
+                    Driver = DriverName,
+                    IpAddress = ipAddress,
+                    ControllerName = "CompactLogix / ControlLogix controller",
+                    Firmware = null,
+                    ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds,
+                    Message = "Connected to Allen-Bradley PLC. Tag discovery is limited on this controller.",
+                };
+            }
 
             stopwatch.Stop();
 
@@ -109,6 +128,15 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
         }
 
         return $"Communication exception while connecting to PLC: {exception.Message}";
+    }
+
+    private static bool IsDiscoveryUnsupported(Exception exception)
+    {
+        var message = exception.Message.ToLowerInvariant();
+        return message.Contains("not found")
+            || message.Contains("errornotfound")
+            || message.Contains("tag discovery")
+            || message.Contains("discovery");
     }
 
     public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(

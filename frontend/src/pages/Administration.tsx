@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   addLine,
+  deleteLine,
   getAllLines,
   updateLine,
 } from "../services/dashboardService";
@@ -30,10 +31,16 @@ import {
   type PlcConnectionResult,
 } from "../services/plcConnectionService";
 import {
+  autoMapTagCatalog,
   browsePlcTags,
+  getLineTagCatalog,
+  getTagSlots,
   readPlcTag,
+  replaceLineTagCatalog,
+  type LineTagCatalogEntry,
   type PlcTagBrowseItem,
   type PlcTagReadResult,
+  type TagSlotDefinition,
 } from "../services/plcTagBrowserService";
 import { ApiRequestError } from "../services/api/client";
 import { LineStatus } from "../types/LineStatus";
@@ -67,7 +74,7 @@ function isValidIpv4Address(value: string): boolean {
 }
 
 function formatLineTitle(line: ProductionLine) {
-  return `Line ${line.lineNumber} - ${line.lineName}`;
+  return `${line.lineName} - ${line.product}`;
 }
 
 function formatConnectionTaskTrace(result: PlcConnectionResult): string {
@@ -146,6 +153,12 @@ export default function Administration() {
   const [discoveredTags, setDiscoveredTags] = useState<PlcTagBrowseItem[]>([]);
   const [selectedTag, setSelectedTag] = useState<PlcTagBrowseItem | null>(null);
   const [selectedTagResult, setSelectedTagResult] = useState<PlcTagReadResult | null>(null);
+  const [tagSlots, setTagSlots] = useState<TagSlotDefinition[]>([]);
+  const [tagCatalog, setTagCatalog] = useState<LineTagCatalogEntry[]>([]);
+  const [loadingTagCatalog, setLoadingTagCatalog] = useState(false);
+  const [savingTagCatalog, setSavingTagCatalog] = useState(false);
+  const [autoMapping, setAutoMapping] = useState(false);
+  const [mappingStatus, setMappingStatus] = useState("");
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.isActive),
@@ -177,11 +190,63 @@ export default function Administration() {
 
   useEffect(() => {
     void loadLines();
+    void loadTagSlots();
   }, []);
+
+  useEffect(() => {
+    if (selectedLineId === "new") {
+      setTagCatalog([]);
+      return;
+    }
+
+    void loadLineTagCatalog(selectedLineId);
+  }, [selectedLineId]);
 
   async function loadLines() {
     const fetchedLines = await getAllLines();
     setLines(fetchedLines);
+  }
+
+  async function loadTagSlots() {
+    try {
+      const slots = await getTagSlots();
+      setTagSlots(slots);
+    } catch {
+      setTagSlots([]);
+    }
+  }
+
+  function buildCatalogFromSlots(slots: TagSlotDefinition[], existing?: LineTagCatalogEntry[]) {
+    return slots.map((slot, index) => {
+      const matched = existing?.find((entry) => entry.logicalKey === slot.logicalKey);
+      return {
+        logicalKey: slot.logicalKey,
+        displayName: slot.displayName,
+        driver: form.manufacturer,
+        plcAddress: matched?.plcAddress ?? "",
+        dataType: matched?.dataType ?? "real",
+        unit: matched?.unit ?? null,
+        scale: matched?.scale ?? 1,
+        description: slot.description ?? matched?.description ?? null,
+        isEnabled: matched?.isEnabled ?? true,
+        sortOrder: matched?.sortOrder ?? index,
+        readFrequencyMs: matched?.readFrequencyMs ?? 1000,
+        isRequired: slot.isRequired,
+      } satisfies LineTagCatalogEntry;
+    });
+  }
+
+  async function loadLineTagCatalog(lineId: number) {
+    setLoadingTagCatalog(true);
+    setMappingStatus("");
+    try {
+      const existing = await getLineTagCatalog(lineId);
+      setTagCatalog(buildCatalogFromSlots(tagSlots, existing));
+    } catch {
+      setTagCatalog(buildCatalogFromSlots(tagSlots));
+    } finally {
+      setLoadingTagCatalog(false);
+    }
   }
 
   function resetTagBrowser() {
@@ -230,6 +295,16 @@ export default function Administration() {
       setConnectionResult(null);
       setSuccess("");
       resetTagBrowser();
+      setMappingStatus("");
+    }
+
+    if (key === "manufacturer") {
+      setTagCatalog((previous) =>
+        previous.map((entry) => ({
+          ...entry,
+          driver: String(value),
+        }))
+      );
     }
 
     setForm((previous) => ({
@@ -263,22 +338,6 @@ export default function Administration() {
       return "PLC IP must be a valid IPv4 address (example: 192.168.1.105).";
     }
 
-    if (form.lineNumber <= 0) {
-      return "Line number must be greater than 0.";
-    }
-
-    const duplicateLineNumber = lines.some((line) => {
-      if (selectedLineId !== "new" && line.id === selectedLineId) {
-        return false;
-      }
-
-      return line.lineNumber === form.lineNumber;
-    });
-
-    if (duplicateLineNumber) {
-      return `Line number ${form.lineNumber} is already in use.`;
-    }
-
     const duplicateIp = lines.some((line) => {
       if (selectedLineId !== "new" && line.id === selectedLineId) {
         return false;
@@ -310,8 +369,13 @@ export default function Administration() {
     }
 
     if (selectedLineId === "new") {
+      const nextLineNumber = lines.length
+        ? Math.max(...lines.map((line) => line.lineNumber || 0)) + 1
+        : 1;
+
       await addLine({
         ...form,
+        lineNumber: nextLineNumber,
         lineName: form.lineName.trim(),
         startDateTime: new Date().toISOString(),
         status: LineStatus.Offline,
@@ -330,7 +394,7 @@ export default function Administration() {
       setSuccess("Line added successfully.");
     } else {
       await updateLine(selectedLineId, {
-        lineNumber: form.lineNumber,
+        lineNumber: selectedLine?.lineNumber ?? form.lineNumber,
         lineName: form.lineName.trim(),
         product: form.product.trim(),
         manufacturer: form.manufacturer,
@@ -352,6 +416,27 @@ export default function Administration() {
     }
   }
 
+  async function handleDeleteLine() {
+    if (selectedLineId === "new") {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+
+    const confirmed = window.confirm("Delete this line configuration?");
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteLine(selectedLineId);
+    const refreshed = await getAllLines();
+    setLines(refreshed);
+    setSelectedLineId("new");
+    setForm(emptyLineForm);
+    setSuccess("Line deleted successfully.");
+  }
+
   async function handleTestConnection() {
     setError("");
     setSuccess("");
@@ -369,6 +454,7 @@ export default function Administration() {
       if (result.isConnected) {
         setSuccess("PLC connection verified successfully.");
         await discoverTags(result.driver, form.plcIp.trim());
+        await handleAutoMapTagCatalog();
       } else {
         resetTagBrowser();
         setError(formatConnectionTaskTrace(result));
@@ -467,6 +553,89 @@ export default function Administration() {
     }
   }
 
+  function updateTagCatalog(logicalKey: string, updates: Partial<LineTagCatalogEntry>) {
+    setTagCatalog((previous) =>
+      previous.map((entry) =>
+        entry.logicalKey === logicalKey
+          ? {
+              ...entry,
+              ...updates,
+            }
+          : entry
+      )
+    );
+  }
+
+  async function handleAutoMapTagCatalog() {
+    setMappingStatus("");
+
+    if (!connectionResult?.isConnected) {
+      setMappingStatus("Run a successful PLC connection test before auto-map.");
+      return;
+    }
+
+    setAutoMapping(true);
+    try {
+      const slots = tagSlots.length > 0 ? tagSlots : await getTagSlots();
+
+      if (tagSlots.length === 0) {
+        setTagSlots(slots);
+      }
+
+      const result = await autoMapTagCatalog({
+        driver: form.manufacturer,
+        ipAddress: form.plcIp.trim(),
+      });
+
+      setTagCatalog(buildCatalogFromSlots(slots, result.suggestedMappings));
+
+      if (result.missingLogicalKeys.length > 0) {
+        setMappingStatus(
+          `Auto-map completed with gaps. Missing: ${result.missingLogicalKeys.join(", ")}. Use the PLC Tag dropdowns to override any slot manually.`
+        );
+      } else {
+        setMappingStatus("Auto-map completed. Review the suggested assignments or override any slot manually before saving.");
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Auto-map request failed.";
+
+      setMappingStatus(message);
+    } finally {
+      setAutoMapping(false);
+    }
+  }
+
+  async function handleSaveTagCatalog() {
+    setMappingStatus("");
+
+    if (selectedLineId === "new") {
+      setMappingStatus("Save the line first, then save tag assignments.");
+      return;
+    }
+
+    setSavingTagCatalog(true);
+    try {
+      const saved = await replaceLineTagCatalog(selectedLineId, form.manufacturer, tagCatalog);
+      setTagCatalog(buildCatalogFromSlots(tagSlots, saved));
+      setMappingStatus("Tag assignments saved.");
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Saving tag assignments failed.";
+      setMappingStatus(message);
+    } finally {
+      setSavingTagCatalog(false);
+    }
+  }
+
   const canTestConnection = isValidIpv4Address(form.plcIp) && !testingConnection;
   const isNewLine = selectedLineId === "new";
   const canSaveLine = !isNewLine || connectionResult?.isConnected === true;
@@ -546,16 +715,6 @@ export default function Administration() {
           ) : null}
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField
-              label="Line Number"
-              type="number"
-              value={form.lineNumber}
-              onChange={(event) =>
-                updateForm("lineNumber", Number(event.target.value))
-              }
-              fullWidth
-            />
-
             <TextField
               label="Line Name"
               value={form.lineName}
@@ -857,6 +1016,119 @@ export default function Administration() {
             </Paper>
           ) : null}
 
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Stack spacing={2}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                justifyContent="space-between"
+                alignItems={{ xs: "flex-start", sm: "center" }}
+                spacing={1.5}
+              >
+                <Stack spacing={0.4}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                    Tag Slot Assignment
+                  </Typography>
+                  <Typography color="text.secondary">
+                    Auto-map the discovered PLC tags into the required logical slots, then use the dropdowns to assign a different tag to any column if needed. Each PLC tag can only be used once per line.
+                  </Typography>
+                </Stack>
+
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="outlined"
+                    onClick={handleAutoMapTagCatalog}
+                    disabled={autoMapping || selectedLineId === "new" || !connectionResult?.isConnected}
+                  >
+                    {autoMapping ? "Auto-Mapping..." : "Auto Populate"}
+                  </Button>
+
+                  <Button
+                    variant="contained"
+                    onClick={handleSaveTagCatalog}
+                    disabled={savingTagCatalog || selectedLineId === "new"}
+                  >
+                    {savingTagCatalog ? "Saving..." : "Save Tag Assignments"}
+                  </Button>
+                </Stack>
+              </Stack>
+
+              {mappingStatus ? (
+                <Alert severity="info">
+                  <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                    {mappingStatus}
+                  </Typography>
+                </Alert>
+              ) : null}
+
+              {loadingTagCatalog ? (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <CircularProgress size={16} />
+                  <Typography color="text.secondary">Loading tag assignments...</Typography>
+                </Stack>
+              ) : null}
+
+              <Stack spacing={1.5}>
+                {tagCatalog.map((entry) => (
+                  <Stack key={entry.logicalKey} direction={{ xs: "column", lg: "row" }} spacing={1.5}>
+                    <TextField
+                      label="Logical Key"
+                      value={entry.logicalKey}
+                      disabled
+                      sx={{ minWidth: { lg: 180 } }}
+                    />
+
+                    <TextField
+                      label="Display"
+                      value={entry.displayName}
+                      disabled
+                      sx={{ minWidth: { lg: 170 } }}
+                    />
+
+                    <TextField
+                      select
+                      fullWidth
+                      label="PLC Tag"
+                      value={entry.plcAddress}
+                      onChange={(event) => {
+                        const selectedTag = discoveredTags.find((tag) => tag.name === event.target.value);
+                        updateTagCatalog(entry.logicalKey, {
+                          plcAddress: event.target.value,
+                          dataType: selectedTag?.dataType ?? entry.dataType,
+                        });
+                      }}
+                    >
+                      <MenuItem value="">Unassigned</MenuItem>
+                      {discoveredTags.map((tag) => (
+                        <MenuItem key={`${entry.logicalKey}:${tag.name}`} value={tag.name}>
+                          {`${tag.name} (${tag.dataType})`}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    <TextField
+                      select
+                      label="Data Type"
+                      value={entry.dataType}
+                      onChange={(event) => {
+                        updateTagCatalog(entry.logicalKey, {
+                          dataType: event.target.value,
+                        });
+                      }}
+                      sx={{ minWidth: { lg: 110 } }}
+                    >
+                      <MenuItem value="bool">bool</MenuItem>
+                      <MenuItem value="int">int</MenuItem>
+                      <MenuItem value="dint">dint</MenuItem>
+                      <MenuItem value="real">real</MenuItem>
+                      <MenuItem value="string">string</MenuItem>
+                    </TextField>
+                  </Stack>
+                ))}
+              </Stack>
+
+            </Stack>
+          </Paper>
+
           <FormControlLabel
             control={
               <Switch
@@ -868,6 +1140,16 @@ export default function Administration() {
           />
 
           <Stack direction="row" justifyContent="flex-end">
+            {selectedLineId !== "new" ? (
+              <Button
+                variant="outlined"
+                color="error"
+                onClick={handleDeleteLine}
+                sx={{ mr: 1.5 }}
+              >
+                Delete Line
+              </Button>
+            ) : null}
             <Button variant="contained" onClick={handleSave} disabled={!canSaveLine}>
               {selectedLineId === "new" ? "Add Line" : "Save Changes"}
             </Button>

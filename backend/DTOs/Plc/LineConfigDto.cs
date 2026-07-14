@@ -1,0 +1,14 @@
+namespace backend.DTOs.Plc;
+
+public sealed class LineConfigDto
+{
+    public int Id { get; set; }
+    public int LineNumber { get; set; }
+    public string LineName { get; set; } = string.Empty;
+    public string ProductId { get; set; } = string.Empty;
+    public string PlcIp { get; set; } = string.Empty;
+    public string Manufacturer { get; set; } = string.Empty;
+    public int PollIntervalMs { get; set; }
+    public bool IsActive { get; set; }
+    public DateTime UpdatedAtUtc { get; set; }
+}

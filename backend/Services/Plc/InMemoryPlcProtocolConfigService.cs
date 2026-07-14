@@ -23,11 +23,27 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
         "string",
     ];
 
+    private static readonly IReadOnlyList<TagSlotDefinitionDto> RequiredTagSlots =
+    [
+        new() { LogicalKey = "line_id", DisplayName = "Line ID", IsRequired = true, Description = "Unique line identifier from PLC." },
+        new() { LogicalKey = "product_id", DisplayName = "Product ID", IsRequired = true, Description = "Current product identifier/serial." },
+        new() { LogicalKey = "control_mode", DisplayName = "Control Mode", IsRequired = true, Description = "Current control mode (Auto/Manual)." },
+        new() { LogicalKey = "machine_state", DisplayName = "Machine State", IsRequired = true, Description = "Current machine state/status code." },
+        new() { LogicalKey = "production_length", DisplayName = "Production Length", IsRequired = true, Description = "Current produced length." },
+        new() { LogicalKey = "bare_setpoint", DisplayName = "Bare Setpoint", IsRequired = true, Description = "Bare OD setpoint." },
+        new() { LogicalKey = "bare_actual", DisplayName = "Bare Actual", IsRequired = true, Description = "Bare OD actual." },
+        new() { LogicalKey = "hot_setpoint", DisplayName = "Hot Setpoint", IsRequired = true, Description = "Hot OD setpoint." },
+        new() { LogicalKey = "hot_actual", DisplayName = "Hot Actual", IsRequired = true, Description = "Hot OD actual." },
+        new() { LogicalKey = "cold_setpoint", DisplayName = "Cold Setpoint", IsRequired = true, Description = "Cold OD setpoint." },
+        new() { LogicalKey = "cold_actual", DisplayName = "Cold Actual", IsRequired = true, Description = "Cold OD actual." },
+    ];
+
     private readonly IPlcTagAddressValidator _addressValidator;
     private readonly object _sync = new();
     private readonly List<PlcPresetDto> _presets;
     private readonly Dictionary<int, LineProtocolAssignmentDto> _assignments = new();
     private readonly Dictionary<int, List<EffectiveTagMappingDto>> _overrides = new();
+    private readonly Dictionary<int, List<LineTagCatalogEntryDto>> _tagCatalog = new();
 
     public InMemoryPlcProtocolConfigService(IPlcTagAddressValidator addressValidator)
     {
@@ -49,6 +65,11 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
             .ToList();
     }
 
+    public IReadOnlyCollection<TagSlotDefinitionDto> GetRequiredTagSlots()
+    {
+        return RequiredTagSlots;
+    }
+
     public LineProtocolAssignmentDto? GetAssignment(int lineId)
     {
         lock (_sync)
@@ -56,6 +77,126 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
             _assignments.TryGetValue(lineId, out var assignment);
             return assignment;
         }
+    }
+
+    public IReadOnlyCollection<LineTagCatalogEntryDto> GetTagCatalog(int lineId)
+    {
+        lock (_sync)
+        {
+            if (!_tagCatalog.TryGetValue(lineId, out var catalog))
+            {
+                return [];
+            }
+
+            return catalog
+                .OrderBy(x => x.SortOrder)
+                .ThenBy(x => x.LogicalKey)
+                .Select(CloneCatalogEntry)
+                .ToList();
+        }
+    }
+
+    public bool TryReplaceTagCatalog(
+        int lineId,
+        UpdateLineTagCatalogRequestDto request,
+        out IReadOnlyCollection<LineTagCatalogEntryDto>? tags,
+        out string? error)
+    {
+        tags = null;
+        error = null;
+
+        if (lineId <= 0)
+        {
+            error = "Line id must be greater than 0.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Driver))
+        {
+            error = "Driver is required.";
+            return false;
+        }
+
+        var normalizedDriver = NormalizeManufacturer(request.Driver);
+        var requiredKeys = RequiredTagSlots
+            .Where(x => x.IsRequired)
+            .Select(x => x.LogicalKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var catalog = request.Tags ?? [];
+        var duplicateKeys = catalog
+            .GroupBy(x => x.LogicalKey, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (duplicateKeys.Count > 0)
+        {
+            error = $"Duplicate logical keys detected: {string.Join(", ", duplicateKeys)}";
+            return false;
+        }
+
+        var missingRequired = requiredKeys
+            .Where(required => !catalog.Any(x => x.LogicalKey.Equals(required, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (missingRequired.Count > 0)
+        {
+            error = $"Missing required logical keys: {string.Join(", ", missingRequired)}";
+            return false;
+        }
+
+        for (var index = 0; index < catalog.Count; index += 1)
+        {
+            var entry = catalog[index];
+
+            if (string.IsNullOrWhiteSpace(entry.LogicalKey))
+            {
+                error = "Logical key is required for every catalog entry.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.PlcAddress))
+            {
+                error = $"PLC address is required for logical key '{entry.LogicalKey}'.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.DataType)
+                || !AllowedDataTypes.Contains(entry.DataType.Trim(), StringComparer.OrdinalIgnoreCase))
+            {
+                error = $"Data type for logical key '{entry.LogicalKey}' must be one of: bool, int, dint, real, string.";
+                return false;
+            }
+
+            if (!_addressValidator.IsValidAddress(normalizedDriver, entry.PlcAddress, out var addressMessage))
+            {
+                error = $"Logical key '{entry.LogicalKey}' has invalid PLC address: {addressMessage}";
+                return false;
+            }
+
+            entry.Driver = normalizedDriver;
+            if (entry.SortOrder == 0)
+            {
+                entry.SortOrder = index;
+            }
+            if (entry.ReadFrequencyMs <= 0)
+            {
+                entry.ReadFrequencyMs = 1000;
+            }
+            if (string.IsNullOrWhiteSpace(entry.DisplayName))
+            {
+                entry.DisplayName = entry.LogicalKey;
+            }
+        }
+
+        lock (_sync)
+        {
+            _tagCatalog[lineId] = catalog.Select(CloneCatalogEntry).ToList();
+        }
+
+        tags = GetTagCatalog(lineId);
+        return true;
     }
 
     public bool TryUpsertAssignment(int lineId, UpdateLineProtocolAssignmentRequestDto request, out string? error)
@@ -307,6 +448,25 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
             PlcAddress = source.PlcAddress,
             DataType = source.DataType,
             Scale = source.Scale,
+            IsRequired = source.IsRequired,
+        };
+    }
+
+    private static LineTagCatalogEntryDto CloneCatalogEntry(LineTagCatalogEntryDto source)
+    {
+        return new LineTagCatalogEntryDto
+        {
+            LogicalKey = source.LogicalKey,
+            DisplayName = source.DisplayName,
+            Driver = source.Driver,
+            PlcAddress = source.PlcAddress,
+            DataType = source.DataType,
+            Unit = source.Unit,
+            Scale = source.Scale,
+            Description = source.Description,
+            IsEnabled = source.IsEnabled,
+            SortOrder = source.SortOrder,
+            ReadFrequencyMs = source.ReadFrequencyMs,
             IsRequired = source.IsRequired,
         };
     }

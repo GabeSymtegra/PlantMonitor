@@ -12,7 +12,11 @@ import {
   LogLevel,
 } from "@microsoft/signalr";
 
-import { getDashboard } from "../services/dashboardService";
+import {
+  getAllLines,
+  getDashboard,
+  toConfiguredFallbackLine,
+} from "../services/dashboardService";
 import type { DashboardModel } from "../models/DashboardModel";
 import { useAuth } from "./useAuth";
 
@@ -59,7 +63,21 @@ export function DashboardProvider({
       setDashboard(data);
       setError(null);
     } catch {
-      setError("Unable to load dashboard data. Check backend connectivity and try again.");
+      try {
+        const configuredLines = (await getAllLines()).filter((line) => line.isActive);
+
+        setDashboard({
+          lines: configuredLines.map(toConfiguredFallbackLine),
+          lastUpdated: new Date(),
+        });
+      } catch {
+        setDashboard({
+          lines: [],
+          lastUpdated: new Date(),
+        });
+      }
+
+      setError("Unable to load live runtime data. Showing configured active lines.");
     } finally {
       if (showLoader) {
         setLoading(false);

@@ -26,6 +26,21 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         "string",
     ];
 
+    private static readonly IReadOnlyList<TagSlotDefinitionDto> RequiredTagSlots =
+    [
+        new() { LogicalKey = "line_id", DisplayName = "Line ID", IsRequired = true, Description = "Unique line identifier from PLC." },
+        new() { LogicalKey = "product_id", DisplayName = "Product ID", IsRequired = true, Description = "Current product identifier/serial." },
+        new() { LogicalKey = "control_mode", DisplayName = "Control Mode", IsRequired = true, Description = "Current control mode (Auto/Manual)." },
+        new() { LogicalKey = "machine_state", DisplayName = "Machine State", IsRequired = true, Description = "Current machine state/status code." },
+        new() { LogicalKey = "production_length", DisplayName = "Production Length", IsRequired = true, Description = "Current produced length." },
+        new() { LogicalKey = "bare_setpoint", DisplayName = "Bare Setpoint", IsRequired = true, Description = "Bare OD setpoint." },
+        new() { LogicalKey = "bare_actual", DisplayName = "Bare Actual", IsRequired = true, Description = "Bare OD actual." },
+        new() { LogicalKey = "hot_setpoint", DisplayName = "Hot Setpoint", IsRequired = true, Description = "Hot OD setpoint." },
+        new() { LogicalKey = "hot_actual", DisplayName = "Hot Actual", IsRequired = true, Description = "Hot OD actual." },
+        new() { LogicalKey = "cold_setpoint", DisplayName = "Cold Setpoint", IsRequired = true, Description = "Cold OD setpoint." },
+        new() { LogicalKey = "cold_actual", DisplayName = "Cold Actual", IsRequired = true, Description = "Cold OD actual." },
+    ];
+
     private readonly PlantMonitorDbContext _dbContext;
     private readonly IPlcTagAddressValidator _addressValidator;
 
@@ -59,6 +74,11 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         return presets.Select(MapPreset).ToList();
     }
 
+    public IReadOnlyCollection<TagSlotDefinitionDto> GetRequiredTagSlots()
+    {
+        return RequiredTagSlots;
+    }
+
     public LineProtocolAssignmentDto? GetAssignment(int lineId)
     {
         var assignment = _dbContext.LineProtocolAssignments
@@ -66,6 +86,140 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             .SingleOrDefault(a => a.LineId == lineId);
 
         return assignment is null ? null : MapAssignment(assignment);
+    }
+
+    public IReadOnlyCollection<LineTagCatalogEntryDto> GetTagCatalog(int lineId)
+    {
+        return _dbContext.LineTagCatalogEntries
+            .AsNoTracking()
+            .Where(x => x.LineId == lineId)
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.LogicalKey)
+            .Select(MapCatalogEntry)
+            .ToList();
+    }
+
+    public bool TryReplaceTagCatalog(
+        int lineId,
+        UpdateLineTagCatalogRequestDto request,
+        out IReadOnlyCollection<LineTagCatalogEntryDto>? tags,
+        out string? error)
+    {
+        tags = null;
+        error = null;
+
+        if (lineId <= 0)
+        {
+            error = "Line id must be greater than 0.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Driver))
+        {
+            error = "Driver is required.";
+            return false;
+        }
+
+        var normalizedDriver = NormalizeManufacturer(request.Driver);
+        var requiredKeys = RequiredTagSlots.Where(x => x.IsRequired)
+            .Select(x => x.LogicalKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var catalog = request.Tags ?? [];
+        var duplicateKeys = catalog
+            .GroupBy(x => x.LogicalKey, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (duplicateKeys.Count > 0)
+        {
+            error = $"Duplicate logical keys detected: {string.Join(", ", duplicateKeys)}";
+            return false;
+        }
+
+        var missingRequired = requiredKeys
+            .Where(required => !catalog.Any(x => x.LogicalKey.Equals(required, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (missingRequired.Count > 0)
+        {
+            error = $"Missing required logical keys: {string.Join(", ", missingRequired)}";
+            return false;
+        }
+
+        var duplicateAddresses = catalog
+            .Where(x => !string.IsNullOrWhiteSpace(x.PlcAddress))
+            .GroupBy(x => x.PlcAddress.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToList();
+
+        if (duplicateAddresses.Count > 0)
+        {
+            error = $"Each PLC address can only be assigned once per line. Duplicate addresses: {string.Join(", ", duplicateAddresses)}";
+            return false;
+        }
+
+        foreach (var entry in catalog)
+        {
+            if (string.IsNullOrWhiteSpace(entry.LogicalKey))
+            {
+                error = "Logical key is required for every catalog entry.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.PlcAddress))
+            {
+                error = $"PLC address is required for logical key '{entry.LogicalKey}'.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.DataType)
+                || !AllowedDataTypes.Contains(entry.DataType.Trim(), StringComparer.OrdinalIgnoreCase))
+            {
+                error = $"Data type for logical key '{entry.LogicalKey}' must be one of: bool, int, dint, real, string.";
+                return false;
+            }
+
+            if (!_addressValidator.IsValidAddress(normalizedDriver, entry.PlcAddress, out var addressMessage))
+            {
+                error = $"Logical key '{entry.LogicalKey}' has invalid PLC address: {addressMessage}";
+                return false;
+            }
+        }
+
+        var existing = _dbContext.LineTagCatalogEntries
+            .Where(x => x.LineId == lineId)
+            .ToList();
+
+        _dbContext.LineTagCatalogEntries.RemoveRange(existing);
+
+        var utcNow = DateTime.UtcNow;
+        var entities = catalog.Select((x, index) => new LineTagCatalogEntryEntity
+        {
+            LineId = lineId,
+            LogicalKey = x.LogicalKey.Trim(),
+            DisplayName = string.IsNullOrWhiteSpace(x.DisplayName) ? x.LogicalKey.Trim() : x.DisplayName.Trim(),
+            Driver = normalizedDriver,
+            PlcAddress = x.PlcAddress.Trim(),
+            DataType = x.DataType.Trim().ToLowerInvariant(),
+            Unit = x.Unit,
+            Scale = x.Scale,
+            Description = x.Description,
+            IsEnabled = x.IsEnabled,
+            SortOrder = x.SortOrder == 0 ? index : x.SortOrder,
+            ReadFrequencyMs = x.ReadFrequencyMs <= 0 ? 1000 : x.ReadFrequencyMs,
+            IsRequired = x.IsRequired,
+            CreatedAtUtc = utcNow,
+            UpdatedAtUtc = utcNow,
+        }).ToList();
+
+        _dbContext.LineTagCatalogEntries.AddRange(entities);
+        _dbContext.SaveChanges();
+
+        tags = GetTagCatalog(lineId);
+        return true;
     }
 
     public bool TryUpsertAssignment(int lineId, UpdateLineProtocolAssignmentRequestDto request, out string? error)
@@ -375,6 +529,25 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             DataType = tag.DataType,
             Scale = tag.Scale,
             IsRequired = tag.IsRequired,
+        };
+    }
+
+    private static LineTagCatalogEntryDto MapCatalogEntry(LineTagCatalogEntryEntity entity)
+    {
+        return new LineTagCatalogEntryDto
+        {
+            LogicalKey = entity.LogicalKey,
+            DisplayName = entity.DisplayName,
+            Driver = entity.Driver,
+            PlcAddress = entity.PlcAddress,
+            DataType = entity.DataType,
+            Unit = entity.Unit,
+            Scale = entity.Scale,
+            Description = entity.Description,
+            IsEnabled = entity.IsEnabled,
+            SortOrder = entity.SortOrder,
+            ReadFrequencyMs = entity.ReadFrequencyMs,
+            IsRequired = entity.IsRequired,
         };
     }
 }

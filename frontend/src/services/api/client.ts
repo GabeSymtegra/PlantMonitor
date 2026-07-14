@@ -108,15 +108,21 @@ async function handleResponse<T>(
   return response.json() as Promise<T>;
 }
 
-export async function apiGet<T>(endpoint: string): Promise<T> {
-  const method = "GET";
+async function request<T>(
+  method: string,
+  endpoint: string,
+  body?: unknown
+): Promise<T> {
   const url = buildUrl(endpoint);
 
   try {
     const response = await fetch(url, {
+      method,
       headers: {
+        ...(body ? { "Content-Type": "application/json" } : {}),
         ...getAuthHeaders(),
       },
+      body: body ? JSON.stringify(body) : undefined,
     });
 
     return handleResponse<T>(response, method, url);
@@ -130,34 +136,56 @@ export async function apiGet<T>(endpoint: string): Promise<T> {
     throw new ApiRequestError({
       method,
       url,
-      message: buildRequestTrace(
-        method,
-        url,
-        "failed: no response returned",
-        details
-      ),
+      message: buildRequestTrace(method, url, "failed: no response returned", details),
     });
   }
+}
+
+export async function apiGet<T>(endpoint: string): Promise<T> {
+  return request<T>("GET", endpoint);
 }
 
 export async function apiPost<TResponse, TBody = unknown>(
   endpoint: string,
   body: TBody
 ): Promise<TResponse> {
-  const method = "POST";
+  return request<TResponse>("POST", endpoint, body);
+}
+
+export async function apiPut<TResponse, TBody = unknown>(
+  endpoint: string,
+  body: TBody
+): Promise<TResponse> {
+  return request<TResponse>("PUT", endpoint, body);
+}
+
+export async function apiDelete(endpoint: string): Promise<void> {
+  const method = "DELETE";
   const url = buildUrl(endpoint);
 
   try {
     const response = await fetch(url, {
       method,
       headers: {
-        "Content-Type": "application/json",
         ...getAuthHeaders(),
       },
-      body: JSON.stringify(body),
     });
 
-    return handleResponse<TResponse>(response, method, url);
+    if (!response.ok) {
+      const errorText = await response.text();
+      const statusText = response.statusText || "Request failed";
+      const responseDetails = errorText || statusText;
+
+      dispatchAuthExpiredIfNeeded(url, response.status);
+
+      throw new ApiRequestError({
+        method,
+        url,
+        status: response.status,
+        responseBody: errorText || undefined,
+        message: buildRequestTrace(method, url, `failed: HTTP ${response.status} ${statusText}`, responseDetails),
+      });
+    }
   } catch (error) {
     if (error instanceof ApiRequestError) {
       throw error;
@@ -168,12 +196,7 @@ export async function apiPost<TResponse, TBody = unknown>(
     throw new ApiRequestError({
       method,
       url,
-      message: buildRequestTrace(
-        method,
-        url,
-        "failed: no response returned",
-        details
-      ),
+      message: buildRequestTrace(method, url, "failed: no response returned", details),
     });
   }
 }

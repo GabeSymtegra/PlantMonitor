@@ -4,11 +4,14 @@ using backend.Configuration;
 using backend.Data;
 using backend.DTOs.Authentication;
 using backend.DTOs.Plc;
+using backend.Interfaces.Production;
 using backend.Interfaces;
 using backend.Interfaces.Plc;
+using backend.DTOs.Production;
 using backend.Services.Line;
 using backend.Services.Authentication;
 using backend.Services.Plc;
+using backend.Services.Production;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +35,10 @@ builder.Services.AddSingleton<IPlcDriver, AllenBradleyPlcDriver>();
 builder.Services.AddSingleton<IPlcDriver, SiemensPlcDriver>();
 builder.Services.AddSingleton<IPlcConnectionService>(serviceProvider =>
     new PlcConnectionService(serviceProvider.GetServices<IPlcDriver>().ToArray()));
+builder.Services.AddSingleton<ProductionRuntimeService>();
+builder.Services.AddSingleton<IProductionRuntimeService>(serviceProvider =>
+    serviceProvider.GetRequiredService<ProductionRuntimeService>());
+builder.Services.AddScoped<IRecipeToleranceService, RecipeToleranceService>();
 builder.Services.AddControllers();
 
 builder.Services
@@ -96,6 +103,8 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<LineUpdateBroadcastService>();
+builder.Services.AddHostedService(serviceProvider =>
+    serviceProvider.GetRequiredService<ProductionRuntimeService>());
 
 var app = builder.Build();
 
@@ -110,6 +119,7 @@ using (var scope = app.Services.CreateScope())
     if (hasLegacySchemaWithoutMigrations)
     {
         dbContext.Database.EnsureCreated();
+        EnsureLegacyRuntimeSchema(dbContext);
     }
     else
     {
@@ -123,10 +133,12 @@ using (var scope = app.Services.CreateScope())
         {
             // Compatibility and race-safe fallback for legacy local/test SQLite files.
             dbContext.Database.EnsureCreated();
+            EnsureLegacyRuntimeSchema(dbContext);
         }
     }
 
     await PlcPresetSeeder.SeedAsync(dbContext);
+    await RecipeToleranceSeeder.SeedAsync(dbContext);
 }
 
 app.UseCors("FrontendDev");
@@ -185,6 +197,36 @@ app.MapGet("/api/status", () =>
     });
 }).RequireAuthorization();
 
+app.MapGet("/api/dashboard", (IProductionRuntimeService runtimeService) =>
+{
+    return Results.Ok(runtimeService.GetDashboardSnapshot());
+}).RequireAuthorization();
+
+app.MapGet("/api/lines/{lineId:int}/details", (int lineId, IProductionRuntimeService runtimeService) =>
+{
+    var detail = runtimeService.GetLineDetail(lineId);
+    return detail is null
+        ? Results.NotFound(new { message = "Line runtime details were not found." })
+        : Results.Ok(detail);
+}).RequireAuthorization();
+
+app.MapGet("/api/production-runs", async (
+    [AsParameters] ProductionRunsQuery query,
+    IProductionRuntimeService runtimeService,
+    CancellationToken cancellationToken) =>
+{
+    var rows = await runtimeService.GetCompletedRunsAsync(query.LineId, query.Take, cancellationToken);
+    return Results.Ok(rows);
+}).RequireAuthorization();
+
+app.MapGet("/api/recipe-tolerances", (
+    [AsParameters] RecipeToleranceQuery query,
+    IRecipeToleranceService toleranceService) =>
+{
+    var rows = toleranceService.GetActiveTolerances(query.RecipeId, query.ProductId);
+    return Results.Ok(rows);
+}).RequireAuthorization();
+
 app.MapGet("/api/configuration/access-check", (ClaimsPrincipal user) =>
 {
     return Results.Ok(new
@@ -236,4 +278,162 @@ static bool HasSqliteTable(PlantMonitorDbContext dbContext, string tableName)
     }
 }
 
+static void EnsureLegacyRuntimeSchema(PlantMonitorDbContext dbContext)
+{
+    if (!string.Equals(dbContext.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+    {
+        return;
+    }
+
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "LineNumber", "INTEGER NOT NULL DEFAULT 0");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "LineName", "TEXT NOT NULL DEFAULT ''");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "ProductId", "TEXT NOT NULL DEFAULT ''");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "PlcIp", "TEXT NOT NULL DEFAULT ''");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "IsActive", "INTEGER NOT NULL DEFAULT 1");
+
+    dbContext.Database.ExecuteSqlRaw(@"
+UPDATE line_protocol_assignments
+SET LineNumber = CASE WHEN LineNumber = 0 THEN LineId ELSE LineNumber END,
+    LineName = CASE WHEN trim(coalesce(LineName, '')) = '' THEN 'Line ' || LineId ELSE LineName END,
+    IsActive = CASE WHEN IsActive = 0 THEN 1 ELSE IsActive END;
+");
+
+    if (!HasSqliteTable(dbContext, "recipe_tolerances"))
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+CREATE TABLE IF NOT EXISTS recipe_tolerances (
+    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    RecipeId TEXT NOT NULL,
+    ProductId TEXT NOT NULL,
+    MeasurementType TEXT NOT NULL,
+    TargetValue TEXT NOT NULL,
+    ToleranceMinus TEXT NOT NULL,
+    TolerancePlus TEXT NOT NULL,
+    Version INTEGER NOT NULL,
+    IsActive INTEGER NOT NULL,
+    Source TEXT NOT NULL,
+    CreatedAtUtc TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_recipe_tolerances_RecipeId_MeasurementType_Version
+    ON recipe_tolerances (RecipeId, MeasurementType, Version);
+");
+    }
+
+    if (!HasSqliteTable(dbContext, "completed_production_runs"))
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+CREATE TABLE IF NOT EXISTS completed_production_runs (
+    Id TEXT NOT NULL PRIMARY KEY,
+    LineId INTEGER NOT NULL,
+    LineNumber INTEGER NOT NULL,
+    LineName TEXT NOT NULL,
+    ProductId TEXT NOT NULL,
+    RecipeId TEXT NOT NULL,
+    MachineId TEXT NOT NULL,
+    OperatorName TEXT NOT NULL,
+    Manufacturer TEXT NOT NULL,
+    PlcIp TEXT NOT NULL,
+    FinalStatus TEXT NOT NULL,
+    StartTimeUtc TEXT NOT NULL,
+    EndTimeUtc TEXT NOT NULL,
+    RuntimeSeconds REAL NOT NULL,
+    ProductionLength REAL NOT NULL,
+    AutoTimeSeconds REAL NOT NULL,
+    ManualTimeSeconds REAL NOT NULL,
+    AutoPercentage REAL NOT NULL,
+    ManualPercentage REAL NOT NULL,
+    CreatedAtUtc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS IX_completed_production_runs_EndTimeUtc
+    ON completed_production_runs (EndTimeUtc);
+CREATE INDEX IF NOT EXISTS IX_completed_production_runs_LineId
+    ON completed_production_runs (LineId);
+");
+    }
+
+    if (!HasSqliteTable(dbContext, "completed_production_run_zone_stats"))
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+CREATE TABLE IF NOT EXISTS completed_production_run_zone_stats (
+    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    RunId TEXT NOT NULL,
+    Zone TEXT NOT NULL,
+    Segment TEXT NOT NULL,
+    MeasurementCount INTEGER NOT NULL,
+    SkippedCount INTEGER NOT NULL,
+    RunningAbsoluteDeviationSum REAL NOT NULL,
+    AverageAbsoluteDeviation REAL NOT NULL,
+    MaxPositiveDeviation REAL NOT NULL,
+    MaxNegativeDeviation REAL NOT NULL,
+    CurrentDeviation REAL NOT NULL,
+    FOREIGN KEY (RunId) REFERENCES completed_production_runs (Id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_completed_production_run_zone_stats_RunId_Zone_Segment
+    ON completed_production_run_zone_stats (RunId, Zone, Segment);
+");
+    }
+}
+
+static void EnsureSqliteColumn(PlantMonitorDbContext dbContext, string tableName, string columnName, string columnDefinition)
+{
+    if (!HasSqliteTable(dbContext, tableName) || HasSqliteColumn(dbContext, tableName, columnName))
+    {
+        return;
+    }
+
+    dbContext.Database.ExecuteSqlRaw($"ALTER TABLE \"{tableName}\" ADD COLUMN \"{columnName}\" {columnDefinition};");
+}
+
+static bool HasSqliteColumn(PlantMonitorDbContext dbContext, string tableName, string columnName)
+{
+    if (!string.Equals(dbContext.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+    {
+        return false;
+    }
+
+    var connection = dbContext.Database.GetDbConnection();
+    var shouldClose = connection.State != System.Data.ConnectionState.Open;
+
+    if (shouldClose)
+    {
+        connection.Open();
+    }
+
+    try
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info(\"{tableName}\");";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var name = reader.GetString(1);
+            if (name.Equals(columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+    finally
+    {
+        if (shouldClose)
+        {
+            connection.Close();
+        }
+    }
+}
+
 public partial class Program;
+
+public sealed class ProductionRunsQuery
+{
+    public int? LineId { get; init; }
+    public int Take { get; init; } = 50;
+}
+
+public sealed class RecipeToleranceQuery
+{
+    public string? RecipeId { get; init; }
+    public string? ProductId { get; init; }
+}

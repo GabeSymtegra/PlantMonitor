@@ -23,7 +23,23 @@ namespace backend.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LineName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LineNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Manufacturer")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlcIp")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
@@ -38,6 +54,11 @@ namespace backend.Data.Migrations
 
                     b.Property<int>("PresetVersion")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("TEXT");
@@ -232,6 +253,197 @@ namespace backend.Data.Migrations
                     b.ToTable("plc_protocol_preset_tags", (string)null);
                 });
 
+            modelBuilder.Entity("backend.Models.Production.CompletedProductionRunEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("AutoPercentage")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("AutoTimeSeconds")
+                        .HasColumnType("REAL");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("EndTimeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FinalStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LineId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LineName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LineNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MachineId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("ManualPercentage")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("ManualTimeSeconds")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Manufacturer")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperatorName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlcIp")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("ProductionLength")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("RecipeId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("RuntimeSeconds")
+                        .HasColumnType("REAL");
+
+                    b.Property<DateTime>("StartTimeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EndTimeUtc");
+
+                    b.HasIndex("LineId");
+
+                    b.ToTable("completed_production_runs", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Production.CompletedProductionRunZoneStatEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("AverageAbsoluteDeviation")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("CurrentDeviation")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MaxNegativeDeviation")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("MaxPositiveDeviation")
+                        .HasColumnType("REAL");
+
+                    b.Property<long>("MeasurementCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("RunningAbsoluteDeviationSum")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Segment")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SkippedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Zone")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId", "Zone", "Segment")
+                        .IsUnique();
+
+                    b.ToTable("completed_production_run_zone_stats", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Production.RecipeToleranceEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MeasurementType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RecipeId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TargetValue")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ToleranceMinus")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("TolerancePlus")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipeId", "MeasurementType", "Version")
+                        .IsUnique();
+
+                    b.ToTable("recipe_tolerances", (string)null);
+                });
+
             modelBuilder.Entity("backend.Models.Plc.LineTagOverrideEntity", b =>
                 {
                     b.HasOne("backend.Models.Plc.LineProtocolAssignmentEntity", "Assignment")
@@ -254,6 +466,17 @@ namespace backend.Data.Migrations
                     b.Navigation("Preset");
                 });
 
+            modelBuilder.Entity("backend.Models.Production.CompletedProductionRunZoneStatEntity", b =>
+                {
+                    b.HasOne("backend.Models.Production.CompletedProductionRunEntity", "Run")
+                        .WithMany("ZoneStats")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+                });
+
             modelBuilder.Entity("backend.Models.Plc.LineProtocolAssignmentEntity", b =>
                 {
                     b.Navigation("TagOverrides");
@@ -262,6 +485,11 @@ namespace backend.Data.Migrations
             modelBuilder.Entity("backend.Models.Plc.PlcProtocolPresetEntity", b =>
                 {
                     b.Navigation("Tags");
+                });
+
+            modelBuilder.Entity("backend.Models.Production.CompletedProductionRunEntity", b =>
+                {
+                    b.Navigation("ZoneStats");
                 });
 #pragma warning restore 612, 618
         }
