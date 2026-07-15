@@ -9,9 +9,9 @@ Primary operating model:
 - PLC telemetry ingestion through adapter services (mock now, real adapters next)
 
 ## Current Status
-- Branch: copilothelpbranch
-- Stage: Pre-release hardening and readiness
-- Focus: Items 1-6 (tests, runtime reliability, E2E smoke, security package cleanup, performance baseline, release governance)
+- Branch: tagsort
+- Stage: Runtime integration, reporting, and maintainability cleanup
+- Focus: Live PLC-driven dashboard behavior, reporting history, offline handling, and codebase documentation
 
 ## Finalized Changes (Completed)
 
@@ -72,6 +72,47 @@ Primary operating model:
 - Stabilized test tooling boundaries so Vitest only discovers src test files and does not execute e2e Playwright specs.
 - Stabilized local Playwright smoke execution with single-worker mode and deterministic login assertions.
 - Verified backend package graph no longer contains Microsoft.OpenApi; NU1903 warning path no longer appears in direct/transitive package listing.
+
+### Runtime and Dashboard Reliability
+- Stabilized ProductionRuntimeService so dashboard and line detail endpoints can continue serving snapshots even when the runtime engine is inactive or PLC reads fail.
+- Fixed save-to-dashboard behavior so configured line/tag state can surface without requiring a separate test-connection flow.
+- Added product ID normalization so unreadable PLC metadata payloads are shown as `N/A` instead of raw diagnostic JSON.
+- Corrected control mode persistence so manual and auto state remain visible while lines are stopped.
+- Fixed repeated stop-state persistence loops that were inserting duplicate completed-run records.
+- Changed disconnected PLC behavior so failed PLC polling marks the line `Offline` instead of generating simulated live statuses.
+- Updated the PLC failure path to emit runtime status transitions when moving into `Offline`.
+
+### PLC State Mapping and Runtime Semantics
+- Implemented explicit machine-state decoding for live PLC values:
+  - `0 => Stopped`
+  - `1 => Running`
+  - `2 => Bleedout`
+  - `3 => Startup`
+  - `4 => Faulted`
+  - `5 => Maintenance`
+- Extended frontend status handling so `Bleedout` and `Startup` render correctly across navbar summaries, dashboard tables, line lists, status chips, and the status board.
+- Changed time-in-status behavior to reset when the line status changes, so runtime reflects duration in the current state rather than total run age.
+
+### Reporting and Historical Data
+- Added completed production run persistence for historical reporting.
+- Added runtime event persistence for status switches and mode switches across all lines.
+- Added backend reporting API coverage for:
+  - completed runs
+  - runtime switch events
+- Added the frontend Reports page with:
+  - completed run history
+  - mode and status switch history
+  - line filtering
+  - date range filtering
+  - CSV export for both tables
+- Added EF migration support for the new runtime event persistence model.
+
+### Codebase Cleanup and Documentation
+- Performed a low-risk cleanup pass on PLC tag address validation to reduce duplication and make manufacturer-specific rules easier to read.
+- Replaced the placeholder frontend README with project-specific guidance.
+- Added folder-level READMEs to the main backend, frontend, docs, and scripts directories so the code layout is easier to understand.
+- Added a user guide in docs/User-Guide.md and linked it from the root README.
+- Updated the root README to reflect the current architecture, runtime behavior, reports support, and documentation map.
 
 ## Release Readiness Roadmap (Items 1-6)
 
@@ -182,10 +223,10 @@ Exit criteria:
 
 ## Next Implementation Slice
 Immediate next coding slice:
-1. Capture and log before/after bundle size metrics with threshold targets for release gate.
-2. Expand smoke coverage for status-board rendering and reconnect behavior under simulated backend interruption.
-3. Add release command references to README and script docs.
-4. Add release checklist completion evidence template for each deploy candidate.
+1. Break up ProductionRuntimeService into smaller units by responsibility to reduce maintenance cost.
+2. Add focused tests around offline transitions, machine-state decoding, and report event persistence.
+3. Expand reports with preset date ranges and optional aggregation views.
+4. Continue replacing remaining outdated assumptions in docs and log files with current runtime behavior.
 
 ---
-Last updated: 2026-07-02
+Last updated: 2026-07-15
