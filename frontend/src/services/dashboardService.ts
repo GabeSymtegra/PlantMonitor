@@ -1,9 +1,13 @@
 import { API_ENDPOINTS } from "../constants/api";
 import type { DashboardModel } from "../models/DashboardModel";
-import type { LineDetailModel, SensorDetail } from "../models/LineDetailModel";
+import type { GaugeDetail, LineDetailModel } from "../models/LineDetailModel";
 import type { ProductionLine } from "../types/ProductionLine";
 import { LineStatus } from "../types/LineStatus";
 import { apiDelete, apiGet, apiPost, apiPut } from "./api/client";
+
+// -----------------------------------------------------------------------------
+// Backend DTOs used only by the frontend data layer
+// -----------------------------------------------------------------------------
 
 interface RuntimeDashboardLineDto {
   id: number;
@@ -97,6 +101,10 @@ interface UpsertLineConfigRequestDto {
   isActive: boolean;
 }
 
+// -----------------------------------------------------------------------------
+// DTO -> UI model mapping helpers
+// -----------------------------------------------------------------------------
+
 function toLineStatus(value: string): LineStatus {
   switch (value) {
     case LineStatus.Running:
@@ -158,6 +166,8 @@ function toProductionLine(line: RuntimeDashboardLineDto): ProductionLine {
   };
 }
 
+// Configured lines are used as a fallback so the dashboard can still show a
+// known line definition even when runtime data is not available yet.
 function toConfiguredLine(line: LineConfigDto): ProductionLine {
   return {
     id: line.id,
@@ -198,7 +208,7 @@ export function toConfiguredFallbackLine(line: ProductionLine): ProductionLine {
   };
 }
 
-function toSensorDetail(sensor: RuntimeSensorDetailDto): SensorDetail {
+function toGaugeDetail(sensor: RuntimeSensorDetailDto): GaugeDetail {
   return {
     zone: sensor.zone,
     currentSetpoint: sensor.currentSetpoint,
@@ -218,6 +228,10 @@ function toSensorDetail(sensor: RuntimeSensorDetailDto): SensorDetail {
     manualMaxNegativeDeviation: sensor.manualMaxNegativeDeviation,
   };
 }
+
+// -----------------------------------------------------------------------------
+// CRUD and runtime query functions
+// -----------------------------------------------------------------------------
 
 export async function getAllLines(): Promise<ProductionLine[]> {
   const dto = await apiGet<LineConfigDto[]>(API_ENDPOINTS.lines);
@@ -275,6 +289,8 @@ export async function getDashboard(): Promise<DashboardModel> {
   const runtimeLines = dto.lines.map(toProductionLine);
   const runtimeById = new Map(runtimeLines.map((line) => [line.id, line]));
 
+  // Active configured lines still appear in the UI even if they have not yet
+  // produced a live runtime snapshot.
   const configuredActiveLines = (await getAllLines()).filter((line) => line.isActive);
 
   for (const configuredLine of configuredActiveLines) {
@@ -320,7 +336,7 @@ export async function getLineDetail(id: number): Promise<LineDetailModel | null>
       manualTimeSeconds: dto.manualTimeSeconds,
       autoPercentage: dto.autoPercentage,
       manualPercentage: dto.manualPercentage,
-      sensors: dto.sensors.map(toSensorDetail),
+      gauges: dto.sensors.map(toGaugeDetail),
     };
   } catch {
     return null;

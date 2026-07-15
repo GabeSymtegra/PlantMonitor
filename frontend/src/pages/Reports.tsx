@@ -30,6 +30,10 @@ import {
   getRuntimeEventReports,
 } from "../services/reportsService";
 
+// -----------------------------------------------------------------------------
+// Formatting and export helpers
+// -----------------------------------------------------------------------------
+
 function formatDateTime(isoUtc: string): string {
   return new Date(isoUtc).toLocaleString();
 }
@@ -81,6 +85,7 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]): voi
   URL.revokeObjectURL(url);
 }
 
+// Reports combines two historical views: completed runs and transition events.
 export default function Reports() {
   const { dashboard } = useDashboard();
   const [lineFilter, setLineFilter] = useState<string>("all");
@@ -92,6 +97,10 @@ export default function Reports() {
   const [error, setError] = useState<string | null>(null);
 
   const selectedLineId = lineFilter === "all" ? undefined : Number(lineFilter);
+
+  // ---------------------------------------------------------------------------
+  // Data loading
+  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +144,10 @@ export default function Reports() {
     };
   }, [selectedLineId]);
 
+  // ---------------------------------------------------------------------------
+  // Filtered views derived from raw API results
+  // ---------------------------------------------------------------------------
+
   const lines = useMemo(
     () => [...(dashboard?.lines ?? [])].sort((a, b) => a.lineNumber - b.lineNumber),
     [dashboard?.lines]
@@ -177,6 +190,10 @@ export default function Reports() {
       return true;
     });
   }, [events, startDate, endDate]);
+
+  // ---------------------------------------------------------------------------
+  // UI actions
+  // ---------------------------------------------------------------------------
 
   function handleLineFilterChange(event: SelectChangeEvent<string>) {
     setLineFilter(event.target.value);
@@ -237,6 +254,10 @@ export default function Reports() {
       rows
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Page layout
+  // ---------------------------------------------------------------------------
 
   return (
     <Stack spacing={3}>

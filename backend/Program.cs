@@ -17,8 +17,13 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
+// -----------------------------------------------------------------------------
+// Application bootstrap
+// -----------------------------------------------------------------------------
+
 var builder = WebApplication.CreateBuilder(args);
 
+// Core configuration and persistence
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
 
@@ -28,6 +33,7 @@ var connectionString = builder.Configuration.GetConnectionString("PlantMonitor")
 builder.Services.AddDbContext<PlantMonitorDbContext>(options =>
     options.UseSqlite(connectionString));
 
+// Application services
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 builder.Services.AddSingleton<IPlcTagAddressValidator, PlcTagAddressValidator>();
 builder.Services.AddScoped<IPlcProtocolConfigService, EfPlcProtocolConfigService>();
@@ -41,6 +47,7 @@ builder.Services.AddSingleton<IProductionRuntimeService>(serviceProvider =>
 builder.Services.AddScoped<IRecipeToleranceService, RecipeToleranceService>();
 builder.Services.AddControllers();
 
+// Authentication and authorization
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -80,6 +87,7 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
 });
 
+// Development CORS and realtime wiring
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("FrontendDev", policy =>
@@ -105,6 +113,10 @@ builder.Services.AddSignalR();
 builder.Services.AddHostedService<LineUpdateBroadcastService>();
 builder.Services.AddHostedService(serviceProvider =>
     serviceProvider.GetRequiredService<ProductionRuntimeService>());
+
+// -----------------------------------------------------------------------------
+// Application startup
+// -----------------------------------------------------------------------------
 
 var app = builder.Build();
 
@@ -141,11 +153,16 @@ using (var scope = app.Services.CreateScope())
     await RecipeToleranceSeeder.SeedAsync(dbContext);
 }
 
+// Middleware pipeline
 app.UseCors("FrontendDev");
 
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+// -----------------------------------------------------------------------------
+// Minimal API surface
+// -----------------------------------------------------------------------------
 
 app.MapPost("/api/auth/login", (LoginRequestDto request, IJwtTokenService jwtTokenService) =>
 {
@@ -250,6 +267,10 @@ app.MapHub<LinesHub>("/hubs/lines").RequireAuthorization();
 
 app.Run();
 
+// -----------------------------------------------------------------------------
+// Local SQLite compatibility helpers
+// -----------------------------------------------------------------------------
+
 static bool HasSqliteTable(PlantMonitorDbContext dbContext, string tableName)
 {
     if (!string.Equals(dbContext.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
@@ -289,6 +310,8 @@ static bool HasSqliteTable(PlantMonitorDbContext dbContext, string tableName)
 
 static void EnsureLegacyRuntimeSchema(PlantMonitorDbContext dbContext)
 {
+    // Older local databases may exist without EF migration history. These
+    // guards keep dev and test environments bootable while the schema evolves.
     if (!string.Equals(dbContext.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
     {
         return;
@@ -456,6 +479,7 @@ static bool HasSqliteColumn(PlantMonitorDbContext dbContext, string tableName, s
 
 public partial class Program;
 
+// Query DTOs used by minimal APIs
 public sealed class ProductionRunsQuery
 {
     public int? LineId { get; init; }

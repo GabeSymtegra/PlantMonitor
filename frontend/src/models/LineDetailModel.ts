@@ -1,6 +1,6 @@
 import type { LineStatus } from "../types/LineStatus";
 
-export interface SensorDetail {
+export interface GaugeDetail {
   zone: string;
   currentSetpoint: number;
   currentActual: number;
@@ -39,5 +39,5 @@ export interface LineDetailModel {
   manualTimeSeconds: number;
   autoPercentage: number;
   manualPercentage: number;
-  sensors: SensorDetail[];
+  gauges: GaugeDetail[];
 }

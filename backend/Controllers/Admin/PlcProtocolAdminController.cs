@@ -9,6 +9,8 @@ namespace backend.Controllers.Admin;
 [ApiController]
 [Route("api/admin")]
 [Authorize(Policy = "AdminOnly")]
+// Administration endpoints for PLC configuration, tag mapping, and live PLC
+// diagnostics are grouped here behind the AdminOnly policy.
 public sealed class PlcProtocolAdminController : ControllerBase
 {
     private readonly IPlcProtocolConfigService _protocolConfigService;
@@ -21,6 +23,10 @@ public sealed class PlcProtocolAdminController : ControllerBase
         _protocolConfigService = protocolConfigService;
         _connectionService = connectionService;
     }
+
+    // -------------------------------------------------------------------------
+    // Presets, assignments, and tag catalog management
+    // -------------------------------------------------------------------------
 
     [HttpGet("plc/presets")]
     public ActionResult<IReadOnlyCollection<PlcPresetDto>> GetPresets([FromQuery] string? manufacturer)
@@ -113,6 +119,10 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         return Ok(effectiveTags);
     }
+
+    // -------------------------------------------------------------------------
+    // PLC connectivity and live tag interaction
+    // -------------------------------------------------------------------------
 
     [HttpPost("plc/test-connection")]
     public async Task<ActionResult<PlcConnectionResult>> TestConnection([FromBody] PlcConnectionRequest request, CancellationToken cancellationToken)
@@ -252,6 +262,10 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         return Ok(result);
     }
+
+    // -------------------------------------------------------------------------
+    // Small controller helpers
+    // -------------------------------------------------------------------------
 
     private bool TryResolveDriverAndIp(
         string driverName,

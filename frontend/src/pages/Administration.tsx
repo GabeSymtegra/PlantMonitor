@@ -46,6 +46,10 @@ import { ApiRequestError } from "../services/api/client";
 import { LineStatus } from "../types/LineStatus";
 import type { PlcManufacturer, ProductionLine } from "../types/ProductionLine";
 
+// -----------------------------------------------------------------------------
+// Form model and local utilities
+// -----------------------------------------------------------------------------
+
 type LineConfigForm = {
   lineNumber: number;
   lineName: string;
@@ -137,6 +141,8 @@ function describeTagReadability(result: PlcTagReadResult): string {
   return "Direct value read was not available.";
 }
 
+// Administration combines line configuration, PLC connection diagnostics, tag
+// discovery, and tag-to-logical-slot mapping in one workflow-heavy screen.
 export default function Administration() {
   const [lines, setLines] = useState<ProductionLine[]>([]);
   const [selectedLineId, setSelectedLineId] = useState<number | "new">("new");
@@ -188,6 +194,7 @@ export default function Administration() {
 
   const hasDiscoveredTags = discoveredTags.length > 0;
 
+  // Initial data for the page comes from line configuration and slot metadata.
   useEffect(() => {
     void loadLines();
     void loadTagSlots();
@@ -201,6 +208,10 @@ export default function Administration() {
 
     void loadLineTagCatalog(selectedLineId);
   }, [selectedLineId]);
+
+  // ---------------------------------------------------------------------------
+  // Data loading helpers
+  // ---------------------------------------------------------------------------
 
   async function loadLines() {
     const fetchedLines = await getAllLines();

@@ -10,8 +10,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace backend.Services.Production;
 
+// This service is the runtime source of truth for live dashboard state,
+// line detail snapshots, completed-run history, and mode/status switch events.
 public sealed class ProductionRuntimeService : BackgroundService, IProductionRuntimeService
 {
+    // Shared mutable runtime state for all configured lines.
     private readonly object _gate = new();
     private readonly Dictionary<int, LineRuntimeState> _lines;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -29,6 +32,10 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
     private const string LogicalKeyColdSetpoint = "cold_setpoint";
     private const string LogicalKeyColdActual = "cold_actual";
 
+    // -------------------------------------------------------------------------
+    // Construction and query APIs
+    // -------------------------------------------------------------------------
+
     public ProductionRuntimeService(
         ILogger<ProductionRuntimeService> logger,
         IServiceScopeFactory scopeFactory,
@@ -40,6 +47,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         _lines = BuildLineStates();
     }
 
+    // Dashboard uses a flattened line snapshot for the main overview page.
     public DashboardSnapshotDto GetDashboardSnapshot()
     {
         lock (_gate)
@@ -61,6 +69,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
     }
 
+    // Line details expose the deeper runtime breakdown shown on the line page.
     public LineDetailSnapshotDto? GetLineDetail(int lineId)
     {
         lock (_gate)
@@ -191,6 +200,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }).ToList();
     }
 
+    // Reports page reads persisted transition events through this query.
     public async Task<IReadOnlyCollection<RuntimeEventDto>> GetRuntimeEventsAsync(
         int? lineId,
         int take,
@@ -228,6 +238,10 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }).ToList();
     }
 
+    // -------------------------------------------------------------------------
+    // Background polling loop
+    // -------------------------------------------------------------------------
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
@@ -244,6 +258,8 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
                     try
                     {
+                        // A successful mapped tick means the line snapshot came
+                        // from a live PLC read rather than a fallback path.
                         updatedFromPlc = await TryTickStateFromMappedPlcAsync(state, now, stoppingToken);
                     }
                     catch (Exception exception)
@@ -256,6 +272,8 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
                     if (!updatedFromPlc)
                     {
+                        // When the PLC cannot be reached, surface that directly
+                        // instead of inventing simulated production behavior.
                         await MarkLineOfflineAsync(state, now, stoppingToken);
                     }
 
@@ -268,6 +286,10 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             _logger.LogInformation("Production runtime service stopping.");
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Live PLC tick handling
+    // -------------------------------------------------------------------------
 
     private async Task<bool> TryTickStateFromMappedPlcAsync(
         LineRuntimeState state,
@@ -387,6 +409,9 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         return true;
     }
 
+    // Sampling must only happen while a production run is active in the
+    // statistics engine. This method restarts the engine on the first live tick
+    // after a stop or offline period.
     private void EnsureRunIsActiveForSampling(LineRuntimeState state, DateTime now)
     {
         if (state.Engine.IsActive)
@@ -416,6 +441,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
     }
 
+    // Initial line state is reconstructed from configured lines in the database.
     private Dictionary<int, LineRuntimeState> BuildLineStates()
     {
         using var scope = _scopeFactory.CreateScope();
@@ -446,6 +472,10 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                         OperatorName: $"operator-{line.LineNumber}",
                         StartTimeUtc: now)));
     }
+
+    // -------------------------------------------------------------------------
+    // Fallback and decode helpers
+    // -------------------------------------------------------------------------
 
     private void TickStateSimulated(LineRuntimeState state, DateTime now)
     {
@@ -482,6 +512,8 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             Zones: samples));
     }
 
+    // Offline is an explicit runtime state so the UI can distinguish between a
+    // stopped machine and a disconnected one.
     private async Task MarkLineOfflineAsync(LineRuntimeState state, DateTime now, CancellationToken cancellationToken)
     {
         string previousStatus;
@@ -661,6 +693,8 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         IReadOnlyDictionary<string, PlcTagReadResultDto> readMap,
         out string state)
     {
+        // Numeric PLC states are intentionally mapped explicitly so the
+        // dashboard and reports keep a stable vocabulary.
         state = "Running";
         if (!TryGetTextByLogicalKey(catalogMap, readMap, LogicalKeyMachineState, out var rawState))
         {
@@ -815,6 +849,10 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         return totalCount == 0 ? 0d : weightedSum / totalCount;
     }
 
+    // -------------------------------------------------------------------------
+    // Run lifecycle and persistence
+    // -------------------------------------------------------------------------
+
     private async Task HandleRunLifecycleTransitionAsync(LineRuntimeState state, DateTime now, CancellationToken cancellationToken)
     {
         var stopped = IsStopState(state.Status);
@@ -855,6 +893,8 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         await PersistCompletedRunAsync(state, completed, cancellationToken);
     }
 
+    // Completed runs are persisted once per stop/fault/offline transition so the
+    // reports page can reconstruct historical production activity.
     private async Task PersistCompletedRunAsync(
         LineRuntimeState state,
         CompletedProductionRecord completed,
@@ -901,6 +941,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
     }
 
+    // Runtime events capture state changes that matter to operators and reports.
     private async Task PersistRuntimeEventAsync(
         LineRuntimeState state,
         string eventType,
@@ -945,6 +986,10 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                 currentValue);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Small runtime helpers
+    // -------------------------------------------------------------------------
 
     private static List<CompletedProductionRunZoneStatEntity> BuildZoneStats(ProductionStatisticsSnapshot snapshot)
     {
@@ -1007,6 +1052,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         };
     }
 
+    // Mutable in-memory state for a single configured line.
     private sealed class LineRuntimeState
     {
         public int LineId { get; }

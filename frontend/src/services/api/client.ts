@@ -2,6 +2,10 @@ const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
   "http://localhost:5265/api";
 
+// -----------------------------------------------------------------------------
+// Auth token state and exported API error type
+// -----------------------------------------------------------------------------
+
 const TOKEN_STORAGE_KEY = "plantmonitor-auth-token";
 export const AUTH_EXPIRED_EVENT = "plantmonitor-auth-expired";
 
@@ -28,6 +32,10 @@ export class ApiRequestError extends Error {
     this.responseBody = options.responseBody;
   }
 }
+
+// -----------------------------------------------------------------------------
+// Request construction helpers
+// -----------------------------------------------------------------------------
 
 function buildUrl(endpoint: string): string {
   return `${API_BASE}${endpoint}`;
@@ -67,6 +75,8 @@ function getAuthHeaders(): HeadersInit {
   };
 }
 
+// Unauthorized responses outside the login endpoint trigger a global auth
+// expiry event so the auth context can clear stale sessions.
 function dispatchAuthExpiredIfNeeded(url: string, status: number) {
   if (status !== 401 || url.endsWith("/auth/login")) {
     return;
@@ -78,6 +88,10 @@ function dispatchAuthExpiredIfNeeded(url: string, status: number) {
     window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
   }
 }
+
+// -----------------------------------------------------------------------------
+// Shared response and request pipeline
+// -----------------------------------------------------------------------------
 
 async function handleResponse<T>(
   response: Response,
@@ -141,6 +155,8 @@ async function request<T>(
   }
 }
 
+// Public convenience helpers keep API usage readable at the call site while all
+// header, auth, and error behavior stays centralized here.
 export async function apiGet<T>(endpoint: string): Promise<T> {
   return request<T>("GET", endpoint);
 }

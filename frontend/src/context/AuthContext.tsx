@@ -8,6 +8,10 @@ import {
   setApiAccessToken,
 } from "../services/api/client";
 
+// -----------------------------------------------------------------------------
+// Auth transport and context contracts
+// -----------------------------------------------------------------------------
+
 interface LoginResponse {
   accessToken: string;
   username: string;
@@ -35,6 +39,7 @@ const TOKEN_STORAGE_KEY = "plantmonitor-auth-token";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// These helpers keep storage parsing isolated from the provider logic.
 function readStoredUser(): User | null {
   const serialized =
     localStorage.getItem(STORAGE_KEY) ??
@@ -67,6 +72,8 @@ function clearStoredAuth() {
   sessionStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
+// AuthProvider owns login/logout, session persistence, and automatic reaction
+// to expired backend tokens.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => readStoredUser());
   const [accessToken, setAccessToken] = useState<string | null>(() =>
@@ -78,6 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setApiAccessToken(accessToken);
   }, [accessToken]);
 
+  // The API client emits a global event when a protected request comes back as
+  // unauthorized so the UI can clear stale sessions consistently.
   useEffect(() => {
     function handleAuthExpired() {
       setUser(null);
@@ -92,6 +101,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
     };
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Auth actions
+  // ---------------------------------------------------------------------------
 
   async function login(
     username: string,
@@ -114,6 +127,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: response.role,
       };
 
+      // Local storage is used for remembered sessions, session storage for
+      // browser-lifetime sessions.
       setUser(authenticatedUser);
       setAccessToken(response.accessToken);
 
@@ -165,6 +180,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearStoredAuth();
   }
 
+  // Derived auth capabilities are exposed once here so callers do not repeat
+  // role logic throughout the UI.
   const value = useMemo(
     () => ({
       user,

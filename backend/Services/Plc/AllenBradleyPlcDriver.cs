@@ -7,8 +7,12 @@ using TagInfo = libplctag.DataTypes.TagInfo;
 
 namespace backend.Services.Plc;
 
+// Allen-Bradley support is built around live controller discovery and leaf-tag
+// reads. When direct reads are unavailable, the driver returns diagnostics
+// instead of inventing values.
 public sealed class AllenBradleyPlcDriver : IPlcDriver
 {
+    // Common primitive type codes returned by libplctag metadata.
     private const ushort BoolTypeCode = 0x00C1;
     private const ushort SintTypeCode = 0x00C2;
     private const ushort IntTypeCode = 0x00C3;
@@ -29,6 +33,10 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
     ];
 
     public string DriverName => "AllenBradley";
+
+    // -------------------------------------------------------------------------
+    // Connection and top-level driver operations
+    // -------------------------------------------------------------------------
 
     public async Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, CancellationToken cancellationToken = default)
     {
@@ -96,6 +104,8 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
         }
     }
 
+    // Older or restricted controllers may respond to the probe but not support
+    // the discovery tag used for browse-style operations.
     private static PlcConnectionResult Failure(string ipAddress, System.Diagnostics.Stopwatch stopwatch, string message)
     {
         return new PlcConnectionResult
@@ -139,6 +149,8 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
             || message.Contains("discovery");
     }
 
+    // Browse, read, and write follow the same driver contract used by the
+    // admin PLC tooling and runtime service.
     public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(
         string ipAddress,
         string? search = null,
@@ -228,6 +240,10 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
             AttemptedAtUtc = DateTime.UtcNow,
         });
     }
+
+    // -------------------------------------------------------------------------
+    // Internal browse/read helpers
+    // -------------------------------------------------------------------------
 
     private sealed record FillerTagDefinition(
         string Name,

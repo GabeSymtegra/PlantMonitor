@@ -39,6 +39,8 @@ const DashboardContext = createContext<DashboardContextType | undefined>(
   undefined
 );
 
+// The dashboard context owns both the polling fallback path and the SignalR
+// realtime subscription used by the operational views.
 export function DashboardProvider({
   children,
 }: {
@@ -53,6 +55,7 @@ export function DashboardProvider({
   const [view, setView] = useState<DashboardView>("table");
   const signalRConnectionRef = useRef<HubConnection | null>(null);
 
+  // Polling is the baseline transport. SignalR only accelerates refreshes.
   async function refresh(showLoader = true) {
     if (showLoader) {
       setLoading(true);
@@ -64,6 +67,8 @@ export function DashboardProvider({
       setError(null);
     } catch {
       try {
+        // If runtime calls fail, fall back to configured active lines instead
+        // of blanking the entire UI.
         const configuredLines = (await getAllLines()).filter((line) => line.isActive);
 
         setDashboard({
@@ -101,6 +106,7 @@ export function DashboardProvider({
     async function loadInitialDashboard() {
       await refresh(true);
 
+      // Periodic polling keeps the dashboard useful even if SignalR is down.
       pollingTimer = setInterval(() => {
         void refresh(false);
       }, DASHBOARD_POLL_MS);
@@ -115,6 +121,8 @@ export function DashboardProvider({
 
       signalRConnectionRef.current = connection;
 
+      // The backend emits broad refresh signals rather than fine-grained row
+      // patches, so the frontend always re-fetches the latest snapshot.
       connection.on("LineUpdated", () => {
         if (!disposed) {
           void refresh(false);
