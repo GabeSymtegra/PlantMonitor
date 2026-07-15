@@ -250,16 +250,13 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                     {
                         _logger.LogWarning(
                             exception,
-                            "Mapped PLC tick failed for line {LineId}. Falling back to simulated runtime values.",
+                            "Mapped PLC tick failed for line {LineId}. Marking line Offline.",
                             state.LineId);
                     }
 
                     if (!updatedFromPlc)
                     {
-                        lock (_gate)
-                        {
-                            TickStateSimulated(state, now);
-                        }
+                        await MarkLineOfflineAsync(state, now, stoppingToken);
                     }
 
                     await HandleRunLifecycleTransitionAsync(state, now, stoppingToken);
@@ -483,6 +480,25 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             Mode: mode,
             ProductionLength: state.ProductionLength,
             Zones: samples));
+    }
+
+    private async Task MarkLineOfflineAsync(LineRuntimeState state, DateTime now, CancellationToken cancellationToken)
+    {
+        string previousStatus;
+        string currentStatus;
+
+        lock (_gate)
+        {
+            previousStatus = state.Status;
+            UpdateStatus(state, "Offline", now);
+            state.LastTickUtc = now;
+            currentStatus = state.Status;
+        }
+
+        if (!string.Equals(previousStatus, currentStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            await PersistRuntimeEventAsync(state, "StatusSwitch", previousStatus, currentStatus, now, cancellationToken);
+        }
     }
 
     private static ZoneSample BuildZoneSampleSimulated(LineRuntimeState state, MeasurementZone zone, double phase)
@@ -965,6 +981,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
     private static bool IsStopState(string status)
     {
         return status.Equals("Stopped", StringComparison.OrdinalIgnoreCase)
+            || status.Equals("Offline", StringComparison.OrdinalIgnoreCase)
             || status.Equals("Faulted", StringComparison.OrdinalIgnoreCase)
             || status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
     }
