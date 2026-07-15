@@ -13,6 +13,24 @@ export interface CompletedRunReportRow {
   manualPercentage: number;
 }
 
+export interface CompletedRunZoneStat {
+  zone: string;
+  segment: string;
+  averageAbsoluteDeviation: number;
+  maxPositiveDeviation: number;
+  maxNegativeDeviation: number;
+  currentDeviation: number;
+}
+
+export interface CompletedRunReportDetail extends CompletedRunReportRow {
+  recipeId: string;
+  machineId: string;
+  operatorName: string;
+  autoTimeSeconds: number;
+  manualTimeSeconds: number;
+  zoneStats: CompletedRunZoneStat[];
+}
+
 export interface RuntimeEventReportRow {
   id: string;
   lineId: number;

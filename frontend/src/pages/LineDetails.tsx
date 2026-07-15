@@ -8,6 +8,7 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import { alpha, getContrastRatio, useTheme } from "@mui/material/styles";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -30,31 +31,66 @@ function formatDuration(seconds: number): string {
 
 const gaugeCardColors = {
   Bare: {
-    background: "#FFF7D6",
-    border: "#E6CB69",
-    accent: "#9A7A00",
+    light: {
+      background: "#FFF7D6",
+      border: "#E6CB69",
+      accent: "#9A7A00",
+    },
+    dark: {
+      background: "#4B3B05",
+      border: "#D4AF37",
+      accent: "#FFE082",
+    },
   },
   Hot: {
-    background: "#FDECEC",
-    border: "#E9A5A5",
-    accent: "#C75B5B",
+    light: {
+      background: "#FDECEC",
+      border: "#E9A5A5",
+      accent: "#C75B5B",
+    },
+    dark: {
+      background: "#4A1F1F",
+      border: "#D98282",
+      accent: "#FFB4B4",
+    },
   },
   Cold: {
-    background: "#EAF4FF",
-    border: "#9FC7F5",
-    accent: "#2F6DB2",
+    light: {
+      background: "#EAF4FF",
+      border: "#9FC7F5",
+      accent: "#2F6DB2",
+    },
+    dark: {
+      background: "#142D4C",
+      border: "#6EA8E5",
+      accent: "#B7D7F7",
+    },
   },
   Default: {
-    background: "#F5F5F5",
-    border: "#D0D0D0",
-    accent: "#4B5563",
+    light: {
+      background: "#F5F5F5",
+      border: "#D0D0D0",
+      accent: "#4B5563",
+    },
+    dark: {
+      background: "#24303D",
+      border: "#526173",
+      accent: "#E2E8F0",
+    },
   },
 } as const;
+
+function getReadableTextColor(background: string) {
+  const whiteContrast = getContrastRatio(background, "#FFFFFF");
+  const darkContrast = getContrastRatio(background, "#0F172A");
+
+  return whiteContrast >= darkContrast ? "#FFFFFF" : "#0F172A";
+}
 
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
     <Stack direction="row" justifyContent="space-between" spacing={2}>
-      <Typography color="text.secondary">{label}</Typography>
+      <Typography sx={{ color: "inherit", opacity: 0.78 }}>{label}</Typography>
       <Typography sx={{ fontWeight: 600, textAlign: "right" }}>{value}</Typography>
     </Stack>
   );
@@ -65,7 +101,13 @@ function GaugeSection({
 }: {
   gauge: GaugeDetail;
 }) {
-  const palette = gaugeCardColors[gauge.zone as keyof typeof gaugeCardColors] ?? gaugeCardColors.Default;
+  const theme = useTheme();
+  const zonePalette = gaugeCardColors[gauge.zone as keyof typeof gaugeCardColors] ?? gaugeCardColors.Default;
+  const palette = theme.palette.mode === "dark" ? zonePalette.dark : zonePalette.light;
+  const textColor = getReadableTextColor(palette.background);
+  const nestedPanelBackground = theme.palette.mode === "dark"
+    ? alpha("#FFFFFF", 0.08)
+    : alpha("#FFFFFF", 0.58);
 
   return (
     <Paper
@@ -75,6 +117,7 @@ function GaugeSection({
         backgroundColor: palette.background,
         border: `1px solid ${palette.border}`,
         borderRadius: 3,
+        color: textColor,
       }}
     >
       <Typography variant="h6" sx={{ mb: 0.75, fontWeight: 800, color: palette.accent }}>
@@ -120,7 +163,14 @@ function GaugeSection({
       </Typography>
 
       <Stack spacing={1.5}>
-        <Paper sx={{ p: 1.5, backgroundColor: "rgba(255,255,255,0.58)", borderRadius: 2 }}>
+        <Paper
+          sx={{
+            p: 1.5,
+            backgroundColor: nestedPanelBackground,
+            borderRadius: 2,
+            color: textColor,
+          }}
+        >
           <Typography variant="body2" sx={{ mb: 1, fontWeight: 700 }}>
             Auto Mode Quality
           </Typography>
@@ -140,7 +190,14 @@ function GaugeSection({
           </Stack>
         </Paper>
 
-        <Paper sx={{ p: 1.5, backgroundColor: "rgba(255,255,255,0.58)", borderRadius: 2 }}>
+        <Paper
+          sx={{
+            p: 1.5,
+            backgroundColor: nestedPanelBackground,
+            borderRadius: 2,
+            color: textColor,
+          }}
+        >
           <Typography variant="body2" sx={{ mb: 1, fontWeight: 700 }}>
             Manual Mode Quality
           </Typography>

@@ -163,41 +163,43 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             .Take(normalizedTake)
             .ToListAsync(cancellationToken);
 
-        return runs.Select(x => new CompletedProductionRunDto
+        return runs.Select(MapCompletedRun).ToList();
+    }
+
+    public async Task<CompletedProductionRunDto?> GetCompletedRunAsync(
+        Guid runId,
+        CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+
+        var run = await dbContext.CompletedProductionRuns
+            .AsNoTracking()
+            .Include(x => x.ZoneStats)
+            .FirstOrDefaultAsync(x => x.Id == runId, cancellationToken);
+
+        return run is null ? null : MapCompletedRun(run);
+    }
+
+    public async Task<bool> DeleteCompletedRunAsync(
+        Guid runId,
+        CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+
+        var run = await dbContext.CompletedProductionRuns
+            .Include(x => x.ZoneStats)
+            .FirstOrDefaultAsync(x => x.Id == runId, cancellationToken);
+
+        if (run is null)
         {
-            Id = x.Id,
-            LineId = x.LineId,
-            LineNumber = x.LineNumber,
-            LineName = x.LineName,
-            ProductId = x.ProductId,
-            RecipeId = x.RecipeId,
-            MachineId = x.MachineId,
-            OperatorName = x.OperatorName,
-            FinalStatus = x.FinalStatus,
-            StartTimeUtc = x.StartTimeUtc,
-            EndTimeUtc = x.EndTimeUtc,
-            RuntimeSeconds = x.RuntimeSeconds,
-            ProductionLength = x.ProductionLength,
-            AutoTimeSeconds = x.AutoTimeSeconds,
-            ManualTimeSeconds = x.ManualTimeSeconds,
-            AutoPercentage = x.AutoPercentage,
-            ManualPercentage = x.ManualPercentage,
-            ZoneStats = x.ZoneStats
-                .OrderBy(stat => stat.Zone)
-                .ThenBy(stat => stat.Segment)
-                .Select(stat => new CompletedProductionRunZoneStatDto
-                {
-                    Zone = stat.Zone,
-                    Segment = stat.Segment,
-                    MeasurementCount = stat.MeasurementCount,
-                    SkippedCount = stat.SkippedCount,
-                    AverageAbsoluteDeviation = stat.AverageAbsoluteDeviation,
-                    MaxPositiveDeviation = stat.MaxPositiveDeviation,
-                    MaxNegativeDeviation = stat.MaxNegativeDeviation,
-                    CurrentDeviation = stat.CurrentDeviation,
-                })
-                .ToList(),
-        }).ToList();
+            return false;
+        }
+
+        dbContext.CompletedProductionRuns.Remove(run);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     // Reports page reads persisted transition events through this query.
@@ -435,6 +437,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             state.Metadata = nextMetadata;
             state.ProductionLength = 0d;
             state.HasPersistedCurrentStop = false;
+            state.HasSeenRunningState = false;
             state.Engine.StartRun(nextMetadata);
             state.LastTickUtc = now;
             state.StatusEnteredUtc = now;
@@ -870,8 +873,14 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
                     state.Metadata = nextMetadata;
                     state.ProductionLength = 0d;
+                    state.HasSeenRunningState = false;
                     state.Engine.StartRun(nextMetadata);
                 }
+            }
+
+            if (state.Status.Equals("Running", StringComparison.OrdinalIgnoreCase))
+            {
+                state.HasSeenRunningState = true;
             }
 
             state.HasPersistedCurrentStop = false;
@@ -880,6 +889,17 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
         if (state.HasPersistedCurrentStop || !state.Engine.IsActive)
         {
+            return;
+        }
+
+        if (!state.HasSeenRunningState)
+        {
+            lock (_gate)
+            {
+                state.Engine.CompleteRun(now);
+                state.HasPersistedCurrentStop = true;
+            }
+
             return;
         }
 
@@ -1031,6 +1051,45 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             || status.Equals("Completed", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static CompletedProductionRunDto MapCompletedRun(CompletedProductionRunEntity run)
+    {
+        return new CompletedProductionRunDto
+        {
+            Id = run.Id,
+            LineId = run.LineId,
+            LineNumber = run.LineNumber,
+            LineName = run.LineName,
+            ProductId = run.ProductId,
+            RecipeId = run.RecipeId,
+            MachineId = run.MachineId,
+            OperatorName = run.OperatorName,
+            FinalStatus = run.FinalStatus,
+            StartTimeUtc = run.StartTimeUtc,
+            EndTimeUtc = run.EndTimeUtc,
+            RuntimeSeconds = run.RuntimeSeconds,
+            ProductionLength = run.ProductionLength,
+            AutoTimeSeconds = run.AutoTimeSeconds,
+            ManualTimeSeconds = run.ManualTimeSeconds,
+            AutoPercentage = run.AutoPercentage,
+            ManualPercentage = run.ManualPercentage,
+            ZoneStats = run.ZoneStats
+                .OrderBy(stat => stat.Zone)
+                .ThenBy(stat => stat.Segment)
+                .Select(stat => new CompletedProductionRunZoneStatDto
+                {
+                    Zone = stat.Zone,
+                    Segment = stat.Segment,
+                    MeasurementCount = stat.MeasurementCount,
+                    SkippedCount = stat.SkippedCount,
+                    AverageAbsoluteDeviation = stat.AverageAbsoluteDeviation,
+                    MaxPositiveDeviation = stat.MaxPositiveDeviation,
+                    MaxNegativeDeviation = stat.MaxNegativeDeviation,
+                    CurrentDeviation = stat.CurrentDeviation,
+                })
+                .ToList(),
+        };
+    }
+
     private static void UpdateStatus(LineRuntimeState state, string nextStatus, DateTime now)
     {
         if (!string.Equals(state.Status, nextStatus, StringComparison.OrdinalIgnoreCase))
@@ -1069,6 +1128,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         public double ProductionLength { get; set; }
         public ControlMode LastKnownControlMode { get; set; } = ControlMode.Manual;
         public bool HasPersistedCurrentStop { get; set; }
+        public bool HasSeenRunningState { get; set; }
 
         public LineRuntimeState(
             int lineId,

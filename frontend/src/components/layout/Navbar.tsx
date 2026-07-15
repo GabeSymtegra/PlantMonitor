@@ -80,7 +80,7 @@ export default function Navbar() {
     }
 
     if (pathname.startsWith("/reports")) {
-      return `${monitorName} Monitor Reports`;
+      return `${monitorName} Monitor Completed Runs`;
     }
 
     if (pathname.startsWith("/login")) {

@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   FormControl,
   InputLabel,
   MenuItem,
@@ -19,6 +20,7 @@ import {
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import type { SelectChangeEvent } from "@mui/material";
+import { useNavigate } from "react-router-dom";
 
 import { useDashboard } from "../context/useDashboard";
 import type {
@@ -26,9 +28,15 @@ import type {
   RuntimeEventReportRow,
 } from "../models/Reports";
 import {
+  deleteCompletedRunReport,
   getCompletedRunReports,
   getRuntimeEventReports,
 } from "../services/reportsService";
+
+type ReportsView = "runs" | "events";
+type RunSort = "newest" | "oldest" | "lineAsc" | "lineDesc";
+
+const REPORT_REFRESH_MS = 10000;
 
 // -----------------------------------------------------------------------------
 // Formatting and export helpers
@@ -88,12 +96,17 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]): voi
 // Reports combines two historical views: completed runs and transition events.
 export default function Reports() {
   const { dashboard } = useDashboard();
+  const navigate = useNavigate();
+  const [activeView, setActiveView] = useState<ReportsView>("runs");
   const [lineFilter, setLineFilter] = useState<string>("all");
+  const [runSort, setRunSort] = useState<RunSort>("newest");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [runs, setRuns] = useState<CompletedRunReportRow[]>([]);
   const [events, setEvents] = useState<RuntimeEventReportRow[]>([]);
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const selectedLineId = lineFilter === "all" ? undefined : Number(lineFilter);
@@ -104,6 +117,7 @@ export default function Reports() {
 
   useEffect(() => {
     let cancelled = false;
+    let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
     async function load() {
       setLoading(true);
@@ -139,8 +153,16 @@ export default function Reports() {
 
     void load();
 
+    refreshTimer = setInterval(() => {
+      void load();
+    }, REPORT_REFRESH_MS);
+
     return () => {
       cancelled = true;
+
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
     };
   }, [selectedLineId]);
 
@@ -172,6 +194,38 @@ export default function Reports() {
     });
   }, [runs, startDate, endDate]);
 
+  const sortedRuns = useMemo(() => {
+    const rows = [...filteredRuns];
+
+    switch (runSort) {
+      case "oldest":
+        return rows.sort((left, right) =>
+          new Date(left.endTimeUtc).getTime() - new Date(right.endTimeUtc).getTime()
+        );
+      case "lineAsc":
+        return rows.sort((left, right) =>
+          left.lineNumber - right.lineNumber || new Date(right.endTimeUtc).getTime() - new Date(left.endTimeUtc).getTime()
+        );
+      case "lineDesc":
+        return rows.sort((left, right) =>
+          right.lineNumber - left.lineNumber || new Date(right.endTimeUtc).getTime() - new Date(left.endTimeUtc).getTime()
+        );
+      case "newest":
+      default:
+        return rows.sort((left, right) =>
+          new Date(right.endTimeUtc).getTime() - new Date(left.endTimeUtc).getTime()
+        );
+    }
+  }, [filteredRuns, runSort]);
+
+  const selectedRuns = useMemo(
+    () => sortedRuns.filter((row) => selectedRunIds.includes(row.id)),
+    [selectedRunIds, sortedRuns]
+  );
+
+  const allVisibleRunsSelected =
+    sortedRuns.length > 0 && sortedRuns.every((row) => selectedRunIds.includes(row.id));
+
   const filteredEvents = useMemo(() => {
     const start = toDateRangeStart(startDate);
     const end = toDateRangeEnd(endDate);
@@ -199,8 +253,60 @@ export default function Reports() {
     setLineFilter(event.target.value);
   }
 
+  function handleRunSortChange(event: SelectChangeEvent<string>) {
+    setRunSort(event.target.value as RunSort);
+  }
+
+  function handleToggleRunSelection(runId: string) {
+    setSelectedRunIds((current) =>
+      current.includes(runId)
+        ? current.filter((id) => id !== runId)
+        : [...current, runId]
+    );
+  }
+
+  function handleToggleSelectAllVisibleRuns() {
+    if (allVisibleRunsSelected) {
+      setSelectedRunIds((current) => current.filter((id) => !sortedRuns.some((row) => row.id === id)));
+      return;
+    }
+
+    setSelectedRunIds((current) => Array.from(new Set([...current, ...sortedRuns.map((row) => row.id)])));
+  }
+
+  async function handleDeleteRun(runId: string) {
+    setDeletingRunId(runId);
+
+    try {
+      await deleteCompletedRunReport(runId);
+      setRuns((current) => current.filter((row) => row.id !== runId));
+    } catch (deleteError) {
+      const message = deleteError instanceof Error
+        ? deleteError.message
+        : "Failed to delete completed run.";
+      setError(message);
+    } finally {
+      setDeletingRunId(null);
+    }
+  }
+
+  async function handleDeleteSelectedRuns() {
+    const runIds = [...selectedRunIds];
+
+    for (const runId of runIds) {
+      await handleDeleteRun(runId);
+    }
+
+    setSelectedRunIds([]);
+  }
+
+  function handleKeepSelectedRuns() {
+    setSelectedRunIds([]);
+  }
+
   function handleExportRunsCsv() {
-    const rows = filteredRuns.map((row) => [
+    const exportRows = selectedRuns.length > 0 ? selectedRuns : sortedRuns;
+    const rows = exportRows.map((row) => [
       String(row.lineNumber),
       row.lineName,
       row.productId || "N/A",
@@ -263,12 +369,29 @@ export default function Reports() {
     <Stack spacing={3}>
       <Box>
         <Typography variant="h4" sx={{ fontWeight: 700 }}>
-          Reports
+          Completed Runs
         </Typography>
         <Typography color="text.secondary">
-          Run history and runtime switch events across all lines.
+          Saved production runs are recorded automatically when a line run ends.
         </Typography>
       </Box>
+
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        <Button
+          size="small"
+          variant={activeView === "runs" ? "contained" : "outlined"}
+          onClick={() => setActiveView("runs")}
+        >
+          Completed Runs
+        </Button>
+        <Button
+          size="small"
+          variant={activeView === "events" ? "contained" : "outlined"}
+          onClick={() => setActiveView("events")}
+        >
+          Runtime Events
+        </Button>
+      </Stack>
 
       <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
         <FormControl size="small" sx={{ minWidth: 260 }}>
@@ -305,6 +428,23 @@ export default function Reports() {
           onChange={(event) => setEndDate(event.target.value)}
           InputLabelProps={{ shrink: true }}
         />
+
+        {activeView === "runs" ? (
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="completed-runs-sort-label">Sort</InputLabel>
+            <Select
+              labelId="completed-runs-sort-label"
+              value={runSort}
+              label="Sort"
+              onChange={handleRunSortChange}
+            >
+              <MenuItem value="newest">Newest first</MenuItem>
+              <MenuItem value="oldest">Oldest first</MenuItem>
+              <MenuItem value="lineAsc">Line number ascending</MenuItem>
+              <MenuItem value="lineDesc">Line number descending</MenuItem>
+            </Select>
+          </FormControl>
+        ) : null}
       </Stack>
 
       {loading ? (
@@ -315,113 +455,175 @@ export default function Reports() {
         <Alert severity="error">{error}</Alert>
       ) : null}
 
-      <Paper sx={{ p: 2 }}>
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          justifyContent="space-between"
-          alignItems={{ xs: "flex-start", sm: "center" }}
-          sx={{ mb: 1.5 }}
-          spacing={1}
-        >
-          <Typography variant="h6">
-            Completed Runs ({filteredRuns.length})
-          </Typography>
-          <Button size="small" variant="outlined" onClick={handleExportRunsCsv}>
-            Export CSV
-          </Button>
-        </Stack>
+      {activeView === "runs" ? (
+        <Paper sx={{ p: 2 }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            sx={{ mb: 1.5 }}
+            spacing={1}
+          >
+            <Box>
+              <Typography variant="h6">
+                Completed Runs ({sortedRuns.length})
+              </Typography>
+              <Typography color="text.secondary">
+                {selectedRunIds.length > 0
+                  ? `${selectedRunIds.length} selected for bulk actions.`
+                  : "Select completed runs to delete, keep, or export them in bulk."}
+              </Typography>
+            </Box>
 
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Line</TableCell>
-                <TableCell>Product</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Start</TableCell>
-                <TableCell>End</TableCell>
-                <TableCell>Runtime</TableCell>
-                <TableCell>Length</TableCell>
-                <TableCell>Auto %</TableCell>
-                <TableCell>Manual %</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredRuns.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell>{`L${row.lineNumber} - ${row.lineName}`}</TableCell>
-                  <TableCell>{row.productId || "N/A"}</TableCell>
-                  <TableCell>{row.finalStatus}</TableCell>
-                  <TableCell>{formatDateTime(row.startTimeUtc)}</TableCell>
-                  <TableCell>{formatDateTime(row.endTimeUtc)}</TableCell>
-                  <TableCell>{formatDuration(row.runtimeSeconds)}</TableCell>
-                  <TableCell>{row.productionLength.toFixed(2)}</TableCell>
-                  <TableCell>{row.autoPercentage.toFixed(1)}%</TableCell>
-                  <TableCell>{row.manualPercentage.toFixed(1)}%</TableCell>
-                </TableRow>
-              ))}
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button size="small" variant="outlined" onClick={handleExportRunsCsv}>
+                {selectedRunIds.length > 0 ? "Export Selected" : "Export CSV"}
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={selectedRunIds.length === 0}
+                onClick={handleKeepSelectedRuns}
+              >
+                Keep Selected
+              </Button>
+              <Button
+                size="small"
+                color="error"
+                variant="outlined"
+                disabled={selectedRunIds.length === 0 || deletingRunId !== null}
+                onClick={() => void handleDeleteSelectedRuns()}
+              >
+                Delete Selected
+              </Button>
+            </Stack>
+          </Stack>
 
-              {filteredRuns.length === 0 ? (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={9} align="center">
-                    No completed runs for the selected filters.
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      checked={allVisibleRunsSelected}
+                      indeterminate={selectedRunIds.length > 0 && !allVisibleRunsSelected}
+                      onChange={handleToggleSelectAllVisibleRuns}
+                    />
                   </TableCell>
+                  <TableCell>Line</TableCell>
+                  <TableCell>Product</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Start</TableCell>
+                  <TableCell>End</TableCell>
+                  <TableCell>Runtime</TableCell>
+                  <TableCell>Length</TableCell>
+                  <TableCell>Auto %</TableCell>
+                  <TableCell>Manual %</TableCell>
+                  <TableCell align="right">Select</TableCell>
                 </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+              </TableHead>
+              <TableBody>
+                {sortedRuns.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    hover
+                    selected={selectedRunIds.includes(row.id)}
+                    sx={{ cursor: "pointer" }}
+                    onClick={() => navigate(`/reports/completed/${row.id}`)}
+                  >
+                    <TableCell padding="checkbox" onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedRunIds.includes(row.id)}
+                        onChange={() => handleToggleRunSelection(row.id)}
+                      />
+                    </TableCell>
+                    <TableCell>{`L${row.lineNumber} - ${row.lineName}`}</TableCell>
+                    <TableCell>{row.productId || "N/A"}</TableCell>
+                    <TableCell>{row.finalStatus}</TableCell>
+                    <TableCell>{formatDateTime(row.startTimeUtc)}</TableCell>
+                    <TableCell>{formatDateTime(row.endTimeUtc)}</TableCell>
+                    <TableCell>{formatDuration(row.runtimeSeconds)}</TableCell>
+                    <TableCell>{row.productionLength.toFixed(2)}</TableCell>
+                    <TableCell>{row.autoPercentage.toFixed(1)}%</TableCell>
+                    <TableCell>{row.manualPercentage.toFixed(1)}%</TableCell>
+                    <TableCell align="right">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={deletingRunId !== null}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleToggleRunSelection(row.id);
+                        }}
+                      >
+                        {selectedRunIds.includes(row.id) ? "Selected" : "Select"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
 
-      <Paper sx={{ p: 2 }}>
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          justifyContent="space-between"
-          alignItems={{ xs: "flex-start", sm: "center" }}
-          sx={{ mb: 1.5 }}
-          spacing={1}
-        >
-          <Typography variant="h6">
-            Mode and Status Switch Events ({filteredEvents.length})
-          </Typography>
-          <Button size="small" variant="outlined" onClick={handleExportEventsCsv}>
-            Export CSV
-          </Button>
-        </Stack>
+                {sortedRuns.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={11} align="center">
+                      No completed runs for the selected filters.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      ) : (
+        <Paper sx={{ p: 2 }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            sx={{ mb: 1.5 }}
+            spacing={1}
+          >
+            <Typography variant="h6">
+              Runtime Events ({filteredEvents.length})
+            </Typography>
+            <Button size="small" variant="outlined" onClick={handleExportEventsCsv}>
+              Export CSV
+            </Button>
+          </Stack>
 
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Timestamp</TableCell>
-                <TableCell>Line</TableCell>
-                <TableCell>Event Type</TableCell>
-                <TableCell>From</TableCell>
-                <TableCell>To</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredEvents.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell>{formatDateTime(row.occurredAtUtc)}</TableCell>
-                  <TableCell>{`L${row.lineNumber} - ${row.lineName}`}</TableCell>
-                  <TableCell>{row.eventType}</TableCell>
-                  <TableCell>{row.previousValue}</TableCell>
-                  <TableCell>{row.currentValue}</TableCell>
-                </TableRow>
-              ))}
-
-              {filteredEvents.length === 0 ? (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={5} align="center">
-                    No switch events for the selected filters.
-                  </TableCell>
+                  <TableCell>Timestamp</TableCell>
+                  <TableCell>Line</TableCell>
+                  <TableCell>Event Type</TableCell>
+                  <TableCell>From</TableCell>
+                  <TableCell>To</TableCell>
                 </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+              </TableHead>
+              <TableBody>
+                {filteredEvents.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell>{formatDateTime(row.occurredAtUtc)}</TableCell>
+                    <TableCell>{`L${row.lineNumber} - ${row.lineName}`}</TableCell>
+                    <TableCell>{row.eventType}</TableCell>
+                    <TableCell>{row.previousValue}</TableCell>
+                    <TableCell>{row.currentValue}</TableCell>
+                  </TableRow>
+                ))}
+
+                {filteredEvents.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center">
+                      No runtime events for the selected filters.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
     </Stack>
   );
 }

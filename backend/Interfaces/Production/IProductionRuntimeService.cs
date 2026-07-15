@@ -8,5 +8,7 @@ public interface IProductionRuntimeService
     DashboardSnapshotDto GetDashboardSnapshot();
     LineDetailSnapshotDto? GetLineDetail(int lineId);
     Task<IReadOnlyCollection<CompletedProductionRunDto>> GetCompletedRunsAsync(int? lineId, int take, CancellationToken cancellationToken = default);
+    Task<CompletedProductionRunDto?> GetCompletedRunAsync(Guid runId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteCompletedRunAsync(Guid runId, CancellationToken cancellationToken = default);
     Task<IReadOnlyCollection<RuntimeEventDto>> GetRuntimeEventsAsync(int? lineId, int take, CancellationToken cancellationToken = default);
 }

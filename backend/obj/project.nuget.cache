@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "GUMGY84S01c=",
+  "dgSpecHash": "uWXLPCBFdUI=",
   "success": true,
-  "projectFilePath": "C:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj",
+  "projectFilePath": "c:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Gabe\\.nuget\\packages\\humanizer.core\\2.14.1\\humanizer.core.2.14.1.nupkg.sha512",
     "C:\\Users\\Gabe\\.nuget\\packages\\libplctag\\1.5.2\\libplctag.1.5.2.nupkg.sha512",

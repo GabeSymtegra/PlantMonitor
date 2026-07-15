@@ -236,6 +236,28 @@ app.MapGet("/api/production-runs", async (
     return Results.Ok(rows);
 }).RequireAuthorization();
 
+app.MapGet("/api/production-runs/{runId:guid}", async (
+    Guid runId,
+    IProductionRuntimeService runtimeService,
+    CancellationToken cancellationToken) =>
+{
+    var run = await runtimeService.GetCompletedRunAsync(runId, cancellationToken);
+    return run is null
+        ? Results.NotFound(new { message = "Completed production run was not found." })
+        : Results.Ok(run);
+}).RequireAuthorization();
+
+app.MapDelete("/api/production-runs/{runId:guid}", async (
+    Guid runId,
+    IProductionRuntimeService runtimeService,
+    CancellationToken cancellationToken) =>
+{
+    var deleted = await runtimeService.DeleteCompletedRunAsync(runId, cancellationToken);
+    return deleted
+        ? Results.NoContent()
+        : Results.NotFound(new { message = "Completed production run was not found." });
+}).RequireAuthorization();
+
 app.MapGet("/api/reports/events", async (
     [AsParameters] RuntimeEventsQuery query,
     IProductionRuntimeService runtimeService,
