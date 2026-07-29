@@ -182,12 +182,14 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         var discovered = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Options, null, cancellationToken);
         var readableLeafTags = discovered
-            .Where(tag => !tag.IsFolder && tag.CanRead != false)
+            .Where(tag => !tag.IsFolder && tag.CanRead == true)
+            .Where(tag => IsAutoMappableDataType(tag.DataType))
             .ToList();
 
         var slotDefinitions = _protocolConfigService.GetRequiredTagSlots();
         var usedTagNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var suggestions = new List<LineTagCatalogEntryDto>();
+        var suggestionDetails = new List<AutoMapTagSuggestionDto>();
         var missing = new List<string>();
 
         foreach (var slot in slotDefinitions)
@@ -200,19 +202,27 @@ public sealed class PlcProtocolAdminController : ControllerBase
                 continue;
             }
 
-            usedTagNames.Add(match.Name);
+            usedTagNames.Add(match.Tag.Name);
             suggestions.Add(new LineTagCatalogEntryDto
             {
                 LogicalKey = slot.LogicalKey,
                 DisplayName = slot.DisplayName,
                 Driver = driver.DriverName,
-                PlcAddress = match.Name,
-                DataType = NormalizeDataType(match.DataType),
+                PlcAddress = match.Tag.Name,
+                DataType = NormalizeDataType(match.Tag.DataType),
                 IsRequired = slot.IsRequired,
                 IsEnabled = true,
                 SortOrder = suggestions.Count,
                 ReadFrequencyMs = 1000,
                 Description = slot.Description,
+            });
+
+            suggestionDetails.Add(new AutoMapTagSuggestionDto
+            {
+                LogicalKey = slot.LogicalKey,
+                PlcAddress = match.Tag.Name,
+                Confidence = match.Confidence,
+                Reason = match.Reason,
             });
         }
 
@@ -221,6 +231,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             Driver = driver.DriverName,
             ScannedTagCount = readableLeafTags.Count,
             SuggestedMappings = suggestions,
+            SuggestionDetails = suggestionDetails,
             MissingLogicalKeys = missing,
         });
     }
@@ -342,6 +353,9 @@ public sealed class PlcProtocolAdminController : ControllerBase
         "int",
         "dint",
         "real",
+        "sint",
+        "lint",
+        "lreal",
     ];
 
     private static readonly HashSet<string> TextOrCodeDataTypes =
@@ -356,6 +370,8 @@ public sealed class PlcProtocolAdminController : ControllerBase
         "string",
         "int",
         "dint",
+        "sint",
+        "lint",
     ];
 
     private async Task<CommissioningReadinessDto> BuildCommissioningReadinessAsync(LineProtocolAssignmentEntity line, CancellationToken cancellationToken)
@@ -774,7 +790,13 @@ public sealed class PlcProtocolAdminController : ControllerBase
         return true;
     }
 
-    private static PlcTagBrowseItemDto? FindBestMatch(
+    private sealed record TagMatchCandidate(
+        PlcTagBrowseItemDto Tag,
+        int Score,
+        int Confidence,
+        string Reason);
+
+    private static TagMatchCandidate? FindBestMatch(
         string logicalKey,
         IReadOnlyCollection<PlcTagBrowseItemDto> tags,
         HashSet<string> usedTagNames)
@@ -782,16 +804,96 @@ public sealed class PlcProtocolAdminController : ControllerBase
         var aliases = GetAliases(logicalKey);
         return tags
             .Where(tag => !usedTagNames.Contains(tag.Name))
-            .Select(tag => new
-            {
-                Tag = tag,
-                Score = ComputeAliasScore(tag.Name, aliases),
-            })
+            .Select(tag => BuildCandidate(logicalKey, aliases, tag))
+            .Where(candidate => candidate is not null)
+            .Select(candidate => candidate!)
             .Where(candidate => candidate.Score > 0)
             .OrderByDescending(candidate => candidate.Score)
             .ThenBy(candidate => candidate.Tag.Name.Length)
-            .Select(candidate => candidate.Tag)
             .FirstOrDefault();
+    }
+
+    private static TagMatchCandidate? BuildCandidate(
+        string logicalKey,
+        IReadOnlyCollection<string> aliases,
+        PlcTagBrowseItemDto tag)
+    {
+        var normalizedDataType = NormalizeDataType(tag.DataType);
+        if (!IsLogicalKeyCompatible(logicalKey, normalizedDataType))
+        {
+            return null;
+        }
+
+        var score = ComputeAliasScore(tag.Name, aliases);
+        if (score <= 0)
+        {
+            return null;
+        }
+
+        if (NumericLogicalKeys.Contains(logicalKey) && normalizedDataType is "dint" or "real")
+        {
+            score += 10;
+        }
+
+        var confidence = score switch
+        {
+            >= 190 => 95,
+            >= 150 => 85,
+            >= 120 => 75,
+            _ => 60,
+        };
+
+        return new TagMatchCandidate(
+            tag,
+            score,
+            confidence,
+            BuildSuggestionReason(logicalKey, tag.Name, normalizedDataType, score));
+    }
+
+    private static string BuildSuggestionReason(string logicalKey, string tagName, string normalizedDataType, int score)
+    {
+        var aliasStrength = score switch
+        {
+            >= 200 => "exact alias",
+            >= 150 => "suffix alias",
+            >= 120 => "contains alias",
+            _ => "partial alias",
+        };
+
+        return $"Matched by {aliasStrength}; selected '{tagName}' with compatible data type '{normalizedDataType}' for logical key '{logicalKey}'.";
+    }
+
+    private static bool IsAutoMappableDataType(string? dataType)
+    {
+        var normalized = NormalizeDataType(dataType ?? string.Empty);
+        return normalized is "bool" or "int" or "dint" or "real" or "string" or "sint" or "lint" or "lreal";
+    }
+
+    private static bool IsLogicalKeyCompatible(string logicalKey, string normalizedDataType)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedDataType))
+        {
+            return false;
+        }
+
+        if (NumericLogicalKeys.Contains(logicalKey))
+        {
+            return NumericDataTypes.Contains(normalizedDataType);
+        }
+
+        if (logicalKey.Equals("control_mode", StringComparison.OrdinalIgnoreCase)
+            || logicalKey.Equals("machine_state", StringComparison.OrdinalIgnoreCase)
+            || logicalKey.Equals("line_id", StringComparison.OrdinalIgnoreCase))
+        {
+            return TextOrCodeDataTypes.Contains(normalizedDataType);
+        }
+
+        if (logicalKey.Equals("product_id", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProductIdDataTypes.Contains(normalizedDataType);
+        }
+
+        return true;
     }
 
     private static int ComputeAliasScore(string tagName, IReadOnlyCollection<string> aliases)
@@ -848,12 +950,24 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
     private static string NormalizeDataType(string rawDataType)
     {
+        if (string.IsNullOrWhiteSpace(rawDataType))
+        {
+            return "unknown";
+        }
+
         var normalized = rawDataType.Trim().ToLowerInvariant();
         return normalized switch
         {
             "float" or "double" => "real",
             "integer" => "int",
             "int32" => "dint",
+            "type-193" => "bool",
+            "type-194" => "sint",
+            "type-195" => "int",
+            "type-196" => "dint",
+            "type-197" => "lint",
+            "type-202" => "real",
+            "type-203" => "lreal",
             _ => normalized,
         };
     }

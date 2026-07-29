@@ -712,12 +712,20 @@ export default function Administration() {
 
       setTagCatalog(buildCatalogFromSlots(slots, result.suggestedMappings));
 
+      const lowConfidence = result.suggestionDetails
+        .filter((suggestion) => suggestion.confidence < 80)
+        .map((suggestion) => suggestion.logicalKey);
+
+      const guidance = lowConfidence.length > 0
+        ? ` Low confidence suggestions: ${lowConfidence.join(", ")}.`
+        : "";
+
       if (result.missingLogicalKeys.length > 0) {
         setMappingStatus(
-          `Auto-map completed with gaps. Missing: ${result.missingLogicalKeys.join(", ")}. Use the PLC Tag dropdowns to override any slot manually.`
+          `Auto-map completed with gaps. Missing: ${result.missingLogicalKeys.join(", ")}. Use the PLC Tag dropdowns to override any slot manually.${guidance}`
         );
       } else {
-        setMappingStatus("Auto-map completed. Review the suggested assignments or override any slot manually before saving.");
+        setMappingStatus(`Auto-map completed. Review the suggested assignments or override any slot manually before saving.${guidance}`);
       }
     } catch (requestError) {
       const message =

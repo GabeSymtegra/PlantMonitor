@@ -43,6 +43,7 @@ Primary operating model:
 - Fixed admin auto-map first-attempt behavior by passing the fresh successful PLC connection result directly into auto-map/discovery flow instead of relying on same-tick React state, and added frontend test coverage for connection -> discovery -> auto-map orchestration.
 - Replaced line activation semantics with explicit lifecycle states (`Draft`, `Commissioning`, `Active`, `CommissioningFailed`, `Disabled`) including migration support, runtime polling restricted to `Active`, admin activation endpoint (`POST /api/admin/lines/{lineId}/commissioning-activate`), and integration tests validating draft default, reset-to-draft on active connection changes, and failed activation conflict behavior.
 - Added configurable per-line Allen-Bradley connection settings (`routePath`, `processorType`, connection/read timeout, retry count, retry delay, poll interval) with persistence, migration support, runtime usage, commissioning/read/browse/auto-map request wiring, and admin UI controls.
+- Corrected Allen-Bradley auto-map discovery to only consider directly readable primitive tags, enforce logical-key/data-type compatibility (including numeric-key protections against bool mapping), and return confidence/reason metadata for each suggested mapping.
 
 ## Production Readiness Checklist Snapshot (2026-07-29)
 - Done: frontend publishing now builds and copies `frontend/dist` into backend publish output.

@@ -69,6 +69,13 @@ export interface AutoMapTagCatalogRequest {
   options?: PlcConnectionOptions;
 }
 
+export interface AutoMapTagSuggestion {
+  logicalKey: string;
+  plcAddress: string;
+  confidence: number;
+  reason: string;
+}
+
 export interface LineProtocolAssignment {
   lineId: number;
   manufacturer: PlcDriver;
@@ -101,6 +108,7 @@ export interface AutoMapTagCatalogResult {
   driver: string;
   scannedTagCount: number;
   suggestedMappings: LineTagCatalogEntry[];
+  suggestionDetails: AutoMapTagSuggestion[];
   missingLogicalKeys: string[];
 }
 

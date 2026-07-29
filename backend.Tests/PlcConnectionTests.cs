@@ -326,7 +326,34 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
         Assert.Equal("AllenBradley", payload?["driver"]?.GetValue<string>());
         Assert.True(payload?["scannedTagCount"]?.GetValue<int>() > 0);
         Assert.NotNull(payload?["suggestedMappings"]?.AsArray());
+        Assert.NotNull(payload?["suggestionDetails"]?.AsArray());
         Assert.NotNull(payload?["missingLogicalKeys"]?.AsArray());
+
+        var suggestedMappings = payload?["suggestedMappings"]?.AsArray();
+        if (suggestedMappings is not null)
+        {
+            var numericKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "production_length",
+                "bare_setpoint",
+                "bare_actual",
+                "hot_setpoint",
+                "hot_actual",
+                "cold_setpoint",
+                "cold_actual",
+            };
+
+            foreach (var mapping in suggestedMappings)
+            {
+                var logicalKey = mapping?["logicalKey"]?.GetValue<string>();
+                var dataType = mapping?["dataType"]?.GetValue<string>();
+
+                if (logicalKey is not null && numericKeys.Contains(logicalKey))
+                {
+                    Assert.NotEqual("bool", dataType);
+                }
+            }
+        }
     }
 
     [Fact]
@@ -658,6 +685,24 @@ public sealed class PlcConnectionApiFactory : TestWebApplicationFactory
                 new PlcTagBrowseItemDto
                 {
                     Name = "Machine.LineSpeed",
+                    DataType = "real",
+                    IsFolder = false,
+                    ParentPath = "Machine",
+                    CanRead = true,
+                    CanWrite = false,
+                },
+                new PlcTagBrowseItemDto
+                {
+                    Name = "Machine.ProductionLength",
+                    DataType = "bool",
+                    IsFolder = false,
+                    ParentPath = "Machine",
+                    CanRead = true,
+                    CanWrite = false,
+                },
+                new PlcTagBrowseItemDto
+                {
+                    Name = "Machine.ProductionLengthValue",
                     DataType = "real",
                     IsFolder = false,
                     ParentPath = "Machine",

@@ -306,7 +306,7 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
                 DataType = MapDataType(tag.Type),
                 IsFolder = false,
                 ParentPath = BuildParentPath(tag.Name),
-                CanRead = true,
+                CanRead = IsDirectlyReadableTag(tag),
                 CanWrite = false,
             })
             .OrderBy(tag => tag.ParentPath is null ? 0 : 1)
@@ -787,6 +787,11 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
     private static bool IsScalarTag(TagInfo tag)
     {
         return tag.Dimensions is null || tag.Dimensions.Length == 0 || tag.Dimensions.All(dimension => dimension <= 1);
+    }
+
+    private static bool IsDirectlyReadableTag(TagInfo tag)
+    {
+        return IsSupportedScalarType(tag.Type) && IsScalarTag(tag);
     }
 
     private static string? BuildParentPath(string tagName)
