@@ -93,9 +93,17 @@ public sealed class LinesController : ControllerBase
 
     private static void ApplyRequest(LineProtocolAssignmentEntity entity, UpsertLineConfigRequestDto request)
     {
+        static string NormalizeOptional(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "Unknown" : value.Trim();
+        }
+
         entity.LineNumber = request.LineNumber;
         entity.LineName = request.LineName.Trim();
         entity.ProductId = request.ProductId.Trim();
+        entity.RecipeId = NormalizeOptional(request.RecipeId);
+        entity.MachineId = NormalizeOptional(request.MachineId);
+        entity.OperatorName = NormalizeOptional(request.OperatorName);
         entity.PlcIp = request.PlcIp.Trim();
         entity.Manufacturer = request.Manufacturer.Trim();
         entity.PollIntervalMs = request.PollIntervalMs;
@@ -110,6 +118,9 @@ public sealed class LinesController : ControllerBase
             LineNumber = entity.LineNumber,
             LineName = entity.LineName,
             ProductId = entity.ProductId,
+            RecipeId = entity.RecipeId,
+            MachineId = entity.MachineId,
+            OperatorName = entity.OperatorName,
             PlcIp = entity.PlcIp,
             Manufacturer = entity.Manufacturer,
             PollIntervalMs = entity.PollIntervalMs,

@@ -23,6 +23,9 @@ public sealed class CompletedProductionRunEntity
     public double ManualTimeSeconds { get; set; }
     public double AutoPercentage { get; set; }
     public double ManualPercentage { get; set; }
+    public bool IsDeleted { get; set; }
+    public string? DeletedByUsername { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 

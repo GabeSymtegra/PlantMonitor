@@ -4,8 +4,8 @@ import type { User } from "../models/User";
 import {
   AUTH_EXPIRED_EVENT,
   ApiRequestError,
+  apiGet,
   apiPost,
-  setApiAccessToken,
 } from "../services/api/client";
 
 // -----------------------------------------------------------------------------
@@ -13,15 +13,16 @@ import {
 // -----------------------------------------------------------------------------
 
 interface LoginResponse {
-  accessToken: string;
+  accessToken?: string | null;
   username: string;
   role: User["role"];
+  mustChangePassword: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
-  accessToken: string | null;
   authError: string | null;
+  initializing: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
   canConfigure: boolean;
@@ -34,16 +35,12 @@ interface AuthContextType {
 }
 
 const STORAGE_KEY = "plantmonitor-auth-user";
-const SESSION_USER_STORAGE_KEY = "plantmonitor-auth-user-session";
-const TOKEN_STORAGE_KEY = "plantmonitor-auth-token";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // These helpers keep storage parsing isolated from the provider logic.
 function readStoredUser(): User | null {
-  const serialized =
-    localStorage.getItem(STORAGE_KEY) ??
-    sessionStorage.getItem(SESSION_USER_STORAGE_KEY);
+  const serialized = localStorage.getItem(STORAGE_KEY);
 
   if (!serialized) {
     return null;
@@ -53,44 +50,62 @@ function readStoredUser(): User | null {
     return JSON.parse(serialized) as User;
   } catch {
     localStorage.removeItem(STORAGE_KEY);
-    sessionStorage.removeItem(SESSION_USER_STORAGE_KEY);
     return null;
   }
 }
 
-function readStoredToken(): string | null {
-  return (
-    localStorage.getItem(TOKEN_STORAGE_KEY) ??
-    sessionStorage.getItem(TOKEN_STORAGE_KEY)
-  );
-}
-
 function clearStoredAuth() {
   localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
-  sessionStorage.removeItem(SESSION_USER_STORAGE_KEY);
-  sessionStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
 // AuthProvider owns login/logout, session persistence, and automatic reaction
 // to expired backend tokens.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => readStoredUser());
-  const [accessToken, setAccessToken] = useState<string | null>(() =>
-    readStoredToken()
-  );
   const [authError, setAuthError] = useState<string | null>(null);
+  const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
-    setApiAccessToken(accessToken);
-  }, [accessToken]);
+    let cancelled = false;
+
+    async function loadSession() {
+      try {
+        const response = await apiGet<LoginResponse>("/auth/session");
+        if (cancelled) {
+          return;
+        }
+
+        const authenticatedUser: User = {
+          username: response.username,
+          role: response.role,
+        };
+
+        setUser(authenticatedUser);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(authenticatedUser));
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+          clearStoredAuth();
+        }
+      } finally {
+        if (!cancelled) {
+          setInitializing(false);
+        }
+      }
+    }
+
+    void loadSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // The API client emits a global event when a protected request comes back as
   // unauthorized so the UI can clear stale sessions consistently.
   useEffect(() => {
     function handleAuthExpired() {
       setUser(null);
-      setAccessToken(null);
       setAuthError("Your session expired. Sign in again.");
       clearStoredAuth();
     }
@@ -114,11 +129,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
 
     try {
-      const response = await apiPost<LoginResponse, { username: string; password: string }>(
+      const response = await apiPost<LoginResponse, { username: string; password: string; rememberMe: boolean }>(
         "/auth/login",
         {
           username,
           password,
+          rememberMe,
         }
       );
 
@@ -130,31 +146,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Local storage is used for remembered sessions, session storage for
       // browser-lifetime sessions.
       setUser(authenticatedUser);
-      setAccessToken(response.accessToken);
-
-      if (rememberMe) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(authenticatedUser));
-        localStorage.setItem(TOKEN_STORAGE_KEY, response.accessToken);
-        sessionStorage.removeItem(SESSION_USER_STORAGE_KEY);
-        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(TOKEN_STORAGE_KEY);
-        sessionStorage.setItem(
-          SESSION_USER_STORAGE_KEY,
-          JSON.stringify(authenticatedUser)
-        );
-        sessionStorage.setItem(TOKEN_STORAGE_KEY, response.accessToken);
-      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(authenticatedUser));
 
       return true;
     } catch (error) {
       setUser(null);
-      setAccessToken(null);
 
       if (error instanceof ApiRequestError) {
         if (error.status === 401) {
           setAuthError("Invalid username or password.");
+        } else if (error.status === 423) {
+          setAuthError("Account temporarily locked due to repeated failures.");
         } else if (error.status === 403) {
           setAuthError("You do not have access to this account.");
         } else if (typeof error.status === "number") {
@@ -174,8 +176,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    void apiPost<unknown, object>("/auth/logout", {});
     setUser(null);
-    setAccessToken(null);
     setAuthError(null);
     clearStoredAuth();
   }
@@ -185,15 +187,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       user,
-      accessToken,
       authError,
-      isAuthenticated: Boolean(user && accessToken),
+      initializing,
+      isAuthenticated: Boolean(user),
       isAdmin: user?.role === "Admin",
       canConfigure: user?.role === "Admin",
       login,
       logout,
     }),
-    [accessToken, authError, user]
+    [authError, initializing, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

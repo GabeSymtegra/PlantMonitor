@@ -11,6 +11,12 @@ export interface ProductionLine {
 
   product: string;
 
+  recipeId: string;
+
+  machineId: string;
+
+  operatorName: string;
+
   startDateTime: string;
 
   status: LineStatus;

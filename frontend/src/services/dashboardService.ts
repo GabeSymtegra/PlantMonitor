@@ -84,6 +84,9 @@ interface LineConfigDto {
   lineNumber: number;
   lineName: string;
   productId: string;
+  recipeId: string;
+  machineId: string;
+  operatorName: string;
   plcIp: string;
   manufacturer: string;
   pollIntervalMs: number;
@@ -95,6 +98,9 @@ interface UpsertLineConfigRequestDto {
   lineNumber: number;
   lineName: string;
   productId: string;
+  recipeId: string;
+  machineId: string;
+  operatorName: string;
   plcIp: string;
   manufacturer: string;
   pollIntervalMs: number;
@@ -148,6 +154,9 @@ function toProductionLine(line: RuntimeDashboardLineDto): ProductionLine {
     lineNumber: line.lineNumber,
     lineName: line.lineName,
     product: line.productId,
+    recipeId: "Unknown",
+    machineId: "Unknown",
+    operatorName: "Unknown",
     startDateTime,
     status: toLineStatus(line.status),
     timeInStatus: formatRuntime(line.runtimeSeconds),
@@ -174,6 +183,9 @@ function toConfiguredLine(line: LineConfigDto): ProductionLine {
     lineNumber: line.lineNumber,
     lineName: line.lineName,
     product: line.productId,
+    recipeId: line.recipeId,
+    machineId: line.machineId,
+    operatorName: line.operatorName,
     startDateTime: "??",
     status: LineStatus.Offline,
     timeInStatus: "??",
@@ -245,6 +257,9 @@ export async function addLine(
     lineNumber: line.lineNumber,
     lineName: line.lineName,
     productId: line.product,
+    recipeId: line.recipeId,
+    machineId: line.machineId,
+    operatorName: line.operatorName,
     plcIp: line.plcIp,
     manufacturer: line.manufacturer,
     pollIntervalMs: 2000,
@@ -270,6 +285,9 @@ export async function updateLine(
     lineNumber: updates.lineNumber ?? existingLine.lineNumber,
     lineName: updates.lineName ?? existingLine.lineName,
     productId: updates.product ?? existingLine.product,
+    recipeId: updates.recipeId ?? existingLine.recipeId,
+    machineId: updates.machineId ?? existingLine.machineId,
+    operatorName: updates.operatorName ?? existingLine.operatorName,
     plcIp: updates.plcIp ?? existingLine.plcIp,
     manufacturer: updates.manufacturer ?? existingLine.manufacturer,
     pollIntervalMs: 2000,

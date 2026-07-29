@@ -17,6 +17,56 @@ namespace backend.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
 
+            modelBuilder.Entity("backend.Models.Authentication.LocalUserEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedLoginCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDisabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastLoginAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LockoutEndUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("MustChangePassword")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("local_users", (string)null);
+                });
+
             modelBuilder.Entity("backend.Models.Plc.LineProtocolAssignmentEntity", b =>
                 {
                     b.Property<int>("LineId")
@@ -34,9 +84,19 @@ namespace backend.Data.Migrations
                     b.Property<int>("LineNumber")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("MachineId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Manufacturer")
                         .IsRequired()
                         .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperatorName")
+                        .IsRequired()
+                        .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PlcIp")
@@ -56,6 +116,11 @@ namespace backend.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RecipeId")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
@@ -253,6 +318,52 @@ namespace backend.Data.Migrations
                     b.ToTable("plc_protocol_preset_tags", (string)null);
                 });
 
+            modelBuilder.Entity("backend.Models.Production.ActiveLineRuntimeStateEntity", b =>
+                {
+                    b.Property<int>("LineId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ControlMode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentProductId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("HasPersistedCurrentStop")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("HasSeenRunningState")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("LastTickUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("ProductionLength")
+                        .HasColumnType("REAL");
+
+                    b.Property<DateTime>("RunStartTimeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("LineId");
+
+                    b.HasIndex("UpdatedAtUtc");
+
+                    b.ToTable("active_line_runtime_states", (string)null);
+                });
+
             modelBuilder.Entity("backend.Models.Production.CompletedProductionRunEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -268,6 +379,13 @@ namespace backend.Data.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedByUsername")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("EndTimeUtc")
                         .HasColumnType("TEXT");
 
@@ -275,6 +393,9 @@ namespace backend.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("LineId")
                         .HasColumnType("INTEGER");
@@ -336,6 +457,8 @@ namespace backend.Data.Migrations
 
                     b.HasIndex("EndTimeUtc");
 
+                    b.HasIndex("IsDeleted");
+
                     b.HasIndex("LineId");
 
                     b.ToTable("completed_production_runs", (string)null);
@@ -387,6 +510,53 @@ namespace backend.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("completed_production_run_zone_stats", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Production.CompletedRunDeletionAuditEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DeletedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedByRole")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedByUsername")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LineId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LineName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LineNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeletedAtUtc");
+
+                    b.HasIndex("RunId");
+
+                    b.ToTable("completed_run_deletion_audits", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Production.RecipeToleranceEntity", b =>

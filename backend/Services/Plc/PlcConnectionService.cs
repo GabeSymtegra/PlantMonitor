@@ -53,7 +53,8 @@ public sealed class PlcConnectionService : IPlcConnectionService
 
     public bool IsValidIpAddress(string? ipAddress)
     {
-        return IPAddress.TryParse(ipAddress?.Trim(), out _);
+        return IPAddress.TryParse(ipAddress?.Trim(), out var parsed)
+            && parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
     }
 
     private static PlcConnectionResult CreateFailure(PlcConnectionRequest request, string message)

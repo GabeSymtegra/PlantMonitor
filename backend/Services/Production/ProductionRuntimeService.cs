@@ -1,6 +1,7 @@
 using backend.DTOs.Runtime;
 using backend.DTOs.Plc;
 using backend.DTOs.Production;
+using backend.DTOs.Common;
 using backend.Data;
 using backend.Interfaces.Production;
 using backend.Interfaces.Plc;
@@ -20,6 +21,9 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IPlcConnectionService _plcConnectionService;
     private readonly ILogger<ProductionRuntimeService> _logger;
+    private static readonly TimeSpan AssignmentRefreshInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ActiveRuntimePersistenceInterval = TimeSpan.FromSeconds(5);
+    private const int MaxPollConcurrency = 4;
 
     private const string LogicalKeyControlMode = "control_mode";
     private const string LogicalKeyMachineState = "machine_state";
@@ -69,6 +73,14 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
     }
 
+    public bool IsKnownLine(int lineId)
+    {
+        lock (_gate)
+        {
+            return _lines.ContainsKey(lineId);
+        }
+    }
+
     // Line details expose the deeper runtime breakdown shown on the line page.
     public LineDetailSnapshotDto? GetLineDetail(int lineId)
     {
@@ -80,7 +92,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             }
 
             var snapshot = GetSnapshotOrFallback(state);
-            var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - state.StatusEnteredUtc).TotalSeconds);
+            var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - snapshot.Metadata.StartTimeUtc).TotalSeconds);
 
             var sensors = Enum.GetValues<MeasurementZone>()
                 .Select(zone =>
@@ -138,11 +150,15 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
     }
 
-    public async Task<IReadOnlyCollection<CompletedProductionRunDto>> GetCompletedRunsAsync(
+    public async Task<PagedResultDto<CompletedProductionRunDto>> GetCompletedRunsAsync(
         int? lineId,
+        DateTime? fromUtc,
+        DateTime? toUtc,
+        int skip,
         int take,
         CancellationToken cancellationToken = default)
     {
+        var normalizedSkip = Math.Max(0, skip);
         var normalizedTake = Math.Clamp(take, 1, 500);
 
         using var scope = _scopeFactory.CreateScope();
@@ -150,6 +166,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
         var query = dbContext.CompletedProductionRuns
             .AsNoTracking()
+            .Where(x => !x.IsDeleted)
             .Include(x => x.ZoneStats)
             .AsQueryable();
 
@@ -158,12 +175,31 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             query = query.Where(x => x.LineId == lineId.Value);
         }
 
+        if (fromUtc.HasValue)
+        {
+            query = query.Where(x => x.EndTimeUtc >= fromUtc.Value);
+        }
+
+        if (toUtc.HasValue)
+        {
+            query = query.Where(x => x.EndTimeUtc <= toUtc.Value);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
         var runs = await query
             .OrderByDescending(x => x.EndTimeUtc)
+            .Skip(normalizedSkip)
             .Take(normalizedTake)
             .ToListAsync(cancellationToken);
 
-        return runs.Select(MapCompletedRun).ToList();
+        return new PagedResultDto<CompletedProductionRunDto>
+        {
+            Items = runs.Select(MapCompletedRun).ToList(),
+            TotalCount = totalCount,
+            Skip = normalizedSkip,
+            Take = normalizedTake,
+        };
     }
 
     public async Task<CompletedProductionRunDto?> GetCompletedRunAsync(
@@ -176,6 +212,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         var run = await dbContext.CompletedProductionRuns
             .AsNoTracking()
             .Include(x => x.ZoneStats)
+            .Where(x => !x.IsDeleted)
             .FirstOrDefaultAsync(x => x.Id == runId, cancellationToken);
 
         return run is null ? null : MapCompletedRun(run);
@@ -183,6 +220,8 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
     public async Task<bool> DeleteCompletedRunAsync(
         Guid runId,
+        string deletedByUsername,
+        string deletedByRole,
         CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
@@ -190,24 +229,44 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
         var run = await dbContext.CompletedProductionRuns
             .Include(x => x.ZoneStats)
-            .FirstOrDefaultAsync(x => x.Id == runId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == runId && !x.IsDeleted, cancellationToken);
 
         if (run is null)
         {
             return false;
         }
 
-        dbContext.CompletedProductionRuns.Remove(run);
+        run.IsDeleted = true;
+        run.DeletedByUsername = deletedByUsername;
+        run.DeletedAtUtc = DateTime.UtcNow;
+
+        dbContext.CompletedRunDeletionAudits.Add(new CompletedRunDeletionAuditEntity
+        {
+            Id = Guid.NewGuid(),
+            RunId = run.Id,
+            LineId = run.LineId,
+            LineNumber = run.LineNumber,
+            LineName = run.LineName,
+            ProductId = run.ProductId,
+            DeletedByUsername = deletedByUsername,
+            DeletedByRole = deletedByRole,
+            DeletedAtUtc = DateTime.UtcNow,
+        });
+
         await dbContext.SaveChangesAsync(cancellationToken);
         return true;
     }
 
     // Reports page reads persisted transition events through this query.
-    public async Task<IReadOnlyCollection<RuntimeEventDto>> GetRuntimeEventsAsync(
+    public async Task<PagedResultDto<RuntimeEventDto>> GetRuntimeEventsAsync(
         int? lineId,
+        DateTime? fromUtc,
+        DateTime? toUtc,
+        int skip,
         int take,
         CancellationToken cancellationToken = default)
     {
+        var normalizedSkip = Math.Max(0, skip);
         var normalizedTake = Math.Clamp(take, 1, 1000);
 
         using var scope = _scopeFactory.CreateScope();
@@ -222,22 +281,41 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             query = query.Where(x => x.LineId == lineId.Value);
         }
 
+        if (fromUtc.HasValue)
+        {
+            query = query.Where(x => x.OccurredAtUtc >= fromUtc.Value);
+        }
+
+        if (toUtc.HasValue)
+        {
+            query = query.Where(x => x.OccurredAtUtc <= toUtc.Value);
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
         var rows = await query
             .OrderByDescending(x => x.OccurredAtUtc)
+            .Skip(normalizedSkip)
             .Take(normalizedTake)
             .ToListAsync(cancellationToken);
 
-        return rows.Select(x => new RuntimeEventDto
+        return new PagedResultDto<RuntimeEventDto>
         {
-            Id = x.Id,
-            LineId = x.LineId,
-            LineNumber = x.LineNumber,
-            LineName = x.LineName,
-            EventType = x.EventType,
-            PreviousValue = x.PreviousValue,
-            CurrentValue = x.CurrentValue,
-            OccurredAtUtc = x.OccurredAtUtc,
-        }).ToList();
+            Items = rows.Select(x => new RuntimeEventDto
+            {
+                Id = x.Id,
+                LineId = x.LineId,
+                LineNumber = x.LineNumber,
+                LineName = x.LineName,
+                EventType = x.EventType,
+                PreviousValue = x.PreviousValue,
+                CurrentValue = x.CurrentValue,
+                OccurredAtUtc = x.OccurredAtUtc,
+            }).ToList(),
+            TotalCount = totalCount,
+            Skip = normalizedSkip,
+            Take = normalizedTake,
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -247,6 +325,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        var nextAssignmentRefresh = DateTime.UtcNow;
 
         try
         {
@@ -254,38 +333,156 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             {
                 var now = DateTime.UtcNow;
 
-                foreach (var state in _lines.Values)
+                try
                 {
-                    var updatedFromPlc = false;
-
-                    try
+                    if (now >= nextAssignmentRefresh)
                     {
-                        // A successful mapped tick means the line snapshot came
-                        // from a live PLC read rather than a fallback path.
-                        updatedFromPlc = await TryTickStateFromMappedPlcAsync(state, now, stoppingToken);
-                    }
-                    catch (Exception exception)
-                    {
-                        _logger.LogWarning(
-                            exception,
-                            "Mapped PLC tick failed for line {LineId}. Marking line Offline.",
-                            state.LineId);
+                        RefreshLineStatesFromAssignments(now);
+                        nextAssignmentRefresh = now.Add(AssignmentRefreshInterval);
                     }
 
-                    if (!updatedFromPlc)
+                    List<LineRuntimeState> dueLines;
+                    lock (_gate)
                     {
-                        // When the PLC cannot be reached, surface that directly
-                        // instead of inventing simulated production behavior.
-                        await MarkLineOfflineAsync(state, now, stoppingToken);
+                        dueLines = _lines.Values
+                            .Where(state => state.IsEnabled && now >= state.NextPollAtUtc && state.TryBeginTick())
+                            .ToList();
                     }
 
-                    await HandleRunLifecycleTransitionAsync(state, now, stoppingToken);
+                    if (dueLines.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var parallelOptions = new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = Math.Clamp(dueLines.Count, 1, MaxPollConcurrency),
+                        CancellationToken = stoppingToken,
+                    };
+
+                    await Parallel.ForEachAsync(dueLines, parallelOptions, async (state, cancellationToken) =>
+                    {
+                        try
+                        {
+                            await PollLineAsync(state, now, cancellationToken);
+                        }
+                        finally
+                        {
+                            state.CompleteTick(now);
+                        }
+                    });
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "Runtime polling iteration failed and will be retried on the next tick.");
                 }
             }
         }
         catch (OperationCanceledException)
         {
             _logger.LogInformation("Production runtime service stopping.");
+        }
+    }
+
+    private async Task PollLineAsync(LineRuntimeState state, DateTime now, CancellationToken stoppingToken)
+    {
+        var updatedFromPlc = false;
+
+        try
+        {
+            // A successful mapped tick means the line snapshot came
+            // from a live PLC read rather than a fallback path.
+            updatedFromPlc = await TryTickStateFromMappedPlcAsync(state, now, stoppingToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Mapped PLC tick failed for line {LineId}. Marking line Offline.",
+                state.LineId);
+        }
+
+        if (!updatedFromPlc)
+        {
+            // When the PLC cannot be reached, surface that directly
+            // instead of inventing simulated production behavior.
+            await MarkLineOfflineAsync(state, now, stoppingToken);
+        }
+
+        await HandleRunLifecycleTransitionAsync(state, now, stoppingToken);
+        await PersistActiveRuntimeStateAsync(state, now, stoppingToken);
+    }
+
+    private void RefreshLineStatesFromAssignments(DateTime now)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+
+        var activeAssignments = dbContext.LineProtocolAssignments
+            .AsNoTracking()
+            .Where(x => x.IsActive)
+            .ToList();
+
+        var persistedRuntimeStates = dbContext.ActiveLineRuntimeStates
+            .AsNoTracking()
+            .ToDictionary(x => x.LineId);
+
+        var activeLineIds = activeAssignments
+            .Select(x => x.LineId)
+            .ToHashSet();
+
+        lock (_gate)
+        {
+            foreach (var assignment in activeAssignments)
+            {
+                if (!_lines.TryGetValue(assignment.LineId, out var state))
+                {
+                    state = new LineRuntimeState(
+                        lineId: assignment.LineId,
+                        lineNumber: assignment.LineNumber,
+                        lineName: assignment.LineName,
+                        plcIp: assignment.PlcIp,
+                        manufacturer: assignment.Manufacturer,
+                        pollIntervalMs: assignment.PollIntervalMs,
+                        metadata: BuildRunMetadata(
+                            assignment,
+                            assignment.ProductId,
+                            now));
+
+                    if (persistedRuntimeStates.TryGetValue(assignment.LineId, out var checkpoint))
+                    {
+                        state.ApplyPersistedCheckpoint(checkpoint);
+                    }
+
+                    _lines[assignment.LineId] = state;
+                }
+
+                state.LineNumber = assignment.LineNumber;
+                state.LineName = assignment.LineName;
+                state.PlcIp = assignment.PlcIp;
+                state.Manufacturer = assignment.Manufacturer;
+                state.PollIntervalMs = Math.Clamp(assignment.PollIntervalMs, 500, 60000);
+                state.IsEnabled = true;
+
+                var productId = string.IsNullOrWhiteSpace(state.CurrentProductId)
+                    ? assignment.ProductId
+                    : state.CurrentProductId;
+
+                state.CurrentProductId = NormalizeProductId(productId);
+                state.Metadata = BuildRunMetadata(assignment, state.CurrentProductId, state.Metadata.StartTimeUtc);
+            }
+
+            foreach (var state in _lines.Values)
+            {
+                if (!activeLineIds.Contains(state.LineId))
+                {
+                    state.IsEnabled = false;
+                }
+            }
         }
     }
 
@@ -353,7 +550,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         if (TryGetReadableProductId(catalogMap, readMap, out var product)
             && !string.IsNullOrWhiteSpace(product))
         {
-            state.CurrentProductId = product.Trim();
+            state.CurrentProductId = NormalizeProductId(product);
         }
 
         var nextStatus = TryResolveMachineState(catalogMap, readMap, out var machineStatus)
@@ -430,7 +627,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
             var nextMetadata = state.Metadata with
             {
-                ProductId = state.CurrentProductId,
+                ProductId = NormalizeProductId(state.CurrentProductId),
                 StartTimeUtc = now,
             };
 
@@ -456,29 +653,63 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             .OrderBy(x => x.LineNumber)
             .ToList();
 
+        var persistedRuntimeStates = dbContext.ActiveLineRuntimeStates
+            .AsNoTracking()
+            .ToDictionary(x => x.LineId);
+
         var now = DateTime.UtcNow;
 
-        return configuredLines
-            .ToDictionary(
-                line => line.LineId,
-                line => new LineRuntimeState(
-                    lineId: line.LineId,
-                    lineNumber: line.LineNumber,
-                    lineName: line.LineName,
-                    plcIp: line.PlcIp,
-                    manufacturer: line.Manufacturer,
-                    metadata: new ProductionRunMetadata(
-                        LineId: line.LineId,
-                        ProductId: string.IsNullOrWhiteSpace(line.ProductId) ? "" : line.ProductId,
-                        RecipeId: string.IsNullOrWhiteSpace(line.ProductId) ? "" : $"RCP-{line.ProductId}",
-                        MachineId: $"MX-{line.LineNumber:000}",
-                        OperatorName: $"operator-{line.LineNumber}",
-                        StartTimeUtc: now)));
+        var lineStates = new Dictionary<int, LineRuntimeState>();
+
+        foreach (var line in configuredLines)
+        {
+            var state = new LineRuntimeState(
+                lineId: line.LineId,
+                lineNumber: line.LineNumber,
+                lineName: line.LineName,
+                plcIp: line.PlcIp,
+                manufacturer: line.Manufacturer,
+                pollIntervalMs: line.PollIntervalMs,
+                metadata: BuildRunMetadata(line, line.ProductId, now));
+
+            if (persistedRuntimeStates.TryGetValue(line.LineId, out var checkpoint))
+            {
+                state.ApplyPersistedCheckpoint(checkpoint);
+            }
+
+            lineStates[line.LineId] = state;
+        }
+
+        return lineStates;
     }
 
     // -------------------------------------------------------------------------
     // Fallback and decode helpers
     // -------------------------------------------------------------------------
+
+    private static string NormalizeMetadataValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Unknown" : value.Trim();
+    }
+
+    private static string NormalizeProductId(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "N/A" : value.Trim();
+    }
+
+    private static ProductionRunMetadata BuildRunMetadata(
+        Models.Plc.LineProtocolAssignmentEntity assignment,
+        string productId,
+        DateTime startTimeUtc)
+    {
+        return new ProductionRunMetadata(
+            LineId: assignment.LineId,
+            ProductId: NormalizeProductId(productId),
+            RecipeId: NormalizeMetadataValue(assignment.RecipeId),
+            MachineId: NormalizeMetadataValue(assignment.MachineId),
+            OperatorName: NormalizeMetadataValue(assignment.OperatorName),
+            StartTimeUtc: startTimeUtc);
+    }
 
     private void TickStateSimulated(LineRuntimeState state, DateTime now)
     {
@@ -763,7 +994,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
     private static DashboardLineDto ToDashboardLine(LineRuntimeState state)
     {
         var snapshot = GetSnapshotOrFallback(state);
-        var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - state.StatusEnteredUtc).TotalSeconds);
+        var runtimeSeconds = Math.Max(0L, (long)(snapshot.LastUpdateUtc - snapshot.Metadata.StartTimeUtc).TotalSeconds);
         var autoModeVariance = CalculateWeightedVariance(snapshot.AutoQuality.Zones.Values);
         var manualModeVariance = CalculateWeightedVariance(snapshot.ManualQuality.Zones.Values);
         var totalVariance = CalculateWeightedVariance(snapshot.OverallZones.Values);
@@ -861,13 +1092,15 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         var stopped = IsStopState(state.Status);
         if (!stopped)
         {
-            if (!state.Engine.IsActive)
+            var shouldMarkRunning = false;
+
+            lock (_gate)
             {
-                lock (_gate)
+                if (!state.Engine.IsActive)
                 {
                     var nextMetadata = state.Metadata with
                     {
-                        ProductId = state.CurrentProductId,
+                        ProductId = NormalizeProductId(state.CurrentProductId),
                         StartTimeUtc = now,
                     };
 
@@ -876,38 +1109,48 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                     state.HasSeenRunningState = false;
                     state.Engine.StartRun(nextMetadata);
                 }
-            }
 
-            if (state.Status.Equals("Running", StringComparison.OrdinalIgnoreCase))
-            {
-                state.HasSeenRunningState = true;
-            }
+                shouldMarkRunning = state.Status.Equals("Running", StringComparison.OrdinalIgnoreCase);
+                if (shouldMarkRunning)
+                {
+                    state.HasSeenRunningState = true;
+                }
 
-            state.HasPersistedCurrentStop = false;
-            return;
-        }
-
-        if (state.HasPersistedCurrentStop || !state.Engine.IsActive)
-        {
-            return;
-        }
-
-        if (!state.HasSeenRunningState)
-        {
-            lock (_gate)
-            {
-                state.Engine.CompleteRun(now);
-                state.HasPersistedCurrentStop = true;
+                state.HasPersistedCurrentStop = false;
             }
 
             return;
         }
 
-        CompletedProductionRecord completed;
+        var shouldPersistStop = false;
+        var shouldPersistCompletedRun = false;
+        CompletedProductionRecord? completed = null;
+
         lock (_gate)
         {
-            completed = state.Engine.CompleteRun(now);
+            if (state.HasPersistedCurrentStop || !state.Engine.IsActive)
+            {
+                return;
+            }
+
+            shouldPersistStop = true;
+            shouldPersistCompletedRun = state.HasSeenRunningState;
+
+            if (shouldPersistCompletedRun)
+            {
+                completed = state.Engine.CompleteRun(now);
+            }
+            else
+            {
+                state.Engine.CompleteRun(now);
+            }
+
             state.HasPersistedCurrentStop = true;
+        }
+
+        if (!shouldPersistStop || !shouldPersistCompletedRun || completed is null)
+        {
+            return;
         }
 
         await PersistCompletedRunAsync(state, completed, cancellationToken);
@@ -915,6 +1158,70 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
     // Completed runs are persisted once per stop/fault/offline transition so the
     // reports page can reconstruct historical production activity.
+    private async Task PersistActiveRuntimeStateAsync(
+        LineRuntimeState state,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        ActiveLineRuntimeStateEntity checkpoint;
+
+        lock (_gate)
+        {
+            if (!state.ShouldPersistCheckpoint(now, ActiveRuntimePersistenceInterval))
+            {
+                return;
+            }
+
+            checkpoint = new ActiveLineRuntimeStateEntity
+            {
+                LineId = state.LineId,
+                Status = state.Status,
+                ControlMode = state.LastKnownControlMode.ToString(),
+                CurrentProductId = NormalizeProductId(state.CurrentProductId),
+                RunStartTimeUtc = state.Metadata.StartTimeUtc,
+                LastTickUtc = state.LastTickUtc,
+                ProductionLength = state.ProductionLength,
+                HasSeenRunningState = state.HasSeenRunningState,
+                HasPersistedCurrentStop = state.HasPersistedCurrentStop,
+                UpdatedAtUtc = now,
+            };
+
+            state.MarkCheckpointPersisted(now);
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+
+            var existing = await dbContext.ActiveLineRuntimeStates
+                .FirstOrDefaultAsync(x => x.LineId == checkpoint.LineId, cancellationToken);
+
+            if (existing is null)
+            {
+                dbContext.ActiveLineRuntimeStates.Add(checkpoint);
+            }
+            else
+            {
+                existing.Status = checkpoint.Status;
+                existing.ControlMode = checkpoint.ControlMode;
+                existing.CurrentProductId = checkpoint.CurrentProductId;
+                existing.RunStartTimeUtc = checkpoint.RunStartTimeUtc;
+                existing.LastTickUtc = checkpoint.LastTickUtc;
+                existing.ProductionLength = checkpoint.ProductionLength;
+                existing.HasSeenRunningState = checkpoint.HasSeenRunningState;
+                existing.HasPersistedCurrentStop = checkpoint.HasPersistedCurrentStop;
+                existing.UpdatedAtUtc = checkpoint.UpdatedAtUtc;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to persist active runtime checkpoint for line {LineId}.", state.LineId);
+        }
+    }
+
     private async Task PersistCompletedRunAsync(
         LineRuntimeState state,
         CompletedProductionRecord completed,
@@ -931,7 +1238,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                 LineId = state.LineId,
                 LineNumber = state.LineNumber,
                 LineName = state.LineName,
-                ProductId = state.CurrentProductId,
+                ProductId = NormalizeProductId(state.CurrentProductId),
                 RecipeId = snapshot.Metadata.RecipeId,
                 MachineId = snapshot.Metadata.MachineId,
                 OperatorName = snapshot.Metadata.OperatorName,
@@ -1115,10 +1422,15 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
     private sealed class LineRuntimeState
     {
         public int LineId { get; }
-        public int LineNumber { get; }
-        public string LineName { get; }
-        public string PlcIp { get; }
-        public string Manufacturer { get; }
+        private int _tickInProgress;
+
+        public int LineNumber { get; set; }
+        public string LineName { get; set; }
+        public string PlcIp { get; set; }
+        public string Manufacturer { get; set; }
+        public int PollIntervalMs { get; set; }
+        public DateTime NextPollAtUtc { get; private set; }
+        public bool IsEnabled { get; set; } = true;
         public string Status { get; set; } = "Offline";
         public ProductionRunMetadata Metadata { get; set; }
         public string CurrentProductId { get; set; }
@@ -1129,6 +1441,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         public ControlMode LastKnownControlMode { get; set; } = ControlMode.Manual;
         public bool HasPersistedCurrentStop { get; set; }
         public bool HasSeenRunningState { get; set; }
+        public DateTime LastCheckpointPersistedUtc { get; private set; }
 
         public LineRuntimeState(
             int lineId,
@@ -1136,6 +1449,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             string lineName,
             string plcIp,
             string manufacturer,
+            int pollIntervalMs,
             ProductionRunMetadata metadata)
         {
             LineId = lineId;
@@ -1143,6 +1457,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             LineName = lineName;
             PlcIp = plcIp;
             Manufacturer = manufacturer;
+            PollIntervalMs = Math.Clamp(pollIntervalMs, 500, 60000);
             Metadata = metadata;
             CurrentProductId = metadata.ProductId;
 
@@ -1150,6 +1465,62 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             Engine.StartRun(metadata);
             LastTickUtc = metadata.StartTimeUtc;
             StatusEnteredUtc = metadata.StartTimeUtc;
+            NextPollAtUtc = metadata.StartTimeUtc;
+            LastCheckpointPersistedUtc = DateTime.MinValue;
+        }
+
+        public void ApplyPersistedCheckpoint(ActiveLineRuntimeStateEntity checkpoint)
+        {
+            CurrentProductId = string.IsNullOrWhiteSpace(checkpoint.CurrentProductId)
+                ? CurrentProductId
+                : checkpoint.CurrentProductId.Trim();
+
+            Status = string.IsNullOrWhiteSpace(checkpoint.Status)
+                ? Status
+                : checkpoint.Status.Trim();
+
+            if (Enum.TryParse<ControlMode>(checkpoint.ControlMode, ignoreCase: true, out var persistedMode))
+            {
+                LastKnownControlMode = persistedMode;
+            }
+
+            var persistedStart = checkpoint.RunStartTimeUtc == default
+                ? Metadata.StartTimeUtc
+                : checkpoint.RunStartTimeUtc;
+
+            Metadata = Metadata with
+            {
+                ProductId = CurrentProductId,
+                StartTimeUtc = persistedStart,
+            };
+
+            LastTickUtc = checkpoint.LastTickUtc == default ? LastTickUtc : checkpoint.LastTickUtc;
+            StatusEnteredUtc = LastTickUtc;
+            ProductionLength = checkpoint.ProductionLength;
+            HasSeenRunningState = checkpoint.HasSeenRunningState;
+            HasPersistedCurrentStop = checkpoint.HasPersistedCurrentStop;
+        }
+
+        public bool ShouldPersistCheckpoint(DateTime now, TimeSpan interval)
+        {
+            return LastCheckpointPersistedUtc == DateTime.MinValue
+                || now - LastCheckpointPersistedUtc >= interval;
+        }
+
+        public void MarkCheckpointPersisted(DateTime now)
+        {
+            LastCheckpointPersistedUtc = now;
+        }
+
+        public bool TryBeginTick()
+        {
+            return Interlocked.CompareExchange(ref _tickInProgress, 1, 0) == 0;
+        }
+
+        public void CompleteTick(DateTime now)
+        {
+            NextPollAtUtc = now.AddMilliseconds(Math.Clamp(PollIntervalMs, 500, 60000));
+            Interlocked.Exchange(ref _tickInProgress, 0);
         }
     }
 }

@@ -15,8 +15,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 
 export default function Login() {
-  const [username, setUsername] = useState("test");
-  const [password, setPassword] = useState("test");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -57,11 +57,11 @@ export default function Login() {
       <Paper sx={{ width: "100%", maxWidth: 420, p: 4 }} elevation={3}>
         <Stack spacing={2.5} component="form" onSubmit={handleSubmit}>
           <Typography variant="h4" sx={{ fontWeight: 700 }}>
-            Admin Login
+            Plant Monitor Login
           </Typography>
 
           <Typography color="text.secondary">
-            Sign in to access protected administration features.
+            Sign in to access your authorized Plant Monitor pages.
           </Typography>
 
           {error ? <Alert severity="error">{error}</Alert> : null}

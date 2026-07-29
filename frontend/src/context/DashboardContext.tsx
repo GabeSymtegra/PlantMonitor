@@ -22,8 +22,9 @@ import { useAuth } from "./useAuth";
 
 export type DashboardView = "table" | "cards";
 const DASHBOARD_POLL_MS = 10000;
+const MIN_SIGNALR_REFRESH_MS = 1500;
 const SIGNALR_HUB_URL =
-  import.meta.env.VITE_SIGNALR_HUB_URL ?? "http://localhost:5265/hubs/lines";
+  import.meta.env.VITE_SIGNALR_HUB_URL ?? "/hubs/lines";
 
 interface DashboardContextType {
   dashboard: DashboardModel | null;
@@ -46,17 +47,24 @@ export function DashboardProvider({
 }: {
   children: ReactNode;
 }) {
-  const { isAuthenticated, accessToken } = useAuth();
-  const authToken = accessToken;
+  const { isAuthenticated } = useAuth();
   const [dashboard, setDashboard] = useState<DashboardModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [view, setView] = useState<DashboardView>("table");
   const signalRConnectionRef = useRef<HubConnection | null>(null);
+  const lastRefreshAtRef = useRef(0);
+  const inFlightRefreshRef = useRef<Promise<void> | null>(null);
+  const deferredRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Polling is the baseline transport. SignalR only accelerates refreshes.
   async function refresh(showLoader = true) {
+    if (inFlightRefreshRef.current) {
+      return inFlightRefreshRef.current;
+    }
+
+    const run = (async () => {
     if (showLoader) {
       setLoading(true);
     }
@@ -84,9 +92,19 @@ export function DashboardProvider({
 
       setError("Unable to load live runtime data. Showing configured active lines.");
     } finally {
+      lastRefreshAtRef.current = Date.now();
       if (showLoader) {
         setLoading(false);
       }
+    }
+    })();
+
+    inFlightRefreshRef.current = run;
+
+    try {
+      await run;
+    } finally {
+      inFlightRefreshRef.current = null;
     }
   }
 
@@ -94,14 +112,36 @@ export function DashboardProvider({
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
     let disposed = false;
 
-    if (!isAuthenticated || !authToken) {
+    function requestRealtimeRefresh() {
+      if (disposed) {
+        return;
+      }
+
+      const elapsedMs = Date.now() - lastRefreshAtRef.current;
+      if (elapsedMs >= MIN_SIGNALR_REFRESH_MS && !inFlightRefreshRef.current) {
+        void refresh(false);
+        return;
+      }
+
+      if (deferredRefreshTimerRef.current) {
+        return;
+      }
+
+      const remainingMs = Math.max(100, MIN_SIGNALR_REFRESH_MS - elapsedMs);
+      deferredRefreshTimerRef.current = setTimeout(() => {
+        deferredRefreshTimerRef.current = null;
+        if (!disposed) {
+          void refresh(false);
+        }
+      }, remainingMs);
+    }
+
+    if (!isAuthenticated) {
       setDashboard(null);
       setError(null);
       setLoading(false);
       return;
     }
-
-    const token: string = authToken;
 
     async function loadInitialDashboard() {
       await refresh(true);
@@ -112,9 +152,7 @@ export function DashboardProvider({
       }, DASHBOARD_POLL_MS);
 
       const connection = new HubConnectionBuilder()
-        .withUrl(SIGNALR_HUB_URL, {
-          accessTokenFactory: () => token,
-        })
+        .withUrl(SIGNALR_HUB_URL, { withCredentials: true })
         .withAutomaticReconnect()
         .configureLogging(LogLevel.Warning)
         .build();
@@ -124,21 +162,15 @@ export function DashboardProvider({
       // The backend emits broad refresh signals rather than fine-grained row
       // patches, so the frontend always re-fetches the latest snapshot.
       connection.on("LineUpdated", () => {
-        if (!disposed) {
-          void refresh(false);
-        }
+        requestRealtimeRefresh();
       });
 
       connection.on("SnapshotRefreshRequired", () => {
-        if (!disposed) {
-          void refresh(false);
-        }
+        requestRealtimeRefresh();
       });
 
       connection.onreconnected(() => {
-        if (!disposed) {
-          void refresh(false);
-        }
+        requestRealtimeRefresh();
       });
 
       try {
@@ -157,6 +189,11 @@ export function DashboardProvider({
         clearInterval(pollingTimer);
       }
 
+      if (deferredRefreshTimerRef.current) {
+        clearTimeout(deferredRefreshTimerRef.current);
+        deferredRefreshTimerRef.current = null;
+      }
+
       if (
         signalRConnectionRef.current &&
         signalRConnectionRef.current.state !== HubConnectionState.Disconnected
@@ -164,7 +201,7 @@ export function DashboardProvider({
         void signalRConnectionRef.current.stop();
       }
     };
-  }, [authToken, isAuthenticated]);
+  }, [isAuthenticated]);
 
   return (
     <DashboardContext.Provider

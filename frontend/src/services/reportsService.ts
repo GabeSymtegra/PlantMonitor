@@ -1,10 +1,19 @@
 import { apiDelete, apiGet } from "./api/client";
 import type {
+  PagedResult,
   CompletedRunReportDetail,
   CompletedRunReportRow,
   CompletedRunZoneStat,
   RuntimeEventReportRow,
 } from "../models/Reports";
+
+interface ReportFilters {
+  lineId?: number;
+  fromDate?: string;
+  toDate?: string;
+  page?: number;
+  pageSize?: number;
+}
 
 interface CompletedRunDto {
   id: string;
@@ -47,33 +56,53 @@ interface RuntimeEventDto {
   occurredAtUtc: string;
 }
 
-export async function getCompletedRunReports(
-  lineId?: number,
-  take = 200
-): Promise<CompletedRunReportRow[]> {
-  const query = new URLSearchParams();
-  query.set("take", String(take));
+interface PagedResultDto<T> {
+  items: T[];
+  totalCount: number;
+  skip: number;
+  take: number;
+}
 
-  if (typeof lineId === "number") {
-    query.set("lineId", String(lineId));
+export async function getCompletedRunReports(
+  filters: ReportFilters = {}
+): Promise<PagedResult<CompletedRunReportRow>> {
+  const query = new URLSearchParams();
+  query.set("page", String(filters.page ?? 1));
+  query.set("pageSize", String(filters.pageSize ?? 25));
+
+  if (typeof filters.lineId === "number") {
+    query.set("lineId", String(filters.lineId));
   }
 
-  const rows = await apiGet<CompletedRunDto[]>(`/production-runs?${query.toString()}`);
+  if (filters.fromDate) {
+    query.set("fromDate", filters.fromDate);
+  }
 
-  return rows.map((row) => ({
-    id: row.id,
-    lineId: row.lineId,
-    lineNumber: row.lineNumber,
-    lineName: row.lineName,
-    productId: row.productId,
-    finalStatus: row.finalStatus,
-    startTimeUtc: row.startTimeUtc,
-    endTimeUtc: row.endTimeUtc,
-    runtimeSeconds: row.runtimeSeconds,
-    productionLength: row.productionLength,
-    autoPercentage: row.autoPercentage,
-    manualPercentage: row.manualPercentage,
-  }));
+  if (filters.toDate) {
+    query.set("toDate", filters.toDate);
+  }
+
+  const payload = await apiGet<PagedResultDto<CompletedRunDto>>(`/production-runs?${query.toString()}`);
+
+  return {
+    items: payload.items.map((row) => ({
+      id: row.id,
+      lineId: row.lineId,
+      lineNumber: row.lineNumber,
+      lineName: row.lineName,
+      productId: row.productId,
+      finalStatus: row.finalStatus,
+      startTimeUtc: row.startTimeUtc,
+      endTimeUtc: row.endTimeUtc,
+      runtimeSeconds: row.runtimeSeconds,
+      productionLength: row.productionLength,
+      autoPercentage: row.autoPercentage,
+      manualPercentage: row.manualPercentage,
+    })),
+    totalCount: payload.totalCount,
+    skip: payload.skip,
+    take: payload.take,
+  };
 }
 
 function toCompletedRunZoneStat(row: CompletedRunZoneStatDto): CompletedRunZoneStat {
@@ -123,26 +152,39 @@ export async function deleteCompletedRunReport(runId: string): Promise<void> {
 }
 
 export async function getRuntimeEventReports(
-  lineId?: number,
-  take = 400
-): Promise<RuntimeEventReportRow[]> {
+  filters: ReportFilters = {}
+): Promise<PagedResult<RuntimeEventReportRow>> {
   const query = new URLSearchParams();
-  query.set("take", String(take));
+  query.set("page", String(filters.page ?? 1));
+  query.set("pageSize", String(filters.pageSize ?? 50));
 
-  if (typeof lineId === "number") {
-    query.set("lineId", String(lineId));
+  if (typeof filters.lineId === "number") {
+    query.set("lineId", String(filters.lineId));
   }
 
-  const rows = await apiGet<RuntimeEventDto[]>(`/reports/events?${query.toString()}`);
+  if (filters.fromDate) {
+    query.set("fromDate", filters.fromDate);
+  }
 
-  return rows.map((row) => ({
-    id: row.id,
-    lineId: row.lineId,
-    lineNumber: row.lineNumber,
-    lineName: row.lineName,
-    eventType: row.eventType,
-    previousValue: row.previousValue,
-    currentValue: row.currentValue,
-    occurredAtUtc: row.occurredAtUtc,
-  }));
+  if (filters.toDate) {
+    query.set("toDate", filters.toDate);
+  }
+
+  const payload = await apiGet<PagedResultDto<RuntimeEventDto>>(`/reports/events?${query.toString()}`);
+
+  return {
+    items: payload.items.map((row) => ({
+      id: row.id,
+      lineId: row.lineId,
+      lineNumber: row.lineNumber,
+      lineName: row.lineName,
+      eventType: row.eventType,
+      previousValue: row.previousValue,
+      currentValue: row.currentValue,
+      occurredAtUtc: row.occurredAtUtc,
+    })),
+    totalCount: payload.totalCount,
+    skip: payload.skip,
+    take: payload.take,
+  };
 }

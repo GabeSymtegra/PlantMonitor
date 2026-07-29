@@ -189,6 +189,52 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     }
 
     [Fact]
+    public async Task TestConnection_WithDriverFailure_ReturnsBadGateway()
+    {
+        var client = _factory.CreateClient();
+        var token = await GetAccessToken(client, "test", "test");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.PostAsJsonAsync("/api/admin/plc/test-connection", new
+        {
+            driver = "AllenBradley",
+            ipAddress = "192.168.1.99",
+        });
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReplaceTagCatalog_WithUnknownLogicalKey_ReturnsBadRequest()
+    {
+        var client = _factory.CreateClient();
+        var token = await GetAccessToken(client, "test", "test");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.PutAsJsonAsync("/api/admin/lines/101/tag-catalog", new
+        {
+            driver = "AllenBradley",
+            tags = new[]
+            {
+                new
+                {
+                    logicalKey = "unknown_key",
+                    displayName = "Unknown",
+                    driver = "AllenBradley",
+                    plcAddress = "Machine.LineSpeed",
+                    dataType = "real",
+                    scale = 1.0m,
+                    isEnabled = true,
+                    isRequired = true,
+                    readFrequencyMs = 1000,
+                },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task BrowseTags_WithAdminToken_ReturnsResolvedDriverTags()
     {
         var client = _factory.CreateClient();
@@ -270,6 +316,17 @@ public sealed class PlcConnectionApiFactory : WebApplicationFactory<Program>
 
         public Task<PlcConnectionResult> TestConnectionAsync(PlcConnectionRequest request, CancellationToken cancellationToken = default)
         {
+            if (string.Equals(request.IpAddress, "192.168.1.99", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new PlcConnectionResult
+                {
+                    IsConnected = false,
+                    Driver = request.Driver,
+                    IpAddress = request.IpAddress,
+                    Message = "Driver timeout while connecting to PLC.",
+                });
+            }
+
             return Task.FromResult(new PlcConnectionResult
             {
                 IsConnected = true,

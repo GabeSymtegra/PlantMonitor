@@ -1,12 +1,11 @@
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
-  "http://localhost:5265/api";
+  "/api";
 
 // -----------------------------------------------------------------------------
 // Auth token state and exported API error type
 // -----------------------------------------------------------------------------
 
-const TOKEN_STORAGE_KEY = "plantmonitor-auth-token";
 export const AUTH_EXPIRED_EVENT = "plantmonitor-auth-expired";
 
 let currentAccessToken: string | null = null;
@@ -38,7 +37,24 @@ export class ApiRequestError extends Error {
 // -----------------------------------------------------------------------------
 
 function buildUrl(endpoint: string): string {
-  return `${API_BASE}${endpoint}`;
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint
+    : `/${endpoint}`;
+
+  const baseHasApiSuffix = /\/api$/i.test(API_BASE);
+  const endpointHasApiPrefix = /^\/api(\/|$)/i.test(normalizedEndpoint);
+
+  let resolvedEndpoint = normalizedEndpoint;
+
+  if (baseHasApiSuffix && endpointHasApiPrefix) {
+    resolvedEndpoint = normalizedEndpoint.replace(/^\/api/i, "");
+  }
+
+  if (!baseHasApiSuffix && !endpointHasApiPrefix) {
+    resolvedEndpoint = `/api${normalizedEndpoint}`;
+  }
+
+  return `${API_BASE}${resolvedEndpoint}`;
 }
 
 export function setApiAccessToken(token: string | null) {
@@ -61,10 +77,7 @@ function buildRequestTrace(
 }
 
 function getAuthHeaders(): HeadersInit {
-  const token =
-    currentAccessToken ??
-    localStorage.getItem(TOKEN_STORAGE_KEY) ??
-    sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  const token = currentAccessToken;
 
   if (!token) {
     return {};
@@ -132,6 +145,7 @@ async function request<T>(
   try {
     const response = await fetch(url, {
       method,
+      credentials: "include",
       headers: {
         ...(body ? { "Content-Type": "application/json" } : {}),
         ...getAuthHeaders(),
@@ -182,6 +196,7 @@ export async function apiDelete(endpoint: string): Promise<void> {
   try {
     const response = await fetch(url, {
       method,
+      credentials: "include",
       headers: {
         ...getAuthHeaders(),
       },

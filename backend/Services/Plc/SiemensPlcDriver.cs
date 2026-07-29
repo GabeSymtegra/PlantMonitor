@@ -22,6 +22,16 @@ public sealed class SiemensPlcDriver : IPlcDriver
 
     public async Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask;
+        return new PlcConnectionResult
+        {
+            IsConnected = false,
+            Driver = DriverName,
+            IpAddress = ipAddress,
+            Message = "Siemens monitoring is not supported in this build. Commissioning is blocked until real read support is completed.",
+        };
+
+        #pragma warning disable CS0162
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
@@ -63,6 +73,7 @@ public sealed class SiemensPlcDriver : IPlcDriver
             stopwatch.Stop();
             return Failure(ipAddress, stopwatch, MapMessage(exception));
         }
+        #pragma warning restore CS0162
     }
 
     private static PlcConnectionResult Failure(string ipAddress, System.Diagnostics.Stopwatch stopwatch, string message)
@@ -106,28 +117,7 @@ public sealed class SiemensPlcDriver : IPlcDriver
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var query = FillerTags.AsEnumerable();
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            query = query.Where(tag => tag.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase));
-        }
-
-        var tags = query
-            .Select(tag => new PlcTagBrowseItemDto
-            {
-                Name = tag.Name,
-                DataType = tag.DataType,
-                IsFolder = tag.IsFolder,
-                ParentPath = tag.ParentPath,
-                CanRead = tag.IsFolder ? null : true,
-                CanWrite = tag.IsFolder ? null : tag.CanWrite,
-            })
-            .OrderBy(tag => tag.IsFolder ? 0 : 1)
-            .ThenBy(tag => tag.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>(tags);
+        return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>([]);
     }
 
     public Task<PlcTagReadResultDto> ReadTagAsync(
@@ -136,28 +126,13 @@ public sealed class SiemensPlcDriver : IPlcDriver
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        var tag = FillerTags.FirstOrDefault(x =>
-            !x.IsFolder && x.Name.Equals(tagName.Trim(), StringComparison.OrdinalIgnoreCase));
-
-        if (tag is null)
-        {
-            return Task.FromResult(new PlcTagReadResultDto
-            {
-                Name = tagName,
-                LastReadUtc = DateTime.UtcNow,
-                Error = "Tag was not found in filler mode.",
-            });
-        }
-
         return Task.FromResult(new PlcTagReadResultDto
         {
-            Name = tag.Name,
-            DataType = tag.DataType,
-            Value = tag.SampleValue,
+            Name = tagName,
             LastReadUtc = DateTime.UtcNow,
-            CanRead = true,
-            CanWrite = tag.CanWrite,
+            CanRead = false,
+            CanWrite = false,
+            Error = "Siemens monitoring is not supported in this build.",
         });
     }
 
@@ -185,37 +160,12 @@ public sealed class SiemensPlcDriver : IPlcDriver
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        var tag = FillerTags.FirstOrDefault(x =>
-            !x.IsFolder && x.Name.Equals(tagName.Trim(), StringComparison.OrdinalIgnoreCase));
-
-        if (tag is null)
-        {
-            return Task.FromResult(new PlcTagWriteResultDto
-            {
-                Name = tagName,
-                Success = false,
-                AttemptedAtUtc = DateTime.UtcNow,
-                Error = "Tag was not found in filler mode.",
-            });
-        }
-
-        if (!tag.CanWrite)
-        {
-            return Task.FromResult(new PlcTagWriteResultDto
-            {
-                Name = tag.Name,
-                Success = false,
-                AttemptedAtUtc = DateTime.UtcNow,
-                Error = "Tag is read-only in filler mode.",
-            });
-        }
-
         return Task.FromResult(new PlcTagWriteResultDto
         {
-            Name = tag.Name,
-            Success = true,
+            Name = tagName,
+            Success = false,
             AttemptedAtUtc = DateTime.UtcNow,
+            Error = "Write operations are disabled. PlantMonitor is monitor-only.",
         });
     }
 

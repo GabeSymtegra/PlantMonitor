@@ -58,11 +58,33 @@ interface ThemeContextType {
     resetAppearance: () => void;
 }
 
-const STORAGE_KEY = "plantmonitor-theme-mode";
-const APPEARANCE_STORAGE_KEY = "plantmonitor-appearance-settings";
+const STORAGE_KEY_PREFIX = "plantmonitor-theme-mode";
+const APPEARANCE_STORAGE_KEY_PREFIX = "plantmonitor-appearance-settings";
+const AUTH_USER_STORAGE_KEY = "plantmonitor-auth-user";
+
+function getStorageScopeSuffix(): string {
+    const rawUser = localStorage.getItem(AUTH_USER_STORAGE_KEY);
+    if (!rawUser) {
+        return "anonymous";
+    }
+
+    try {
+        const parsed = JSON.parse(rawUser) as { username?: string };
+        const normalized = parsed.username?.trim().toLowerCase();
+        return normalized ? `user:${normalized}` : "anonymous";
+    } catch {
+        return "anonymous";
+    }
+}
+
+function buildScopedStorageKey(prefix: string): string {
+    return `${prefix}:${getStorageScopeSuffix()}`;
+}
 
 function resolveInitialMode(): ThemeMode {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const scopedStorageKey = buildScopedStorageKey(STORAGE_KEY_PREFIX);
+    const stored = localStorage.getItem(scopedStorageKey)
+        ?? localStorage.getItem(STORAGE_KEY_PREFIX);
 
     if (stored === "light" || stored === "dark") {
         return stored;
@@ -80,7 +102,9 @@ export const ThemeContext = createContext<ThemeContextType | undefined>(
 );
 
 function resolveInitialAppearance(): AppearanceSettings {
-    const stored = localStorage.getItem(APPEARANCE_STORAGE_KEY);
+    const scopedStorageKey = buildScopedStorageKey(APPEARANCE_STORAGE_KEY_PREFIX);
+    const stored = localStorage.getItem(scopedStorageKey)
+        ?? localStorage.getItem(APPEARANCE_STORAGE_KEY_PREFIX);
 
     if (!stored) {
         return DEFAULT_APPEARANCE_SETTINGS;
@@ -123,11 +147,14 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     );
 
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, mode);
+        localStorage.setItem(buildScopedStorageKey(STORAGE_KEY_PREFIX), mode);
     }, [mode]);
 
     useEffect(() => {
-        localStorage.setItem(APPEARANCE_STORAGE_KEY, JSON.stringify(appearance));
+        localStorage.setItem(
+            buildScopedStorageKey(APPEARANCE_STORAGE_KEY_PREFIX),
+            JSON.stringify(appearance)
+        );
     }, [appearance]);
 
     useEffect(() => {

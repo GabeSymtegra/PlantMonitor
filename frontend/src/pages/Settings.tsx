@@ -100,6 +100,10 @@ export default function Settings() {
           Display Settings
         </Typography>
 
+        <Typography color="text.secondary">
+          These preferences are stored in this browser for the currently signed-in user and are not shared to other devices.
+        </Typography>
+
         <Paper sx={{ p: 2.5 }}>
           <Stack spacing={2}>
             <Typography variant="h6">Color Mode</Typography>

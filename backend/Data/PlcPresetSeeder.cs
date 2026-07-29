@@ -7,11 +7,6 @@ public static class PlcPresetSeeder
 {
     public static async Task SeedAsync(PlantMonitorDbContext dbContext, CancellationToken cancellationToken = default)
     {
-        if (await dbContext.PlcProtocolPresets.AnyAsync(cancellationToken))
-        {
-            return;
-        }
-
         var presets = new List<PlcProtocolPresetEntity>
         {
             new()
@@ -46,7 +41,30 @@ public static class PlcPresetSeeder
             },
         };
 
-        dbContext.PlcProtocolPresets.AddRange(presets);
+        var existing = await dbContext.PlcProtocolPresets
+            .AsNoTracking()
+            .Select(x => new { x.Manufacturer, x.PresetName, x.PresetVersion })
+            .ToListAsync(cancellationToken);
+
+        var existingKeys = new HashSet<string>(
+            existing.Select(x => BuildKey(x.Manufacturer, x.PresetName, x.PresetVersion)),
+            StringComparer.OrdinalIgnoreCase);
+
+        var missing = presets
+            .Where(x => !existingKeys.Contains(BuildKey(x.Manufacturer, x.PresetName, x.PresetVersion)))
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        dbContext.PlcProtocolPresets.AddRange(missing);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string BuildKey(string manufacturer, string presetName, int presetVersion)
+    {
+        return $"{manufacturer}::{presetName}::{presetVersion}";
     }
 }

@@ -36,6 +36,7 @@ The status board is the simplified monitoring screen.
 Administration is for configuration work.
 
 - Add or update line definitions.
+- Maintain line runtime metadata (`Recipe ID`, `Machine ID`, and `Operator`) used by runtime details and completed-run records.
 - Test PLC connectivity.
 - Assign protocol presets.
 - Review effective tag mappings.
@@ -57,6 +58,14 @@ The Reports page provides historical visibility.
 - Runtime events show mode switches and status switches for each line.
 - Use the line filter and date range fields to narrow results.
 - Export filtered tables to CSV when needed.
+
+## Settings
+
+Settings control display preferences such as color mode, monitor name, and text readability.
+
+- Settings are stored in the current browser.
+- Settings are scoped to the currently signed-in user in that browser.
+- Settings do not sync automatically across machines.
 
 ## Common Status Meanings
 

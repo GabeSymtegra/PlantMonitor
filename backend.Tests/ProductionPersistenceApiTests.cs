@@ -39,7 +39,7 @@ public sealed class ProductionPersistenceApiTests : IClassFixture<WebApplication
     }
 
     [Fact]
-    public async Task ProductionRuns_WithAdminToken_ReturnsOkArray()
+    public async Task ProductionRuns_WithAdminToken_ReturnsPagedPayload()
     {
         var client = _factory.CreateClient();
         var token = await GetAccessToken(client, "test", "test");
@@ -50,8 +50,36 @@ public sealed class ProductionPersistenceApiTests : IClassFixture<WebApplication
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var payload = await response.Content.ReadFromJsonAsync<JsonArray>();
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
         Assert.NotNull(payload);
+        Assert.True(payload!.ContainsKey("items"));
+        Assert.True(payload.ContainsKey("totalCount"));
+    }
+
+    [Fact]
+    public async Task RuntimeEvents_WithInvalidLineId_ReturnsBadRequest()
+    {
+        var client = _factory.CreateClient();
+        var token = await GetAccessToken(client, "test", "test");
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.GetAsync("/api/reports/events?lineId=9999");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProductionRuns_WithInvalidDateRange_ReturnsBadRequest()
+    {
+        var client = _factory.CreateClient();
+        var token = await GetAccessToken(client, "test", "test");
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.GetAsync("/api/production-runs?fromDate=2026-07-10&toDate=2026-07-01");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     private static async Task<string> GetAccessToken(HttpClient client, string username, string password)

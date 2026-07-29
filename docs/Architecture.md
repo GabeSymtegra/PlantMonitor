@@ -6,13 +6,13 @@ PlantMonitor is a private-network manufacturing monitoring platform.
 
 This document defines the backend and frontend architecture for the current implementation phase:
 
-- Mock PLC data source is used for initial feature delivery.
-- System is monitor-only in this phase (no remote PLC control commands).
-- Realtime dashboard updates are delivered via SignalR from day one.
+- Runtime data is sourced from configured line tag catalogs and PLC drivers.
+- System is monitor-only in this phase (no remote PLC write commands).
+- Realtime dashboard refresh signals are delivered via SignalR from day one.
 
 Out of scope for this version:
 
-- Direct production PLC driver implementation details (future phase).
+- Full Siemens production read path verification (commissioning pending).
 - Worker and standalone PLC service process design (future phase).
 
 ## 2. System Context
@@ -57,20 +57,20 @@ Responsibilities:
 - Authentication and authorization.
 - REST APIs for dashboard, lines, tag mappings, and reports.
 - SignalR hub for realtime event delivery.
-- Read/write of current and historical records in PostgreSQL.
-- Mock telemetry producer that simulates PLC values.
+- Read/write of configuration and historical records in SQLite.
+- Runtime polling and statistics orchestration for configured lines.
 
 Current code anchor:
 
 - Minimal baseline: backend/Program.cs
 
-### 3.3 PostgreSQL Data Store
+### 3.3 SQLite Data Store
 
 Responsibilities:
 
 - Source of truth for line configuration and tag definitions.
-- Persistence of line snapshots and historical aggregates.
-- User and role records if identity data is stored locally.
+- Persistence of completed runs, runtime events, auth records, and active runtime checkpoints.
+- Local deployment-friendly storage with EF Core migrations.
 
 Schema details are specified in docs/Database.md.
 
@@ -96,24 +96,19 @@ Schema details are specified in docs/Database.md.
 - On reconnect success, client requests a full snapshot refresh from GET /api/dashboard.
 - If hub is unavailable, dashboard shows stale indicator and continues periodic snapshot refresh.
 
-## 5. Mock PLC Integration Strategy (Current Phase)
+## 5. PLC Integration Strategy (Current Phase)
 
-The backend uses an internal mock telemetry provider with deterministic synthetic values.
+The backend polls configured lines using mapped PLC tag catalogs.
 
 Requirements:
 
-- Generate valid status transitions using supported status values:
-	- Running
-	- Stopped
-	- Faulted
-	- Offline
-	- Maintenance
-- Increment runtime and totalLength metrics realistically.
-- Preserve per-line identity and configured PLC metadata.
+- Use validated, per-line logical keys (`control_mode`, `machine_state`, production and zone tags).
+- Persist status/mode transition events and completed runs.
+- Preserve per-line identity and configured PLC metadata, including explicit `RecipeId`, `MachineId`, and `OperatorName` from line configuration.
 
 Design rule:
 
-- Backend contracts consumed by frontend must remain stable when real AB and Siemens drivers replace mock sources.
+- Backend contracts consumed by frontend must remain stable as commissioning coverage expands.
 
 ## 6. Frontend Architecture Details
 
@@ -133,7 +128,7 @@ Target behavior:
 
 - Protected routes require valid auth token.
 - Unauthorized users are redirected to /login.
-- Role-based UI gates hide admin-only actions.
+- Role-based UI gates hide admin-only actions while still allowing explicit `/forbidden` feedback for denied routes.
 
 ### 6.2 State Management
 
@@ -143,13 +138,14 @@ DashboardContext owns:
 - Loading state
 - View mode (table or cards)
 - Realtime subscription lifecycle
-- Search and filter state (to be added)
+- SignalR refresh coalescing and polling fallback
 
 State rules:
 
 - Single source of truth for dashboard lines.
 - All dashboard components consume shared context.
 - No component-local duplicate copies of line state.
+- Display preferences from `/settings` are browser-local and scoped per signed-in user.
 
 ### 6.3 Presentation Components
 
@@ -175,6 +171,7 @@ Component behavior requirements:
 - Services: Business rules and orchestration.
 - Data access layer: EF Core repositories or DbContext-driven services.
 - SignalR publisher: Broadcast line and dashboard events.
+- Background runtime services: line polling, transition capture, run completion persistence.
 
 ### 7.2 Security Layers
 

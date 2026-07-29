@@ -3,10 +3,17 @@ node_modules/
 
 # Vite
 dist/
+frontend/dist/
 
 # .NET
 bin/
 obj/
+artifacts/
+
+# Runtime data
+*.db
+*.db-wal
+*.db-shm
 
 # VS Code
 .vscode/

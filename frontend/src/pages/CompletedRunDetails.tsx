@@ -148,11 +148,17 @@ export default function CompletedRunDetails() {
         return;
       }
 
-      const lineEvents = await getRuntimeEventReports(nextRun.lineId, 1000);
+      const lineEvents = await getRuntimeEventReports({
+        lineId: nextRun.lineId,
+        fromDate: nextRun.startTimeUtc.slice(0, 10),
+        toDate: nextRun.endTimeUtc.slice(0, 10),
+        page: 1,
+        pageSize: 1000,
+      });
       const start = new Date(nextRun.startTimeUtc).getTime();
       const end = new Date(nextRun.endTimeUtc).getTime();
 
-      const filteredEvents = lineEvents.filter((event) => {
+      const filteredEvents = lineEvents.items.filter((event) => {
         const stamp = new Date(event.occurredAtUtc).getTime();
         return stamp >= start && stamp <= end;
       });

@@ -3,6 +3,7 @@ using backend.Interfaces.Plc;
 using libplctag;
 using libplctag.DataTypes.Simple;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using TagInfo = libplctag.DataTypes.TagInfo;
 
 namespace backend.Services.Plc;
@@ -12,6 +13,9 @@ namespace backend.Services.Plc;
 // instead of inventing values.
 public sealed class AllenBradleyPlcDriver : IPlcDriver
 {
+    private static readonly ConcurrentDictionary<string, (DateTime CachedAtUtc, TagInfo[] Tags)> TagCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan TagCacheTtl = TimeSpan.FromSeconds(30);
+
     // Common primitive type codes returned by libplctag metadata.
     private const ushort BoolTypeCode = 0x00C1;
     private const ushort SintTypeCode = 0x00C2;
@@ -190,11 +194,25 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var discoveredTags = await DiscoverTagsAsync(ipAddress, cancellationToken);
+        var discoveredMap = discoveredTags.ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
+
         var results = new List<PlcTagReadResultDto>(tagNames.Count);
 
         foreach (var tagName in tagNames.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            results.Add(await ReadTagAsync(ipAddress, tagName, cancellationToken));
+            if (!discoveredMap.TryGetValue(tagName.Trim(), out var tag))
+            {
+                results.Add(new PlcTagReadResultDto
+                {
+                    Name = tagName,
+                    LastReadUtc = DateTime.UtcNow,
+                    Error = "Tag was not found on the controller.",
+                });
+                continue;
+            }
+
+            results.Add(await ReadLiveTagAsync(ipAddress, tag, cancellationToken));
         }
 
         return results;
@@ -207,37 +225,12 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        var tag = FillerTags.FirstOrDefault(x =>
-            !x.IsFolder && x.Name.Equals(tagName.Trim(), StringComparison.OrdinalIgnoreCase));
-
-        if (tag is null)
-        {
-            return Task.FromResult(new PlcTagWriteResultDto
-            {
-                Name = tagName,
-                Success = false,
-                AttemptedAtUtc = DateTime.UtcNow,
-                Error = "Tag was not found in filler mode.",
-            });
-        }
-
-        if (!tag.CanWrite)
-        {
-            return Task.FromResult(new PlcTagWriteResultDto
-            {
-                Name = tag.Name,
-                Success = false,
-                AttemptedAtUtc = DateTime.UtcNow,
-                Error = "Tag is read-only in filler mode.",
-            });
-        }
-
         return Task.FromResult(new PlcTagWriteResultDto
         {
-            Name = tag.Name,
-            Success = true,
+            Name = tagName,
+            Success = false,
             AttemptedAtUtc = DateTime.UtcNow,
+            Error = "Write operations are disabled. PlantMonitor is monitor-only.",
         });
     }
 
@@ -280,6 +273,12 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
 
     private static async Task<TagInfo[]> DiscoverTagsAsync(string ipAddress, CancellationToken cancellationToken)
     {
+        if (TagCache.TryGetValue(ipAddress, out var cached)
+            && DateTime.UtcNow - cached.CachedAtUtc < TagCacheTtl)
+        {
+            return cached.Tags;
+        }
+
         var probeTag = new TagTagInfo
         {
             Name = "@tags",
@@ -292,7 +291,9 @@ public sealed class AllenBradleyPlcDriver : IPlcDriver
         await Task.Run(() => probeTag.Initialize(), cancellationToken);
         await Task.Run(probeTag.Read, cancellationToken);
 
-        return probeTag.Value ?? [];
+        var tags = probeTag.Value ?? [];
+        TagCache[ipAddress] = (DateTime.UtcNow, tags);
+        return tags;
     }
 
     private static async Task<PlcTagReadResultDto> ReadScalarTagAsync(

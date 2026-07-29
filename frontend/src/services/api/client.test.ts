@@ -35,8 +35,9 @@ describe("api client auth handling", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:5265/api/admin/plc/test-connection",
+      "/api/admin/plc/test-connection",
       expect.objectContaining({
+        credentials: "include",
         headers: expect.objectContaining({
           Authorization: "Bearer live-token",
         }),

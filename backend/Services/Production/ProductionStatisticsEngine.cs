@@ -54,17 +54,19 @@ public sealed class ProductionStatisticsEngine
                 continue;
             }
 
+            var modeAccumulator = sample.Mode == ControlMode.Auto ? _auto : _manual;
+
             if (Math.Abs(zoneSample.Setpoint) < 0.000001d)
             {
                 _overall[zone].IncrementSkipped();
-                CurrentModeAccumulators()[zone].IncrementSkipped();
+                modeAccumulator[zone].IncrementSkipped();
                 _live[zone].SetInvalid(zoneSample.Setpoint, zoneSample.Actual);
                 continue;
             }
 
             var percentDeviation = ((zoneSample.Actual - zoneSample.Setpoint) / zoneSample.Setpoint) * 100d;
             _overall[zone].Apply(percentDeviation);
-            CurrentModeAccumulators()[zone].Apply(percentDeviation);
+            modeAccumulator[zone].Apply(percentDeviation);
             _live[zone].Set(zoneSample.Setpoint, zoneSample.Actual, percentDeviation);
         }
     }
@@ -113,11 +115,6 @@ public sealed class ProductionStatisticsEngine
             Snapshot = snapshot,
             EndTimeUtc = endTimeUtc,
         };
-    }
-
-    private Dictionary<MeasurementZone, ZoneAccumulator> CurrentModeAccumulators()
-    {
-        return _currentMode == ControlMode.Auto ? _auto : _manual;
     }
 
     private void EnsureRunIsActive()

@@ -129,6 +129,17 @@ public sealed class PlcProtocolAdminController : ControllerBase
     {
         var result = await _connectionService.TestConnectionAsync(request, cancellationToken);
 
+        if (!result.IsConnected)
+        {
+            if (string.Equals(result.Message, "Wrong driver selected. Choose AllenBradley or Siemens.", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(result.Message, "Invalid IP address. Enter a valid IPv4 address.", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(result);
+            }
+
+            return StatusCode(StatusCodes.Status502BadGateway, result);
+        }
+
         return Ok(result);
     }
 
@@ -236,30 +247,6 @@ public sealed class PlcProtocolAdminController : ControllerBase
         }
 
         var result = await driver!.ReadTagsAsync(request.IpAddress.Trim(), request.TagNames, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("plc/write-tag")]
-    public async Task<ActionResult<PlcTagWriteResultDto>> WriteTag(
-        [FromBody] PlcTagWriteRequestDto request,
-        CancellationToken cancellationToken)
-    {
-        if (!TryResolveDriverAndIp(request.Driver, request.IpAddress, out var driver, out var errorResult))
-        {
-            return errorResult!;
-        }
-
-        if (string.IsNullOrWhiteSpace(request.TagName))
-        {
-            return BadRequest(new { message = "Tag name is required." });
-        }
-
-        var result = await driver!.WriteTagAsync(
-            request.IpAddress.Trim(),
-            request.TagName.Trim(),
-            request.Value,
-            cancellationToken);
-
         return Ok(result);
     }
 

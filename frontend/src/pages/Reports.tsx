@@ -37,6 +37,8 @@ type ReportsView = "runs" | "events";
 type RunSort = "newest" | "oldest" | "lineAsc" | "lineDesc";
 
 const REPORT_REFRESH_MS = 10000;
+const RUNS_PAGE_SIZE = 25;
+const EVENTS_PAGE_SIZE = 50;
 
 // -----------------------------------------------------------------------------
 // Formatting and export helpers
@@ -58,24 +60,9 @@ function formatDuration(seconds: number): string {
   return `${hours}:${minutes}:${secs}`;
 }
 
-function toDateRangeStart(value: string): Date | null {
-  if (!value) {
-    return null;
-  }
-
-  return new Date(`${value}T00:00:00`);
-}
-
-function toDateRangeEnd(value: string): Date | null {
-  if (!value) {
-    return null;
-  }
-
-  return new Date(`${value}T23:59:59.999`);
-}
-
 function escapeCsvCell(value: string): string {
-  const escaped = value.replace(/"/g, '""');
+  const normalized = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  const escaped = normalized.replace(/"/g, '""');
   return /[",\n]/.test(escaped) ? `"${escaped}"` : escaped;
 }
 
@@ -104,6 +91,10 @@ export default function Reports() {
   const [endDate, setEndDate] = useState<string>("");
   const [runs, setRuns] = useState<CompletedRunReportRow[]>([]);
   const [events, setEvents] = useState<RuntimeEventReportRow[]>([]);
+  const [runsTotalCount, setRunsTotalCount] = useState(0);
+  const [eventsTotalCount, setEventsTotalCount] = useState(0);
+  const [runPage, setRunPage] = useState(1);
+  const [eventPage, setEventPage] = useState(1);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
@@ -111,30 +102,48 @@ export default function Reports() {
 
   const selectedLineId = lineFilter === "all" ? undefined : Number(lineFilter);
 
+  useEffect(() => {
+    setRunPage(1);
+    setEventPage(1);
+    setSelectedRunIds([]);
+  }, [lineFilter, startDate, endDate]);
+
   // ---------------------------------------------------------------------------
   // Data loading
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
     let cancelled = false;
-    let refreshTimer: ReturnType<typeof setInterval> | undefined;
-
     async function load() {
       setLoading(true);
       setError(null);
 
       try {
         const [runRows, eventRows] = await Promise.all([
-          getCompletedRunReports(selectedLineId),
-          getRuntimeEventReports(selectedLineId),
+          getCompletedRunReports({
+            lineId: selectedLineId,
+            fromDate: startDate || undefined,
+            toDate: endDate || undefined,
+            page: runPage,
+            pageSize: RUNS_PAGE_SIZE,
+          }),
+          getRuntimeEventReports({
+            lineId: selectedLineId,
+            fromDate: startDate || undefined,
+            toDate: endDate || undefined,
+            page: eventPage,
+            pageSize: EVENTS_PAGE_SIZE,
+          }),
         ]);
 
         if (cancelled) {
           return;
         }
 
-        setRuns(runRows);
-        setEvents(eventRows);
+        setRuns(runRows.items);
+        setRunsTotalCount(runRows.totalCount);
+        setEvents(eventRows.items);
+        setEventsTotalCount(eventRows.totalCount);
       } catch (loadError) {
         if (cancelled) {
           return;
@@ -153,18 +162,15 @@ export default function Reports() {
 
     void load();
 
-    refreshTimer = setInterval(() => {
+    const refreshTimer = setInterval(() => {
       void load();
     }, REPORT_REFRESH_MS);
 
     return () => {
       cancelled = true;
-
-      if (refreshTimer) {
-        clearInterval(refreshTimer);
-      }
+      clearInterval(refreshTimer);
     };
-  }, [selectedLineId]);
+  }, [eventPage, runPage, selectedLineId, startDate, endDate]);
 
   // ---------------------------------------------------------------------------
   // Filtered views derived from raw API results
@@ -175,27 +181,8 @@ export default function Reports() {
     [dashboard?.lines]
   );
 
-  const filteredRuns = useMemo(() => {
-    const start = toDateRangeStart(startDate);
-    const end = toDateRangeEnd(endDate);
-
-    return runs.filter((row) => {
-      const stamp = new Date(row.endTimeUtc).getTime();
-
-      if (start && stamp < start.getTime()) {
-        return false;
-      }
-
-      if (end && stamp > end.getTime()) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [runs, startDate, endDate]);
-
   const sortedRuns = useMemo(() => {
-    const rows = [...filteredRuns];
+    const rows = [...runs];
 
     switch (runSort) {
       case "oldest":
@@ -216,7 +203,7 @@ export default function Reports() {
           new Date(right.endTimeUtc).getTime() - new Date(left.endTimeUtc).getTime()
         );
     }
-  }, [filteredRuns, runSort]);
+  }, [runs, runSort]);
 
   const selectedRuns = useMemo(
     () => sortedRuns.filter((row) => selectedRunIds.includes(row.id)),
@@ -226,24 +213,7 @@ export default function Reports() {
   const allVisibleRunsSelected =
     sortedRuns.length > 0 && sortedRuns.every((row) => selectedRunIds.includes(row.id));
 
-  const filteredEvents = useMemo(() => {
-    const start = toDateRangeStart(startDate);
-    const end = toDateRangeEnd(endDate);
-
-    return events.filter((row) => {
-      const stamp = new Date(row.occurredAtUtc).getTime();
-
-      if (start && stamp < start.getTime()) {
-        return false;
-      }
-
-      if (end && stamp > end.getTime()) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [events, startDate, endDate]);
+  const filteredEvents = events;
 
   // ---------------------------------------------------------------------------
   // UI actions
@@ -292,6 +262,14 @@ export default function Reports() {
 
   async function handleDeleteSelectedRuns() {
     const runIds = [...selectedRunIds];
+
+    const confirmed = window.confirm(
+      `Delete ${runIds.length} completed run record${runIds.length === 1 ? "" : "s"}? This action is audited and cannot be undone from this screen.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
 
     for (const runId of runIds) {
       await handleDeleteRun(runId);
@@ -466,7 +444,7 @@ export default function Reports() {
           >
             <Box>
               <Typography variant="h6">
-                Completed Runs ({sortedRuns.length})
+                Completed Runs ({runsTotalCount})
               </Typography>
               <Typography color="text.secondary">
                 {selectedRunIds.length > 0
@@ -476,6 +454,22 @@ export default function Reports() {
             </Box>
 
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                size="small"
+                variant="text"
+                disabled={runPage <= 1 || loading}
+                onClick={() => setRunPage((current) => Math.max(1, current - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                disabled={runPage * RUNS_PAGE_SIZE >= runsTotalCount || loading}
+                onClick={() => setRunPage((current) => current + 1)}
+              >
+                Next
+              </Button>
               <Button size="small" variant="outlined" onClick={handleExportRunsCsv}>
                 {selectedRunIds.length > 0 ? "Export Selected" : "Export CSV"}
               </Button>
@@ -498,6 +492,10 @@ export default function Reports() {
               </Button>
             </Stack>
           </Stack>
+
+          <Typography color="text.secondary" sx={{ mb: 1 }}>
+            {`Page ${runPage} of ${Math.max(1, Math.ceil(runsTotalCount / RUNS_PAGE_SIZE))}`}
+          </Typography>
 
           <TableContainer>
             <Table size="small">
@@ -583,12 +581,34 @@ export default function Reports() {
             spacing={1}
           >
             <Typography variant="h6">
-              Runtime Events ({filteredEvents.length})
+              Runtime Events ({eventsTotalCount})
             </Typography>
-            <Button size="small" variant="outlined" onClick={handleExportEventsCsv}>
-              Export CSV
-            </Button>
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant="text"
+                disabled={eventPage <= 1 || loading}
+                onClick={() => setEventPage((current) => Math.max(1, current - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                disabled={eventPage * EVENTS_PAGE_SIZE >= eventsTotalCount || loading}
+                onClick={() => setEventPage((current) => current + 1)}
+              >
+                Next
+              </Button>
+              <Button size="small" variant="outlined" onClick={handleExportEventsCsv}>
+                Export CSV
+              </Button>
+            </Stack>
           </Stack>
+
+          <Typography color="text.secondary" sx={{ mb: 1 }}>
+            {`Page ${eventPage} of ${Math.max(1, Math.ceil(eventsTotalCount / EVENTS_PAGE_SIZE))}`}
+          </Typography>
 
           <TableContainer>
             <Table size="small">

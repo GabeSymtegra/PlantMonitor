@@ -3,8 +3,7 @@ name: PlantMonitor CI
 on:
   push:
     branches:
-      - main
-      - copilothelpbranch
+      - '**'
   pull_request:
 
 jobs:
@@ -39,6 +38,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
 
       - name: Run frontend unit tests
         working-directory: frontend

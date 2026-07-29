@@ -24,7 +24,8 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
         var response = await client.PostAsJsonAsync("/api/auth/login", new
         {
             username = "test",
-            password = "test"
+            password = "test",
+            rememberMe = true,
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -43,7 +44,8 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
         var response = await client.PostAsJsonAsync("/api/auth/login", new
         {
             username = "test",
-            password = "wrong"
+            password = "wrong",
+            rememberMe = true,
         });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -136,12 +138,54 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
         Assert.Equal(1500, payload?["pollIntervalMs"]?.GetValue<int>());
     }
 
+    [Fact]
+    public async Task DeleteCompletedRun_WithoutToken_ReturnsUnauthorized()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.DeleteAsync($"/api/production-runs/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteCompletedRun_WithViewerToken_ReturnsForbidden()
+    {
+        var client = _factory.CreateClient();
+        var token = await GetAccessToken(client, "viewer", "test");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.DeleteAsync($"/api/production-runs/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteCompletedRun_WithOperatorToken_ReturnsForbidden()
+    {
+        var client = _factory.CreateClient();
+        var token = await GetAccessToken(client, "operator", "test");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.DeleteAsync($"/api/production-runs/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteCompletedRun_WithAdminToken_IsAuthorized()
+    {
+        var client = _factory.CreateClient();
+        var token = await GetAccessToken(client, "test", "test");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.DeleteAsync($"/api/production-runs/{Guid.NewGuid()}");
+        Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     private static async Task<string> GetAccessToken(HttpClient client, string username, string password)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new
         {
             username,
-            password
+            password,
+            rememberMe = true,
         });
 
         loginResponse.EnsureSuccessStatusCode();

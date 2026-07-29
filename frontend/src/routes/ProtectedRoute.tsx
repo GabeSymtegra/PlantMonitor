@@ -8,8 +8,12 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ requiredRoles }: ProtectedRouteProps) {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, initializing } = useAuth();
   const location = useLocation();
+
+  if (initializing) {
+    return null;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
@@ -32,7 +36,11 @@ export default function ProtectedRoute({ requiredRoles }: ProtectedRouteProps) {
     }
   }
 
-  if (user?.role === "Operator" && location.pathname !== "/status-board") {
+  if (
+    user?.role === "Operator"
+    && location.pathname !== "/status-board"
+    && location.pathname !== "/forbidden"
+  ) {
     return <Navigate to="/status-board" replace state={{ from: location.pathname }} />;
   }
 

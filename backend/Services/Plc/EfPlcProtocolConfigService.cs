@@ -121,6 +121,9 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         }
 
         var normalizedDriver = NormalizeManufacturer(request.Driver);
+        var allowedKeys = RequiredTagSlots
+            .Select(x => x.LogicalKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var requiredKeys = RequiredTagSlots.Where(x => x.IsRequired)
             .Select(x => x.LogicalKey)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -135,6 +138,19 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         if (duplicateKeys.Count > 0)
         {
             error = $"Duplicate logical keys detected: {string.Join(", ", duplicateKeys)}";
+            return false;
+        }
+
+        var unknownKeys = catalog
+            .Select(x => x.LogicalKey?.Trim() ?? string.Empty)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Where(key => !allowedKeys.Contains(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (unknownKeys.Count > 0)
+        {
+            error = $"Unknown logical keys are not allowed: {string.Join(", ", unknownKeys)}";
             return false;
         }
 
@@ -169,9 +185,30 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
                 return false;
             }
 
+            var normalizedKey = entry.LogicalKey.Trim();
+            var requiredSlot = RequiredTagSlots.FirstOrDefault(x => x.LogicalKey.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase));
+            if (requiredSlot is null)
+            {
+                error = $"Unknown logical key '{normalizedKey}'.";
+                return false;
+            }
+
+            if (requiredSlot.IsRequired && (!entry.IsRequired || !entry.IsEnabled))
+            {
+                error = $"Logical key '{normalizedKey}' must remain enabled and required.";
+                return false;
+            }
+
             if (string.IsNullOrWhiteSpace(entry.PlcAddress))
             {
                 error = $"PLC address is required for logical key '{entry.LogicalKey}'.";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.Driver)
+                && !entry.Driver.Trim().Equals(normalizedDriver, StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"Logical key '{entry.LogicalKey}' has driver '{entry.Driver}' but request driver is '{normalizedDriver}'.";
                 return false;
             }
 
@@ -179,6 +216,18 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
                 || !AllowedDataTypes.Contains(entry.DataType.Trim(), StringComparer.OrdinalIgnoreCase))
             {
                 error = $"Data type for logical key '{entry.LogicalKey}' must be one of: bool, int, dint, real, string.";
+                return false;
+            }
+
+            if (entry.ReadFrequencyMs is < 250 or > 60000)
+            {
+                error = $"Read frequency for logical key '{entry.LogicalKey}' must be between 250 and 60000 milliseconds.";
+                return false;
+            }
+
+            if (entry.Scale <= 0)
+            {
+                error = $"Scale for logical key '{entry.LogicalKey}' must be greater than 0.";
                 return false;
             }
 

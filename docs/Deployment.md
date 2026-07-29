@@ -28,7 +28,7 @@ Services:
 
 - frontend (Vite dev server)
 - backend (ASP.NET API + SignalR)
-- postgresql (local instance)
+- sqlite (local file, EF Core migrations on startup)
 
 ### 2.2 Private Production Server
 
@@ -38,9 +38,9 @@ Purpose:
 
 Services:
 
-- frontend static build served by reverse proxy or web server
+- frontend static build served by backend static files + SPA fallback
 - backend API process
-- postgresql database
+- sqlite database file in ProgramData
 
 Network assumptions:
 
@@ -55,17 +55,20 @@ Network assumptions:
 Required environment variables:
 
 - ASPNETCORE_ENVIRONMENT
-- ConnectionStrings__PlantMonitorDb
+- ConnectionStrings__PlantMonitor
 - Jwt__Issuer
 - Jwt__Audience
 - Jwt__SigningKey
 - App__CorsOrigins
-- App__MockTelemetryEnabled
+
+Required first production startup variable:
+
+- Auth__BootstrapAdminPassword
 
 Recommended values by environment:
 
-- Local: App__MockTelemetryEnabled=true
-- Production phase-1: App__MockTelemetryEnabled=true until real PLC adapters are validated
+- Local: ASPNETCORE_ENVIRONMENT=Development
+- Production: configure Jwt and Auth bootstrap secret, and set explicit App__CorsOrigins entries.
 
 ### 3.2 Frontend Settings
 
@@ -83,19 +86,16 @@ Local example:
 
 Required:
 
-- Host
-- Port
-- Database name
-- Username
-- Password
-- TLS mode according to environment security standard
+- Writable local filesystem for ProgramData
+- Backup location for sqlite file snapshots
+- Service account permissions to read/write the database path
 
 ## 4. Local Startup Procedure
 
-1. Start PostgreSQL and ensure database exists.
+1. Ensure backend working directory and ProgramData paths are writable.
 2. Set backend environment variables.
 3. Run backend from backend directory.
-4. Apply EF Core migrations to local database.
+4. Verify migrations apply on startup.
 5. Set frontend environment variables.
 6. Run frontend from frontend directory.
 7. Open web app and verify dashboard loads line rows from backend.
@@ -113,14 +113,14 @@ Recommended topology:
 - Reverse proxy terminates TLS.
 - Reverse proxy routes:
 	- /api and /hubs to backend service
-	- / to frontend static content
-- Backend and PostgreSQL run on private subnet.
+	- / to backend-hosted frontend static content
+- Backend runs on private subnet.
 
 Security controls:
 
 - Allowlist frontend origin in CORS.
 - Rotate JWT signing key by policy.
-- Restrict database port access to backend host only.
+- Restrict access to backend host and local sqlite storage path.
 
 ## 6. Build And Release Process
 
@@ -130,7 +130,7 @@ Release steps:
 
 1. Build backend in release mode.
 2. Run tests.
-3. Apply database migrations.
+3. Start backend once and verify migration output.
 4. Deploy backend binaries.
 5. Restart backend service.
 6. Validate health and logs.
@@ -141,7 +141,7 @@ Release steps:
 
 1. Install dependencies.
 2. Build production assets.
-3. Publish assets to web root.
+3. Publish assets to backend wwwroot.
 4. Purge cache if reverse proxy or CDN cache is enabled.
 5. Validate dashboard page and SignalR connectivity.
 
@@ -158,7 +158,7 @@ Readiness should validate:
 
 - Database connectivity.
 - SignalR subsystem registration.
-- Mock telemetry producer status.
+- Runtime service initialization.
 
 ### 7.2 Logging Requirements
 

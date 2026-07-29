@@ -18,7 +18,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   addLine,
@@ -54,6 +54,9 @@ type LineConfigForm = {
   lineNumber: number;
   lineName: string;
   product: string;
+  recipeId: string;
+  machineId: string;
+  operatorName: string;
   plcIp: string;
   manufacturer: PlcManufacturer;
   isActive: boolean;
@@ -63,6 +66,9 @@ const emptyLineForm: LineConfigForm = {
   lineNumber: 1,
   lineName: "",
   product: "000-000-00-0",
+  recipeId: "Unknown",
+  machineId: "Unknown",
+  operatorName: "Unknown",
   plcIp: "",
   manufacturer: "AllenBradley",
   isActive: true,
@@ -200,15 +206,6 @@ export default function Administration() {
     void loadTagSlots();
   }, []);
 
-  useEffect(() => {
-    if (selectedLineId === "new") {
-      setTagCatalog([]);
-      return;
-    }
-
-    void loadLineTagCatalog(selectedLineId);
-  }, [selectedLineId]);
-
   // ---------------------------------------------------------------------------
   // Data loading helpers
   // ---------------------------------------------------------------------------
@@ -227,7 +224,7 @@ export default function Administration() {
     }
   }
 
-  function buildCatalogFromSlots(slots: TagSlotDefinition[], existing?: LineTagCatalogEntry[]) {
+  const buildCatalogFromSlots = useCallback((slots: TagSlotDefinition[], existing?: LineTagCatalogEntry[]) => {
     return slots.map((slot, index) => {
       const matched = existing?.find((entry) => entry.logicalKey === slot.logicalKey);
       return {
@@ -245,9 +242,9 @@ export default function Administration() {
         isRequired: slot.isRequired,
       } satisfies LineTagCatalogEntry;
     });
-  }
+  }, [form.manufacturer]);
 
-  async function loadLineTagCatalog(lineId: number) {
+  const loadLineTagCatalog = useCallback(async (lineId: number) => {
     setLoadingTagCatalog(true);
     setMappingStatus("");
     try {
@@ -258,7 +255,16 @@ export default function Administration() {
     } finally {
       setLoadingTagCatalog(false);
     }
-  }
+  }, [buildCatalogFromSlots, tagSlots]);
+
+  useEffect(() => {
+    if (selectedLineId === "new") {
+      setTagCatalog([]);
+      return;
+    }
+
+    void loadLineTagCatalog(selectedLineId);
+  }, [loadLineTagCatalog, selectedLineId]);
 
   function resetTagBrowser() {
     setBrowsingTags(false);
@@ -275,6 +281,8 @@ export default function Administration() {
     setSelectedLineId(value);
     setError("");
     setSuccess("");
+    setConnectionResult(null);
+    setMappingStatus("");
     resetTagBrowser();
 
     if (value === "new") {
@@ -289,6 +297,9 @@ export default function Administration() {
         lineNumber: selected.lineNumber,
         lineName: selected.lineName,
         product: selected.product,
+        recipeId: selected.recipeId || "Unknown",
+        machineId: selected.machineId || "Unknown",
+        operatorName: selected.operatorName || "Unknown",
         plcIp: selected.plcIp,
         manufacturer: selected.manufacturer,
         isActive: selected.isActive,
@@ -388,6 +399,9 @@ export default function Administration() {
         ...form,
         lineNumber: nextLineNumber,
         lineName: form.lineName.trim(),
+        recipeId: form.recipeId.trim() || "Unknown",
+        machineId: form.machineId.trim() || "Unknown",
+        operatorName: form.operatorName.trim() || "Unknown",
         startDateTime: new Date().toISOString(),
         status: LineStatus.Offline,
         timeInStatus: "00:00:00",
@@ -408,6 +422,9 @@ export default function Administration() {
         lineNumber: selectedLine?.lineNumber ?? form.lineNumber,
         lineName: form.lineName.trim(),
         product: form.product.trim(),
+        recipeId: form.recipeId.trim() || "Unknown",
+        machineId: form.machineId.trim() || "Unknown",
+        operatorName: form.operatorName.trim() || "Unknown",
         manufacturer: form.manufacturer,
         plcIp: form.plcIp.trim(),
         isActive: form.isActive,
@@ -422,7 +439,7 @@ export default function Administration() {
       const newest = refreshed[refreshed.length - 1];
 
       if (newest) {
-        setSelectedLineId(newest.id);
+        handleSelectLine(newest.id);
       }
     }
   }
@@ -757,6 +774,32 @@ export default function Administration() {
               onChange={(event) => updateForm("product", event.target.value)}
               fullWidth
               placeholder="123-456-78-9"
+            />
+
+            <TextField
+              label="Recipe ID"
+              value={form.recipeId}
+              onChange={(event) => updateForm("recipeId", event.target.value)}
+              fullWidth
+              placeholder="RCP-101"
+            />
+          </Stack>
+
+          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+            <TextField
+              label="Machine ID"
+              value={form.machineId}
+              onChange={(event) => updateForm("machineId", event.target.value)}
+              fullWidth
+              placeholder="MX-001"
+            />
+
+            <TextField
+              label="Operator"
+              value={form.operatorName}
+              onChange={(event) => updateForm("operatorName", event.target.value)}
+              fullWidth
+              placeholder="Unknown"
             />
 
             <TextField

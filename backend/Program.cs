@@ -6,16 +6,22 @@ using backend.DTOs.Authentication;
 using backend.DTOs.Plc;
 using backend.Interfaces.Production;
 using backend.Interfaces;
+using backend.Interfaces.Authentication;
 using backend.Interfaces.Plc;
 using backend.DTOs.Production;
+using backend.Models.Authentication;
 using backend.Services.Line;
 using backend.Services.Authentication;
 using backend.Services.Plc;
 using backend.Services.Production;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Threading.RateLimiting;
 
 // -----------------------------------------------------------------------------
 // Application bootstrap
@@ -26,15 +32,23 @@ var builder = WebApplication.CreateBuilder(args);
 // Core configuration and persistence
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+jwtOptions.SigningKey = ResolveJwtSigningKey(builder.Configuration, builder.Environment, jwtOptions.SigningKey);
+builder.Services.PostConfigure<JwtOptions>(options =>
+{
+    options.SigningKey = jwtOptions.SigningKey;
+});
 
 var connectionString = builder.Configuration.GetConnectionString("PlantMonitor")
     ?? "Data Source=plantmonitor.db";
+connectionString = ResolvePlantMonitorConnectionString(connectionString, builder.Environment);
 
 builder.Services.AddDbContext<PlantMonitorDbContext>(options =>
     options.UseSqlite(connectionString));
 
 // Application services
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<ILocalUserAuthService, LocalUserAuthService>();
+builder.Services.AddScoped<IPasswordHasher<LocalUserEntity>, PasswordHasher<LocalUserEntity>>();
 builder.Services.AddSingleton<IPlcTagAddressValidator, PlcTagAddressValidator>();
 builder.Services.AddScoped<IPlcProtocolConfigService, EfPlcProtocolConfigService>();
 builder.Services.AddSingleton<IPlcDriver, AllenBradleyPlcDriver>();
@@ -46,6 +60,21 @@ builder.Services.AddSingleton<IProductionRuntimeService>(serviceProvider =>
     serviceProvider.GetRequiredService<ProductionRuntimeService>());
 builder.Services.AddScoped<IRecipeToleranceService, RecipeToleranceService>();
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("LoginLimiter", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            }));
+});
 
 // Authentication and authorization
 builder.Services
@@ -56,10 +85,25 @@ builder.Services
         {
             OnMessageReceived = context =>
             {
+                var authHeader = context.Request.Headers.Authorization.ToString();
+                var hasBearerHeader = !string.IsNullOrWhiteSpace(authHeader)
+                    && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+
+                if (!hasBearerHeader)
+                {
+                    var cookieToken = context.Request.Cookies["pm_auth"];
+                    if (!string.IsNullOrWhiteSpace(cookieToken))
+                    {
+                        context.Token = cookieToken;
+                    }
+                }
+
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
 
-                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/lines"))
+                if (string.IsNullOrWhiteSpace(context.Token)
+                    && !string.IsNullOrEmpty(accessToken)
+                    && path.StartsWithSegments("/hubs/lines"))
                 {
                     context.Token = accessToken;
                 }
@@ -108,6 +152,29 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod()
             .AllowCredentials();
     });
+
+    options.AddPolicy("FrontendProd", policy =>
+    {
+        var configuredOrigins = builder.Configuration
+            .GetSection("App:CorsOrigins")
+            .Get<string[]>()
+            ?? [];
+
+        var allowedOrigins = configuredOrigins
+            .Where(origin => !string.IsNullOrWhiteSpace(origin))
+            .Select(origin => origin.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (allowedOrigins.Length > 0)
+        {
+            policy
+                .WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+    });
 });
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<LineUpdateBroadcastService>();
@@ -119,6 +186,8 @@ builder.Services.AddHostedService(serviceProvider =>
 // -----------------------------------------------------------------------------
 
 var app = builder.Build();
+var instanceLock = AcquireSingleInstanceLock(connectionString);
+app.Lifetime.ApplicationStopping.Register(instanceLock.Dispose);
 
 using (var scope = app.Services.CreateScope())
 {
@@ -151,10 +220,60 @@ using (var scope = app.Services.CreateScope())
 
     await PlcPresetSeeder.SeedAsync(dbContext);
     await RecipeToleranceSeeder.SeedAsync(dbContext);
+
+    var authService = scope.ServiceProvider.GetRequiredService<ILocalUserAuthService>();
+    await authService.EnsureBootstrapUsersAsync();
 }
 
 // Middleware pipeline
-app.UseCors("FrontendDev");
+app.UseExceptionHandler();
+
+app.Use(async (context, next) =>
+{
+    var correlationId = context.TraceIdentifier;
+    context.Response.Headers["X-Correlation-ID"] = correlationId;
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none';";
+    await next();
+});
+
+app.Use(async (context, next) =>
+{
+    var startedAt = DateTime.UtcNow;
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    await next();
+    stopwatch.Stop();
+
+    app.Logger.LogInformation(
+        "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMs}ms correlationId={CorrelationId} remoteIp={RemoteIp} startedAtUtc={StartedAtUtc}",
+        context.Request.Method,
+        context.Request.Path,
+        context.Response.StatusCode,
+        stopwatch.ElapsedMilliseconds,
+        context.TraceIdentifier,
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        startedAt);
+});
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseCors("FrontendDev");
+}
+else
+{
+    app.UseCors("FrontendProd");
+}
+app.UseRateLimiter();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -164,54 +283,115 @@ app.MapControllers();
 // Minimal API surface
 // -----------------------------------------------------------------------------
 
-app.MapPost("/api/auth/login", (LoginRequestDto request, IJwtTokenService jwtTokenService) =>
+app.MapPost("/api/auth/login", async (
+    LoginRequestDto request,
+    HttpContext httpContext,
+    ILocalUserAuthService localUserAuthService,
+    IJwtTokenService jwtTokenService,
+    CancellationToken cancellationToken) =>
 {
-    var credentials = new Dictionary<string, (string Password, string Role)>(StringComparer.OrdinalIgnoreCase)
+    if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
     {
-        ["test"] = ("test", "Admin"),
-        ["operator"] = ("test", "Operator"),
-        ["viewer"] = ("test", "Viewer"),
-    };
+        return Results.BadRequest(new { message = "Username and password are required." });
+    }
 
-    if (!credentials.TryGetValue(request.Username, out var account) || account.Password != request.Password)
+    var auth = await localUserAuthService.AuthenticateAsync(request.Username, request.Password, cancellationToken);
+    if (!auth.Success || auth.User is null)
+    {
+        if (auth.IsLockedOut)
+        {
+            return Results.StatusCode(StatusCodes.Status423Locked);
+        }
+
+        return Results.Unauthorized();
+    }
+
+    var accessToken = jwtTokenService.CreateToken(auth.User.Username, auth.User.Role);
+    var expiresAt = DateTime.UtcNow.AddMinutes(jwtOptions.ExpirationMinutes);
+
+    httpContext.Response.Cookies.Append("pm_auth", accessToken, new CookieOptions
+    {
+        HttpOnly = true,
+        Secure = !app.Environment.IsDevelopment(),
+        SameSite = SameSiteMode.Strict,
+        Expires = request.RememberMe ? expiresAt : null,
+        IsEssential = true,
+        Path = "/",
+    });
+
+    return Results.Ok(new LoginResponseDto
+    {
+        Username = auth.User.Username,
+        Role = auth.User.Role,
+        ExpiresAtUtc = expiresAt,
+        MustChangePassword = auth.User.MustChangePassword,
+        AccessToken = accessToken,
+    });
+}).RequireRateLimiting("LoginLimiter");
+
+app.MapPost("/api/auth/logout", (HttpContext httpContext) =>
+{
+    httpContext.Response.Cookies.Delete("pm_auth", new CookieOptions { Path = "/" });
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapGet("/api/auth/session", async (
+    ClaimsPrincipal user,
+    ILocalUserAuthService localUserAuthService,
+    CancellationToken cancellationToken) =>
+{
+    var username = user.Identity?.Name;
+    if (string.IsNullOrWhiteSpace(username))
     {
         return Results.Unauthorized();
     }
 
-    var accessToken = jwtTokenService.CreateToken(request.Username, account.Role);
+    var account = await localUserAuthService.GetByUsernameAsync(username, cancellationToken);
+    if (account is null || account.IsDisabled)
+    {
+        return Results.Unauthorized();
+    }
 
     return Results.Ok(new LoginResponseDto
     {
-        AccessToken = accessToken,
-        Username = request.Username,
+        Username = account.Username,
         Role = account.Role,
         ExpiresAtUtc = DateTime.UtcNow.AddMinutes(jwtOptions.ExpirationMinutes),
+        MustChangePassword = account.MustChangePassword,
+        AccessToken = null,
     });
-});
+}).RequireAuthorization();
 
-app.MapGet("/api/status", () =>
+app.MapPost("/api/auth/change-password", async (
+    ClaimsPrincipal user,
+    ChangePasswordRequestDto request,
+    ILocalUserAuthService localUserAuthService,
+    CancellationToken cancellationToken) =>
 {
-    return Results.Json(new[]
+    var username = user.Identity?.Name;
+    if (string.IsNullOrWhiteSpace(username))
     {
-        new
-        {
-            id = 1,
-            line = "Line 1",
-            status = "Running",
-            product = "Pepsi 20oz",
-            mode = "Auto",
-            length = 14220
-        },
-        new
-        {
-            id = 2,
-            line = "Line 2",
-            status = "Stopped",
-            product = "Mountain Dew",
-            mode = "Manual",
-            length = 8100
-        }
-    });
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 12)
+    {
+        return Results.BadRequest(new { message = "New password must be at least 12 characters long." });
+    }
+
+    var changed = await localUserAuthService.ChangePasswordAsync(
+        username,
+        request.CurrentPassword,
+        request.NewPassword,
+        cancellationToken);
+
+    return changed ? Results.NoContent() : Results.BadRequest(new { message = "Password change failed." });
+}).RequireAuthorization();
+
+app.MapGet("/api/status", (IProductionRuntimeService runtimeService) =>
+{
+    var snapshot = runtimeService.GetDashboardSnapshot();
+    return Results.Ok(snapshot.Lines);
 }).RequireAuthorization();
 
 app.MapGet("/api/dashboard", (IProductionRuntimeService runtimeService) =>
@@ -229,10 +409,36 @@ app.MapGet("/api/lines/{lineId:int}/details", (int lineId, IProductionRuntimeSer
 
 app.MapGet("/api/production-runs", async (
     [AsParameters] ProductionRunsQuery query,
+    PlantMonitorDbContext dbContext,
     IProductionRuntimeService runtimeService,
     CancellationToken cancellationToken) =>
 {
-    var rows = await runtimeService.GetCompletedRunsAsync(query.LineId, query.Take, cancellationToken);
+    if (query.LineId is <= 0)
+    {
+        return Results.BadRequest(new { message = "lineId must be a positive integer." });
+    }
+
+    if (query.LineId.HasValue)
+    {
+        var lineExists = await dbContext.LineProtocolAssignments
+            .AsNoTracking()
+            .AnyAsync(x => x.LineId == query.LineId.Value, cancellationToken);
+
+        if (!lineExists)
+        {
+            return Results.BadRequest(new { message = "lineId was not found." });
+        }
+    }
+
+    var fromUtc = query.FromDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+    var toUtc = query.ToDate?.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
+    if (fromUtc.HasValue && toUtc.HasValue && toUtc.Value < fromUtc.Value)
+    {
+        return Results.BadRequest(new { message = "toDate must be on or after fromDate." });
+    }
+
+    var (skip, take) = ResolvePagination(query.Page, query.PageSize, query.Skip, query.Take, 50, 500);
+    var rows = await runtimeService.GetCompletedRunsAsync(query.LineId, fromUtc, toUtc, skip, take, cancellationToken);
     return Results.Ok(rows);
 }).RequireAuthorization();
 
@@ -249,21 +455,51 @@ app.MapGet("/api/production-runs/{runId:guid}", async (
 
 app.MapDelete("/api/production-runs/{runId:guid}", async (
     Guid runId,
+    ClaimsPrincipal user,
     IProductionRuntimeService runtimeService,
     CancellationToken cancellationToken) =>
 {
-    var deleted = await runtimeService.DeleteCompletedRunAsync(runId, cancellationToken);
+    var username = user.Identity?.Name ?? "unknown";
+    var role = user.FindFirstValue(ClaimTypes.Role) ?? "unknown";
+
+    var deleted = await runtimeService.DeleteCompletedRunAsync(runId, username, role, cancellationToken);
     return deleted
         ? Results.NoContent()
         : Results.NotFound(new { message = "Completed production run was not found." });
-}).RequireAuthorization();
+}).RequireAuthorization("AdminOnly");
 
 app.MapGet("/api/reports/events", async (
     [AsParameters] RuntimeEventsQuery query,
+    PlantMonitorDbContext dbContext,
     IProductionRuntimeService runtimeService,
     CancellationToken cancellationToken) =>
 {
-    var rows = await runtimeService.GetRuntimeEventsAsync(query.LineId, query.Take, cancellationToken);
+    if (query.LineId is <= 0)
+    {
+        return Results.BadRequest(new { message = "lineId must be a positive integer." });
+    }
+
+    if (query.LineId.HasValue)
+    {
+        var lineExists = await dbContext.LineProtocolAssignments
+            .AsNoTracking()
+            .AnyAsync(x => x.LineId == query.LineId.Value, cancellationToken);
+
+        if (!lineExists)
+        {
+            return Results.BadRequest(new { message = "lineId was not found." });
+        }
+    }
+
+    var fromUtc = query.FromDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+    var toUtc = query.ToDate?.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
+    if (fromUtc.HasValue && toUtc.HasValue && toUtc.Value < fromUtc.Value)
+    {
+        return Results.BadRequest(new { message = "toDate must be on or after fromDate." });
+    }
+
+    var (skip, take) = ResolvePagination(query.Page, query.PageSize, query.Skip, query.Take, 100, 1000);
+    var rows = await runtimeService.GetRuntimeEventsAsync(query.LineId, fromUtc, toUtc, skip, take, cancellationToken);
     return Results.Ok(rows);
 }).RequireAuthorization();
 
@@ -285,7 +521,52 @@ app.MapGet("/api/configuration/access-check", (ClaimsPrincipal user) =>
     });
 }).RequireAuthorization("AdminOnly");
 
+app.MapGet("/health/live", () =>
+{
+    return Results.Ok(new
+    {
+        status = "live",
+        timestampUtc = DateTime.UtcNow,
+    });
+});
+
+app.MapGet("/health/ready", async (PlantMonitorDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
+    if (!canConnect)
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    return Results.Ok(new
+    {
+        status = "ready",
+        timestampUtc = DateTime.UtcNow,
+    });
+});
+
 app.MapHub<LinesHub>("/hubs/lines").RequireAuthorization();
+
+app.MapFallback(async context =>
+{
+    var path = context.Request.Path;
+    if (path.StartsWithSegments("/api") || path.StartsWithSegments("/hubs"))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+    var indexPath = Path.Combine(webRoot, "index.html");
+    if (!File.Exists(indexPath))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    context.Response.ContentType = "text/html; charset=utf-8";
+    await context.Response.SendFileAsync(indexPath);
+});
 
 app.Run();
 
@@ -447,6 +728,52 @@ CREATE INDEX IF NOT EXISTS IX_runtime_events_OccurredAtUtc
     ON runtime_events (OccurredAtUtc);
 ");
     }
+
+    EnsureSqliteColumn(dbContext, "completed_production_runs", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+    EnsureSqliteColumn(dbContext, "completed_production_runs", "DeletedByUsername", "TEXT NULL");
+    EnsureSqliteColumn(dbContext, "completed_production_runs", "DeletedAtUtc", "TEXT NULL");
+
+    if (!HasSqliteTable(dbContext, "local_users"))
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+CREATE TABLE IF NOT EXISTS local_users (
+    Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    Username TEXT NOT NULL,
+    PasswordHash TEXT NOT NULL,
+    Role TEXT NOT NULL,
+    IsDisabled INTEGER NOT NULL DEFAULT 0,
+    MustChangePassword INTEGER NOT NULL DEFAULT 1,
+    FailedLoginCount INTEGER NOT NULL DEFAULT 0,
+    LockoutEndUtc TEXT NULL,
+    LastLoginAtUtc TEXT NULL,
+    CreatedAtUtc TEXT NOT NULL,
+    UpdatedAtUtc TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_local_users_Username
+    ON local_users (Username);
+");
+    }
+
+    if (!HasSqliteTable(dbContext, "completed_run_deletion_audits"))
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+CREATE TABLE IF NOT EXISTS completed_run_deletion_audits (
+    Id TEXT NOT NULL PRIMARY KEY,
+    RunId TEXT NOT NULL,
+    LineId INTEGER NOT NULL,
+    LineNumber INTEGER NOT NULL,
+    LineName TEXT NOT NULL,
+    ProductId TEXT NOT NULL,
+    DeletedByUsername TEXT NOT NULL,
+    DeletedByRole TEXT NOT NULL,
+    DeletedAtUtc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS IX_completed_run_deletion_audits_RunId
+    ON completed_run_deletion_audits (RunId);
+CREATE INDEX IF NOT EXISTS IX_completed_run_deletion_audits_DeletedAtUtc
+    ON completed_run_deletion_audits (DeletedAtUtc);
+");
+    }
 }
 
 static void EnsureSqliteColumn(PlantMonitorDbContext dbContext, string tableName, string columnName, string columnDefinition)
@@ -456,7 +783,18 @@ static void EnsureSqliteColumn(PlantMonitorDbContext dbContext, string tableName
         return;
     }
 
-    dbContext.Database.ExecuteSqlRaw($"ALTER TABLE \"{tableName}\" ADD COLUMN \"{columnName}\" {columnDefinition};");
+    if (!IsValidSqliteIdentifier(tableName) || !IsValidSqliteIdentifier(columnName))
+    {
+        throw new InvalidOperationException("Legacy schema upgrade attempted with an invalid SQLite identifier.");
+    }
+
+    if (!IsValidSqliteColumnDefinition(columnDefinition))
+    {
+        throw new InvalidOperationException("Legacy schema upgrade attempted with an invalid SQLite column definition.");
+    }
+
+    var sql = "ALTER TABLE \"" + tableName + "\" ADD COLUMN \"" + columnName + "\" " + columnDefinition + ";";
+    dbContext.Database.ExecuteSqlRaw(sql);
 }
 
 static bool HasSqliteColumn(PlantMonitorDbContext dbContext, string tableName, string columnName)
@@ -477,7 +815,12 @@ static bool HasSqliteColumn(PlantMonitorDbContext dbContext, string tableName, s
     try
     {
         using var command = connection.CreateCommand();
-        command.CommandText = $"PRAGMA table_info(\"{tableName}\");";
+        if (!IsValidSqliteIdentifier(tableName))
+        {
+            throw new InvalidOperationException("Legacy schema check attempted with an invalid SQLite identifier.");
+        }
+
+        command.CommandText = "PRAGMA table_info(\"" + tableName + "\");";
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
@@ -499,13 +842,172 @@ static bool HasSqliteColumn(PlantMonitorDbContext dbContext, string tableName, s
     }
 }
 
+static bool IsValidSqliteIdentifier(string value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    foreach (var character in value)
+    {
+        if (!(char.IsLetterOrDigit(character) || character == '_'))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool IsValidSqliteColumnDefinition(string value)
+{
+    if (string.IsNullOrWhiteSpace(value) || value.Contains(';', StringComparison.Ordinal))
+    {
+        return false;
+    }
+
+    foreach (var character in value)
+    {
+        var isAllowed =
+            char.IsLetterOrDigit(character)
+            || character == '_'
+            || character == ' '
+            || character == '('
+            || character == ')'
+            || character == ','
+            || character == '.'
+            || character == '\''
+            || character == '+'
+            || character == '-';
+
+        if (!isAllowed)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static string ResolveJwtSigningKey(IConfiguration configuration, IWebHostEnvironment environment, string configuredSigningKey)
+{
+    const string placeholder = "PlantMonitor_ChangeThisToAStrongSigningKey_2026";
+    var key = configuredSigningKey?.Trim() ?? string.Empty;
+
+    if (!string.IsNullOrWhiteSpace(key) && key != placeholder && key.Length >= 32)
+    {
+        return key;
+    }
+
+    var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+    var secretsDir = Path.Combine(programData, "PlantMonitor", "Secrets");
+    var secretFile = Path.Combine(secretsDir, "jwt.key");
+
+    if (File.Exists(secretFile))
+    {
+        var stored = File.ReadAllText(secretFile).Trim();
+        if (!string.IsNullOrWhiteSpace(stored) && stored.Length >= 32)
+        {
+            return stored;
+        }
+    }
+
+    if (!environment.IsDevelopment())
+    {
+        throw new InvalidOperationException(
+            "A strong JWT signing key is required in production. Set Jwt:SigningKey or provision ProgramData\\PlantMonitor\\Secrets\\jwt.key.");
+    }
+
+    Directory.CreateDirectory(secretsDir);
+    var generated = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(64));
+    File.WriteAllText(secretFile, generated);
+    return generated;
+}
+
+static string ResolvePlantMonitorConnectionString(string configuredConnectionString, IWebHostEnvironment environment)
+{
+    var sqlite = new SqliteConnectionStringBuilder(configuredConnectionString);
+    if (string.IsNullOrWhiteSpace(sqlite.DataSource)
+        || sqlite.DataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase)
+        || Path.IsPathRooted(sqlite.DataSource)
+        || environment.IsDevelopment())
+    {
+        return sqlite.ToString();
+    }
+
+    var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+    var dataDir = Path.Combine(programData, "PlantMonitor", "Data");
+    Directory.CreateDirectory(dataDir);
+
+    sqlite.DataSource = Path.Combine(dataDir, sqlite.DataSource);
+    return sqlite.ToString();
+}
+
+static IDisposable AcquireSingleInstanceLock(string connectionString)
+{
+    var sqlite = new SqliteConnectionStringBuilder(connectionString);
+    if (string.IsNullOrWhiteSpace(sqlite.DataSource)
+        || sqlite.DataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+    {
+        return NoopDisposable.Instance;
+    }
+
+    var databasePath = Path.GetFullPath(sqlite.DataSource);
+    var lockDirectory = Path.Combine(Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory, ".locks");
+    Directory.CreateDirectory(lockDirectory);
+
+    var hashBytes = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(databasePath));
+    var hashPrefix = Convert.ToHexString(hashBytes)[..16].ToLowerInvariant();
+    var lockFilePath = Path.Combine(lockDirectory, $"plantmonitor-{hashPrefix}.lck");
+
+    try
+    {
+        var stream = new FileStream(lockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        stream.SetLength(0);
+        using var writer = new StreamWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write($"pid={Environment.ProcessId};db={databasePath};started={DateTime.UtcNow:O}");
+        writer.Flush();
+        stream.Position = 0;
+        return stream;
+    }
+    catch (IOException exception)
+    {
+        throw new InvalidOperationException(
+            $"Another PlantMonitor instance is already running for database '{databasePath}'.",
+            exception);
+    }
+}
+
+static (int Skip, int Take) ResolvePagination(
+    int? page,
+    int? pageSize,
+    int? skip,
+    int? take,
+    int defaultTake,
+    int maxTake)
+{
+    var normalizedTake = Math.Clamp(take ?? pageSize ?? defaultTake, 1, maxTake);
+    if (page.HasValue && page.Value > 0)
+    {
+        return ((page.Value - 1) * normalizedTake, normalizedTake);
+    }
+
+    return (Math.Max(0, skip ?? 0), normalizedTake);
+}
+
 public partial class Program;
 
 // Query DTOs used by minimal APIs
 public sealed class ProductionRunsQuery
 {
     public int? LineId { get; init; }
-    public int Take { get; init; } = 50;
+    public DateOnly? FromDate { get; init; }
+    public DateOnly? ToDate { get; init; }
+    public int? Page { get; init; }
+    public int? PageSize { get; init; }
+    public int? Skip { get; init; }
+    public int? Take { get; init; } = 50;
 }
 
 public sealed class RecipeToleranceQuery
@@ -517,5 +1019,23 @@ public sealed class RecipeToleranceQuery
 public sealed class RuntimeEventsQuery
 {
     public int? LineId { get; init; }
-    public int Take { get; init; } = 100;
+    public DateOnly? FromDate { get; init; }
+    public DateOnly? ToDate { get; init; }
+    public int? Page { get; init; }
+    public int? PageSize { get; init; }
+    public int? Skip { get; init; }
+    public int? Take { get; init; } = 100;
+}
+
+file sealed class NoopDisposable : IDisposable
+{
+    public static NoopDisposable Instance { get; } = new();
+
+    private NoopDisposable()
+    {
+    }
+
+    public void Dispose()
+    {
+    }
 }

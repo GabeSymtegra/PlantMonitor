@@ -1,3 +1,10 @@
+export interface PagedResult<T> {
+  items: T[];
+  totalCount: number;
+  skip: number;
+  take: number;
+}
+
 export interface CompletedRunReportRow {
   id: string;
   lineId: number;
