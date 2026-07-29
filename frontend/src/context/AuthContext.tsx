@@ -178,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
-    void apiPost<unknown, object>("/auth/logout", {});
+    void apiPost<void, object>("/auth/logout", {});
     setUser(null);
     setAuthError(null);
     clearStoredAuth();

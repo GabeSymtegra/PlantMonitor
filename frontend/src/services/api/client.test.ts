@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AUTH_EXPIRED_EVENT,
   ApiRequestError,
+  apiGet,
   apiPost,
   setApiAccessToken,
 } from "./client";
@@ -23,7 +24,9 @@ describe("api client auth handling", () => {
   it("uses the in-memory auth token when storage is empty", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ ok: true }),
+      status: 200,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ ok: true }),
     });
 
     vi.stubGlobal("fetch", fetchMock);
@@ -51,6 +54,7 @@ describe("api client auth handling", () => {
       ok: false,
       status: 401,
       statusText: "Unauthorized",
+      headers: new Headers(),
       text: async () => "Unauthorized",
     });
 
@@ -68,5 +72,49 @@ describe("api client auth handling", () => {
     expect(eventHandler).toHaveBeenCalledTimes(1);
 
     window.removeEventListener(AUTH_EXPIRED_EVENT, eventHandler);
+  });
+
+  it("resolves undefined for successful 204 responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: new Headers(),
+      text: async () => "",
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiPost<void, object>("/auth/logout", {})).resolves.toBeUndefined();
+  });
+
+  it("resolves undefined for successful responses with content-length zero", async () => {
+    const jsonSpy = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "Content-Length": "0" }),
+      text: async () => "",
+      json: jsonSpy,
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiPost<void, object>("/auth/logout", {})).resolves.toBeUndefined();
+    expect(jsonSpy).not.toHaveBeenCalled();
+  });
+
+  it("deserializes JSON response payloads normally", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      text: async () => JSON.stringify({ authenticated: true }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiGet<{ authenticated: boolean }>("/auth/session")).resolves.toEqual({
+      authenticated: true,
+    });
   });
 });

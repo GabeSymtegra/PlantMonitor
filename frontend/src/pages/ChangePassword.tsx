@@ -13,12 +13,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/useAuth";
 import { apiPost, ApiRequestError } from "../services/api/client";
 
-interface ChangePasswordResponse {
-  username: string;
-  role: string;
-  mustChangePassword: boolean;
-}
-
 export default function ChangePassword() {
   const { user } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -50,7 +44,7 @@ export default function ChangePassword() {
     setSubmitting(true);
 
     try {
-      await apiPost<ChangePasswordResponse, { currentPassword: string; newPassword: string }>(
+      await apiPost<void, { currentPassword: string; newPassword: string }>(
         "/auth/change-password",
         {
           currentPassword,
@@ -59,7 +53,7 @@ export default function ChangePassword() {
       );
 
       setSuccess("Password updated successfully.");
-      window.location.assign(from);
+      navigate(from, { replace: true });
     } catch (requestError) {
       const message =
         requestError instanceof ApiRequestError

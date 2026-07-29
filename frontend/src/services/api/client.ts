@@ -132,7 +132,21 @@ async function handleResponse<T>(
     });
   }
 
-  return response.json() as Promise<T>;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const contentLengthHeader = response.headers?.get?.("Content-Length");
+  if (contentLengthHeader?.trim() === "0") {
+    return undefined as T;
+  }
+
+  const responseBody = await response.text();
+  if (!responseBody.trim()) {
+    return undefined as T;
+  }
+
+  return JSON.parse(responseBody) as T;
 }
 
 async function request<T>(

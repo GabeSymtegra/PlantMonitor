@@ -39,6 +39,7 @@ Primary operating model:
 - Added backend integration coverage for commissioning readiness and validated end-to-end via admin assignment + commissioning-check flow.
 - Added runtime API correctness coverage for dashboard/detail contracts (`backend.Tests/RuntimeApiTests.cs`) and validated runtime endpoint ProblemDetails/shape behavior.
 - Performed live system verification with running frontend (`http://127.0.0.1:5173`) and backend (`http://127.0.0.1:5265`): root, health, login, dashboard, admin presets, production-runs, backend-served SPA assets, and SignalR `/hubs/lines/negotiate` all returned `200`.
+- Fixed frontend API success handling for empty responses (`204`, empty body, and `Content-Length: 0`) so successful no-content auth flows no longer throw JSON parse errors; updated change-password to `apiPost<void>()` and validated redirect behavior with new frontend tests.
 
 ## Production Readiness Checklist Snapshot (2026-07-29)
 - Done: frontend publishing now builds and copies `frontend/dist` into backend publish output.
