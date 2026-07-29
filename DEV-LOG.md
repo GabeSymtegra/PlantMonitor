@@ -38,6 +38,7 @@ Primary operating model:
 - Added commissioning hardening endpoint `GET /api/admin/lines/{lineId}/commissioning-check` to validate required tag-slot readiness per line and surface missing logical keys/issue details.
 - Added backend integration coverage for commissioning readiness and validated end-to-end via admin assignment + commissioning-check flow.
 - Added runtime API correctness coverage for dashboard/detail contracts (`backend.Tests/RuntimeApiTests.cs`) and validated runtime endpoint ProblemDetails/shape behavior.
+- Performed live system verification with running frontend (`http://127.0.0.1:5173`) and backend (`http://127.0.0.1:5265`): root, health, login, dashboard, admin presets, production-runs, backend-served SPA assets, and SignalR `/hubs/lines/negotiate` all returned `200`.
 
 ## Production Readiness Checklist Snapshot (2026-07-29)
 - Done: frontend publishing now builds and copies `frontend/dist` into backend publish output.
