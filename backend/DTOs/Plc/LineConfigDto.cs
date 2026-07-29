@@ -13,5 +13,6 @@ public sealed class LineConfigDto
     public string Manufacturer { get; set; } = string.Empty;
     public int PollIntervalMs { get; set; }
     public bool IsActive { get; set; }
+    public string LineLifecycleState { get; set; } = Models.Plc.LineLifecycleState.Draft;
     public DateTime UpdatedAtUtc { get; set; }
 }

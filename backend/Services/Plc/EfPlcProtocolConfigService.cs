@@ -304,7 +304,12 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
 
         if (assignment is null)
         {
-            assignment = new LineProtocolAssignmentEntity { LineId = lineId };
+            assignment = new LineProtocolAssignmentEntity
+            {
+                LineId = lineId,
+                IsActive = false,
+                LineLifecycleState = LineLifecycleState.Draft,
+            };
             _dbContext.LineProtocolAssignments.Add(assignment);
         }
 

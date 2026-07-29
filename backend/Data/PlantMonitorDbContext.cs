@@ -66,6 +66,7 @@ public sealed class PlantMonitorDbContext : DbContext
             entity.Property(x => x.Manufacturer).HasMaxLength(64).IsRequired();
             entity.Property(x => x.PresetName).HasMaxLength(128).IsRequired();
             entity.Property(x => x.IsActive).IsRequired();
+            entity.Property(x => x.LineLifecycleState).HasMaxLength(32).IsRequired();
             entity.HasMany(x => x.TagOverrides)
                 .WithOne(x => x.Assignment)
                 .HasForeignKey(x => x.LineId)

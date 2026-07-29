@@ -79,6 +79,11 @@ export interface CommissioningReadinessResult {
   checkedAtUtc: string;
 }
 
+export interface CommissioningActivateResult {
+  lineId: number;
+  lineLifecycleState: "Active";
+}
+
 export async function browsePlcTags(
   request: PlcTagBrowseRequest
 ): Promise<PlcTagBrowseItem[]> {
@@ -132,4 +137,10 @@ export async function getCommissioningReadiness(
   lineId: number
 ): Promise<CommissioningReadinessResult> {
   return apiGet<CommissioningReadinessResult>(`/admin/lines/${lineId}/commissioning-check`);
+}
+
+export async function activateCommissionedLine(
+  lineId: number
+): Promise<CommissioningActivateResult> {
+  return apiPost<CommissioningActivateResult, object>(`/admin/lines/${lineId}/commissioning-activate`, {});
 }

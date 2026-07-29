@@ -12,4 +12,5 @@ public sealed class UpsertLineConfigRequestDto
     public string Manufacturer { get; set; } = string.Empty;
     public int PollIntervalMs { get; set; } = 2000;
     public bool IsActive { get; set; } = true;
+    public string? LineLifecycleState { get; set; }
 }

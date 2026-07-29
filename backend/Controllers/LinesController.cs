@@ -48,6 +48,8 @@ public sealed class LinesController : ControllerBase
         var entity = new LineProtocolAssignmentEntity();
         ApplyRequest(entity, request);
         entity.LineId = request.LineNumber;
+        entity.LineLifecycleState = LineLifecycleState.Draft;
+        entity.IsActive = false;
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
         _dbContext.LineProtocolAssignments.Add(entity);
@@ -66,8 +68,26 @@ public sealed class LinesController : ControllerBase
             return NotFoundProblem("Line configuration not found.", "line_config_not_found");
         }
 
+        var wasActive = IsActiveState(entity.LineLifecycleState);
+        var connectionChanged = !string.Equals(entity.PlcIp, request.PlcIp.Trim(), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(entity.Manufacturer, request.Manufacturer.Trim(), StringComparison.OrdinalIgnoreCase)
+            || entity.PollIntervalMs != request.PollIntervalMs;
+
         ApplyRequest(entity, request);
         entity.LineId = lineId;
+
+        if (wasActive && connectionChanged)
+        {
+            entity.LineLifecycleState = LineLifecycleState.Draft;
+            entity.IsActive = false;
+        }
+
+        if (!LineLifecycleState.IsKnown(entity.LineLifecycleState))
+        {
+            entity.LineLifecycleState = LineLifecycleState.Draft;
+            entity.IsActive = false;
+        }
+
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
         _dbContext.SaveChanges();
@@ -84,6 +104,7 @@ public sealed class LinesController : ControllerBase
             return NotFoundProblem("Line configuration not found.", "line_config_not_found");
         }
 
+        entity.LineLifecycleState = LineLifecycleState.Disabled;
         entity.IsActive = false;
         entity.UpdatedAtUtc = DateTime.UtcNow;
         _dbContext.SaveChanges();
@@ -107,7 +128,12 @@ public sealed class LinesController : ControllerBase
         entity.PlcIp = request.PlcIp.Trim();
         entity.Manufacturer = request.Manufacturer.Trim();
         entity.PollIntervalMs = request.PollIntervalMs;
-        entity.IsActive = request.IsActive;
+        if (!LineLifecycleState.IsKnown(entity.LineLifecycleState))
+        {
+            entity.LineLifecycleState = LineLifecycleState.Draft;
+        }
+
+        entity.IsActive = IsActiveState(entity.LineLifecycleState);
     }
 
     private static LineConfigDto MapLine(LineProtocolAssignmentEntity entity)
@@ -124,9 +150,15 @@ public sealed class LinesController : ControllerBase
             PlcIp = entity.PlcIp,
             Manufacturer = entity.Manufacturer,
             PollIntervalMs = entity.PollIntervalMs,
-            IsActive = entity.IsActive,
+            IsActive = IsActiveState(entity.LineLifecycleState),
+            LineLifecycleState = entity.LineLifecycleState,
             UpdatedAtUtc = entity.UpdatedAtUtc,
         };
+    }
+
+    private static bool IsActiveState(string? lifecycleState)
+    {
+        return string.Equals(lifecycleState, LineLifecycleState.Active, StringComparison.OrdinalIgnoreCase);
     }
 
     private ActionResult BadRequestProblem(string detail, string code)

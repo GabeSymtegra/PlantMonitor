@@ -91,6 +91,7 @@ interface LineConfigDto {
   manufacturer: string;
   pollIntervalMs: number;
   isActive: boolean;
+  lineLifecycleState: "Draft" | "Commissioning" | "Active" | "CommissioningFailed" | "Disabled";
   updatedAtUtc: string;
 }
 
@@ -105,6 +106,7 @@ interface UpsertLineConfigRequestDto {
   manufacturer: string;
   pollIntervalMs: number;
   isActive: boolean;
+  lineLifecycleState?: "Draft" | "Commissioning" | "Active" | "CommissioningFailed" | "Disabled";
 }
 
 // -----------------------------------------------------------------------------
@@ -172,6 +174,7 @@ function toProductionLine(line: RuntimeDashboardLineDto): ProductionLine {
     manufacturer:
       line.manufacturer === "Siemens" ? "Siemens" : "AllenBradley",
     isActive: line.status !== "Offline",
+    lineLifecycleState: "Active",
   };
 }
 
@@ -199,7 +202,8 @@ function toConfiguredLine(line: LineConfigDto): ProductionLine {
     runtime: "??",
     plcIp: line.plcIp,
     manufacturer: line.manufacturer === "Siemens" ? "Siemens" : "AllenBradley",
-    isActive: line.isActive,
+    isActive: line.lineLifecycleState === "Active",
+    lineLifecycleState: line.lineLifecycleState,
   };
 }
 
@@ -217,6 +221,7 @@ export function toConfiguredFallbackLine(line: ProductionLine): ProductionLine {
     totalVariance: Number.NaN,
     totalLength: Number.NaN,
     runtime: "??",
+    lineLifecycleState: line.lineLifecycleState,
   };
 }
 
@@ -263,7 +268,8 @@ export async function addLine(
     plcIp: line.plcIp,
     manufacturer: line.manufacturer,
     pollIntervalMs: 2000,
-    isActive: line.isActive,
+    isActive: line.lineLifecycleState === "Active",
+    lineLifecycleState: line.lineLifecycleState,
   };
 
   const created = await apiPost<LineConfigDto, UpsertLineConfigRequestDto>(API_ENDPOINTS.lines, request);
@@ -291,7 +297,8 @@ export async function updateLine(
     plcIp: updates.plcIp ?? existingLine.plcIp,
     manufacturer: updates.manufacturer ?? existingLine.manufacturer,
     pollIntervalMs: 2000,
-    isActive: updates.isActive ?? existingLine.isActive,
+    isActive: (updates.lineLifecycleState ?? existingLine.lineLifecycleState) === "Active",
+    lineLifecycleState: updates.lineLifecycleState ?? existingLine.lineLifecycleState,
   };
 
   const updated = await apiPut<LineConfigDto, UpsertLineConfigRequestDto>(API_ENDPOINTS.line(id), request);

@@ -15,6 +15,7 @@ public sealed class LineProtocolAssignmentEntity
     public int PresetVersion { get; set; }
     public int PollIntervalMs { get; set; }
     public bool IsActive { get; set; }
+    public string LineLifecycleState { get; set; } = Plc.LineLifecycleState.Draft;
     public DateTime UpdatedAtUtc { get; set; }
     public List<LineTagOverrideEntity> TagOverrides { get; set; } = [];
 }

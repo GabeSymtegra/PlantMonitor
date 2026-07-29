@@ -1,5 +1,8 @@
 using backend.DTOs.Plc;
+using backend.Data;
 using backend.Interfaces.Plc;
+using backend.Models.Plc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.RegularExpressions;
@@ -15,13 +18,16 @@ public sealed class PlcProtocolAdminController : ControllerBase
 {
     private readonly IPlcProtocolConfigService _protocolConfigService;
     private readonly IPlcConnectionService _connectionService;
+    private readonly PlantMonitorDbContext _dbContext;
 
     public PlcProtocolAdminController(
         IPlcProtocolConfigService protocolConfigService,
-        IPlcConnectionService connectionService)
+        IPlcConnectionService connectionService,
+        PlantMonitorDbContext dbContext)
     {
         _protocolConfigService = protocolConfigService;
         _connectionService = connectionService;
+        _dbContext = dbContext;
     }
 
     // -------------------------------------------------------------------------
@@ -68,6 +74,8 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return BadRequestProblem(error ?? "Tag catalog update failed.", "invalid_tag_catalog");
         }
 
+        ResetLineToDraftIfActive(lineId);
+
         return Ok(tags);
     }
 
@@ -78,6 +86,8 @@ public sealed class PlcProtocolAdminController : ControllerBase
         {
             return BadRequestProblem(error ?? "Protocol assignment update failed.", "invalid_protocol_assignment");
         }
+
+        ResetLineToDraftIfActive(lineId);
 
         var assignment = _protocolConfigService.GetAssignment(lineId);
         return Ok(assignment);
@@ -116,6 +126,8 @@ public sealed class PlcProtocolAdminController : ControllerBase
         {
             return BadRequestProblem(error ?? "Tag overrides update failed.", "invalid_tag_overrides");
         }
+
+        ResetLineToDraftIfActive(lineId);
 
         return Ok(effectiveTags);
     }
@@ -253,10 +265,81 @@ public sealed class PlcProtocolAdminController : ControllerBase
     [HttpGet("lines/{lineId:int}/commissioning-check")]
     public ActionResult<CommissioningReadinessDto> GetCommissioningReadiness(int lineId)
     {
+        var line = _dbContext.LineProtocolAssignments.SingleOrDefault(x => x.LineId == lineId);
+        if (line is null)
+        {
+            return NotFoundProblem("Line configuration not found.", "line_config_not_found");
+        }
+
+        line.LineLifecycleState = LineLifecycleState.Commissioning;
+        line.IsActive = false;
+        line.UpdatedAtUtc = DateTime.UtcNow;
+        _dbContext.SaveChanges();
+
+        var readiness = BuildCommissioningReadiness(lineId);
+
+        if (!readiness.IsReady)
+        {
+            line.LineLifecycleState = LineLifecycleState.CommissioningFailed;
+            line.IsActive = false;
+            line.UpdatedAtUtc = DateTime.UtcNow;
+            _dbContext.SaveChanges();
+        }
+
+        return Ok(readiness);
+    }
+
+    [HttpPost("lines/{lineId:int}/commissioning-activate")]
+    public ActionResult ActivateCommissionedLine(int lineId)
+    {
+        var line = _dbContext.LineProtocolAssignments.SingleOrDefault(x => x.LineId == lineId);
+        if (line is null)
+        {
+            return NotFoundProblem("Line configuration not found.", "line_config_not_found");
+        }
+
+        var readiness = BuildCommissioningReadiness(lineId);
+        if (!readiness.IsReady)
+        {
+            line.LineLifecycleState = LineLifecycleState.CommissioningFailed;
+            line.IsActive = false;
+            line.UpdatedAtUtc = DateTime.UtcNow;
+            _dbContext.SaveChanges();
+
+            var detail = readiness.Issues.Count == 0
+                ? "Commissioning validation failed."
+                : string.Join(" ", readiness.Issues);
+
+            return ConflictProblem(detail, "commissioning_validation_failed");
+        }
+
+        line.LineLifecycleState = LineLifecycleState.Active;
+        line.IsActive = true;
+        line.UpdatedAtUtc = DateTime.UtcNow;
+        _dbContext.SaveChanges();
+
+        return Ok(new
+        {
+            lineId,
+            lineLifecycleState = LineLifecycleState.Active,
+        });
+    }
+
+    private CommissioningReadinessDto BuildCommissioningReadiness(int lineId)
+    {
         var assignment = _protocolConfigService.GetAssignment(lineId);
         if (assignment is null)
         {
-            return NotFoundProblem("Protocol assignment not found for line.", "protocol_assignment_not_found");
+            return new CommissioningReadinessDto
+            {
+                LineId = lineId,
+                IsReady = false,
+                RequiredTagCount = 0,
+                MappedRequiredTagCount = 0,
+                MissingRequiredTagKeys = [],
+                Issues = ["Protocol assignment not found for line."],
+                CheckedAtUtc = DateTime.UtcNow,
+            };
         }
 
         var requiredSlots = _protocolConfigService.GetRequiredTagSlots()
@@ -292,7 +375,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             issues.Add($"Missing required logical keys: {string.Join(", ", missingRequiredKeys)}.");
         }
 
-        return Ok(new CommissioningReadinessDto
+        return new CommissioningReadinessDto
         {
             LineId = lineId,
             Manufacturer = assignment.Manufacturer,
@@ -304,7 +387,26 @@ public sealed class PlcProtocolAdminController : ControllerBase
             MissingRequiredTagKeys = missingRequiredKeys,
             Issues = issues,
             CheckedAtUtc = DateTime.UtcNow,
-        });
+        };
+    }
+
+    private void ResetLineToDraftIfActive(int lineId)
+    {
+        var line = _dbContext.LineProtocolAssignments.SingleOrDefault(x => x.LineId == lineId);
+        if (line is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(line.LineLifecycleState, LineLifecycleState.Active, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        line.LineLifecycleState = LineLifecycleState.Draft;
+        line.IsActive = false;
+        line.UpdatedAtUtc = DateTime.UtcNow;
+        _dbContext.SaveChanges();
     }
 
     // -------------------------------------------------------------------------
@@ -444,6 +546,19 @@ public sealed class PlcProtocolAdminController : ControllerBase
             detail: detail,
             statusCode: StatusCodes.Status404NotFound,
             type: "https://httpstatuses.com/404",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+    }
+
+    private ActionResult ConflictProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Resource conflict.",
+            detail: detail,
+            statusCode: StatusCodes.Status409Conflict,
+            type: "https://httpstatuses.com/409",
             extensions: new Dictionary<string, object?>
             {
                 ["code"] = code,

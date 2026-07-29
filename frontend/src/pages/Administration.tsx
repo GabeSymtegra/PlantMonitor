@@ -5,7 +5,6 @@ import {
   CircularProgress,
   Divider,
   FormControl,
-  FormControlLabel,
   InputLabel,
   List,
   ListItemButton,
@@ -14,7 +13,6 @@ import {
   Paper,
   Select,
   Stack,
-  Switch,
   TextField,
   Typography,
 } from "@mui/material";
@@ -31,6 +29,7 @@ import {
   type PlcConnectionResult,
 } from "../services/plcConnectionService";
 import {
+  activateCommissionedLine,
   autoMapTagCatalog,
   getCommissioningReadiness,
   browsePlcTags,
@@ -45,7 +44,7 @@ import {
 } from "../services/plcTagBrowserService";
 import { ApiRequestError } from "../services/api/client";
 import { LineStatus } from "../types/LineStatus";
-import type { PlcManufacturer, ProductionLine } from "../types/ProductionLine";
+import type { LineLifecycleState, PlcManufacturer, ProductionLine } from "../types/ProductionLine";
 
 // -----------------------------------------------------------------------------
 // Form model and local utilities
@@ -60,7 +59,7 @@ type LineConfigForm = {
   operatorName: string;
   plcIp: string;
   manufacturer: PlcManufacturer;
-  isActive: boolean;
+  lineLifecycleState: LineLifecycleState;
 };
 
 const emptyLineForm: LineConfigForm = {
@@ -72,7 +71,7 @@ const emptyLineForm: LineConfigForm = {
   operatorName: "Unknown",
   plcIp: "",
   manufacturer: "AllenBradley",
-  isActive: true,
+  lineLifecycleState: "Draft",
 };
 
 const productSerialPattern = /^\d{3}-\d{3}-\d{2}-\d{1}$/;
@@ -173,11 +172,12 @@ export default function Administration() {
   const [autoMapping, setAutoMapping] = useState(false);
   const [mappingStatus, setMappingStatus] = useState("");
   const [commissioningChecking, setCommissioningChecking] = useState(false);
+  const [activatingLine, setActivatingLine] = useState(false);
   const [commissioningStatus, setCommissioningStatus] = useState("");
   const [commissioningReady, setCommissioningReady] = useState<boolean | null>(null);
 
   const activeLines = useMemo(
-    () => lines.filter((line) => line.isActive),
+    () => lines.filter((line) => line.lineLifecycleState === "Active"),
     [lines]
   );
 
@@ -306,7 +306,7 @@ export default function Administration() {
         operatorName: selected.operatorName || "Unknown",
         plcIp: selected.plcIp,
         manufacturer: selected.manufacturer,
-        isActive: selected.isActive,
+        lineLifecycleState: selected.lineLifecycleState,
       };
 
       setForm(lineForm);
@@ -419,6 +419,7 @@ export default function Administration() {
         runtime: "00:00:00",
         product: form.product.trim(),
         plcIp: form.plcIp.trim(),
+        isActive: false,
       });
       setSuccess("Line added successfully.");
     } else {
@@ -431,7 +432,7 @@ export default function Administration() {
         operatorName: form.operatorName.trim() || "Unknown",
         manufacturer: form.manufacturer,
         plcIp: form.plcIp.trim(),
-        isActive: form.isActive,
+        lineLifecycleState: form.lineLifecycleState,
       });
       setSuccess("Line updated successfully.");
     }
@@ -711,6 +712,61 @@ export default function Administration() {
     }
   }
 
+  async function handleActivateCommissionedLine() {
+    setCommissioningStatus("");
+
+    if (selectedLineId === "new") {
+      setCommissioningStatus("Save the line first, then activate commissioning.");
+      return;
+    }
+
+    setActivatingLine(true);
+
+    try {
+      const readiness = await getCommissioningReadiness(selectedLineId);
+      setCommissioningReady(readiness.isReady);
+
+      if (!readiness.isReady) {
+        const issues = readiness.issues.length > 0
+          ? readiness.issues.join("\n")
+          : "Commissioning validation failed.";
+
+        setCommissioningStatus(
+          `Line remains non-active. Resolve commissioning issues before activation.\n${issues}`
+        );
+        return;
+      }
+
+      await activateCommissionedLine(selectedLineId);
+
+      const refreshed = await getAllLines();
+      setLines(refreshed);
+
+      const current = refreshed.find((line) => line.id === selectedLineId);
+      if (current) {
+        setForm((previous) => ({
+          ...previous,
+          lineLifecycleState: current.lineLifecycleState,
+        }));
+      }
+
+      setCommissioningStatus("Line activation completed. Lifecycle state is now Active.");
+      setCommissioningReady(true);
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Line activation failed.";
+
+      setCommissioningStatus(message);
+      setCommissioningReady(false);
+    } finally {
+      setActivatingLine(false);
+    }
+  }
+
   const canTestConnection = isValidIpv4Address(form.plcIp) && !testingConnection;
   const isNewLine = selectedLineId === "new";
   const canSaveLine = !isNewLine || connectionResult?.isConnected === true;
@@ -872,6 +928,13 @@ export default function Administration() {
               fullWidth
               disabled
             />
+
+             <TextField
+               label="Lifecycle State"
+               value={selectedLine?.lineLifecycleState ?? "Draft"}
+               fullWidth
+               disabled
+             />
           </Stack>
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -1144,8 +1207,19 @@ export default function Administration() {
                   </Button>
 
                   <Button
+                    variant="contained"
+                    color="success"
+                    onClick={handleActivateCommissionedLine}
+                    disabled={activatingLine || selectedLineId === "new"}
+                  >
+                    {activatingLine ? "Activating..." : "Activate Line"}
+                  </Button>
+
+                  <Button
                     variant="outlined"
-                    onClick={handleAutoMapTagCatalog}
+                    onClick={() => {
+                      void handleAutoMapTagCatalog();
+                    }}
                     disabled={autoMapping || selectedLineId === "new" || !connectionResult?.isConnected}
                   >
                     {autoMapping ? "Auto-Mapping..." : "Auto Populate"}
@@ -1245,16 +1319,6 @@ export default function Administration() {
 
             </Stack>
           </Paper>
-
-          <FormControlLabel
-            control={
-              <Switch
-                checked={form.isActive}
-                onChange={(event) => updateForm("isActive", event.target.checked)}
-              />
-            }
-            label="Active Line"
-          />
 
           <Stack direction="row" justifyContent="flex-end">
             {selectedLineId !== "new" ? (

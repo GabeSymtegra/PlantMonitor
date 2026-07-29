@@ -114,7 +114,8 @@ Rules:
 	"plcFamily": "AllenBradley",
 	"plcIp": "192.168.1.101",
 	"pollIntervalMs": 2000,
-	"isActive": true,
+	"isActive": false,
+	"lineLifecycleState": "Draft",
 	"defaultProduct": "PVC Pipe",
 	"createdAtUtc": "2026-07-01T14:00:00Z",
 	"updatedAtUtc": "2026-07-01T14:10:00Z"
@@ -399,6 +400,22 @@ Response 200:
 Response codes:
 
 - 200, 401, 403, 404
+
+POST /api/admin/lines/{lineId}/commissioning-activate
+
+- Explicitly promotes a line to `Active` only after a passing commissioning check.
+- Returns `409` and keeps the line non-active when readiness checks fail.
+
+Response 200:
+
+{
+	"lineId": 101,
+	"lineLifecycleState": "Active"
+}
+
+Response codes:
+
+- 200, 401, 403, 404, 409
 
 GET /api/admin/lines/{lineId}/effective-tags
 

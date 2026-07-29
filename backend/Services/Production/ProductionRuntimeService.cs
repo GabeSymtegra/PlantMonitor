@@ -5,6 +5,7 @@ using backend.Data;
 using backend.Interfaces.Production;
 using backend.Interfaces.Plc;
 using backend.Models.Production;
+using backend.Models.Plc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 
@@ -255,7 +256,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
         var activeAssignments = dbContext.LineProtocolAssignments
             .AsNoTracking()
-            .Where(x => x.IsActive)
+            .Where(x => x.LineLifecycleState == LineLifecycleState.Active)
             .ToList();
 
         var persistedRuntimeStates = dbContext.ActiveLineRuntimeStates
@@ -480,7 +481,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
         var configuredLines = dbContext.LineProtocolAssignments
             .AsNoTracking()
-            .Where(x => x.IsActive)
+            .Where(x => x.LineLifecycleState == LineLifecycleState.Active)
             .OrderBy(x => x.LineNumber)
             .ToList();
 
