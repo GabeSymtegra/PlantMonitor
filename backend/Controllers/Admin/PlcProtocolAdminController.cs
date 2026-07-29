@@ -5,6 +5,7 @@ using backend.Models.Plc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace backend.Controllers.Admin;
@@ -263,7 +264,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
     }
 
     [HttpGet("lines/{lineId:int}/commissioning-check")]
-    public ActionResult<CommissioningReadinessDto> GetCommissioningReadiness(int lineId)
+    public async Task<ActionResult<CommissioningReadinessDto>> GetCommissioningReadiness(int lineId, CancellationToken cancellationToken)
     {
         var line = _dbContext.LineProtocolAssignments.SingleOrDefault(x => x.LineId == lineId);
         if (line is null)
@@ -276,7 +277,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
         line.UpdatedAtUtc = DateTime.UtcNow;
         _dbContext.SaveChanges();
 
-        var readiness = BuildCommissioningReadiness(lineId);
+        var readiness = await BuildCommissioningReadinessAsync(line, cancellationToken);
 
         if (!readiness.IsReady)
         {
@@ -290,7 +291,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
     }
 
     [HttpPost("lines/{lineId:int}/commissioning-activate")]
-    public ActionResult ActivateCommissionedLine(int lineId)
+    public async Task<ActionResult> ActivateCommissionedLine(int lineId, CancellationToken cancellationToken)
     {
         var line = _dbContext.LineProtocolAssignments.SingleOrDefault(x => x.LineId == lineId);
         if (line is null)
@@ -298,7 +299,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return NotFoundProblem("Line configuration not found.", "line_config_not_found");
         }
 
-        var readiness = BuildCommissioningReadiness(lineId);
+        var readiness = await BuildCommissioningReadinessAsync(line, cancellationToken);
         if (!readiness.IsReady)
         {
             line.LineLifecycleState = LineLifecycleState.CommissioningFailed;
@@ -325,8 +326,41 @@ public sealed class PlcProtocolAdminController : ControllerBase
         });
     }
 
-    private CommissioningReadinessDto BuildCommissioningReadiness(int lineId)
+    private static readonly HashSet<string> NumericLogicalKeys =
+    [
+        "production_length",
+        "bare_setpoint",
+        "bare_actual",
+        "hot_setpoint",
+        "hot_actual",
+        "cold_setpoint",
+        "cold_actual",
+    ];
+
+    private static readonly HashSet<string> NumericDataTypes =
+    [
+        "int",
+        "dint",
+        "real",
+    ];
+
+    private static readonly HashSet<string> TextOrCodeDataTypes =
+    [
+        "int",
+        "dint",
+        "string",
+    ];
+
+    private static readonly HashSet<string> ProductIdDataTypes =
+    [
+        "string",
+        "int",
+        "dint",
+    ];
+
+    private async Task<CommissioningReadinessDto> BuildCommissioningReadinessAsync(LineProtocolAssignmentEntity line, CancellationToken cancellationToken)
     {
+        var lineId = line.LineId;
         var assignment = _protocolConfigService.GetAssignment(lineId);
         if (assignment is null)
         {
@@ -347,32 +381,133 @@ public sealed class PlcProtocolAdminController : ControllerBase
             .ToList();
 
         var issues = new List<string>();
-        var mappedRequiredKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var requiredMappings = new Dictionary<string, LineTagCatalogEntryDto>(StringComparer.OrdinalIgnoreCase);
 
-        var effectiveTags = _protocolConfigService.GetEffectiveTags(lineId, out var effectiveTagsError);
-        if (effectiveTags is null)
+        if (!IsAllenBradleyManufacturer(line.Manufacturer))
         {
-            issues.Add(effectiveTagsError ?? "No effective tag mappings are available.");
+            issues.Add("Line manufacturer must be AllenBradley for commissioning.");
         }
-        else
+
+        if (string.IsNullOrWhiteSpace(assignment.PresetName) || assignment.PresetVersion <= 0)
         {
-            foreach (var tag in effectiveTags)
+            issues.Add("Protocol assignment is incomplete. Preset name and version are required.");
+        }
+
+        if (!_connectionService.IsValidIpAddress(line.PlcIp))
+        {
+            issues.Add("Line PLC IP address is invalid.");
+        }
+
+        var tagCatalog = _protocolConfigService.GetTagCatalog(lineId)
+            .Where(x => x.IsEnabled)
+            .ToList();
+
+        if (tagCatalog.Count == 0)
+        {
+            issues.Add("Tag catalog is empty. A complete required tag catalog is needed before commissioning.");
+        }
+
+        foreach (var slot in requiredSlots)
+        {
+            var mapping = tagCatalog.FirstOrDefault(x => x.LogicalKey.Equals(slot.LogicalKey, StringComparison.OrdinalIgnoreCase));
+            if (mapping is null)
             {
-                if (tag.IsRequired && !string.IsNullOrWhiteSpace(tag.PlcAddress))
-                {
-                    mappedRequiredKeys.Add(tag.TagKey);
-                }
+                continue;
             }
+
+            requiredMappings[slot.LogicalKey] = mapping;
+
+            if (string.IsNullOrWhiteSpace(mapping.PlcAddress))
+            {
+                issues.Add($"Required logical key '{slot.LogicalKey}' is missing a PLC address.");
+                continue;
+            }
+
+            ValidateLogicalKeyDataType(slot.LogicalKey, mapping.DataType, issues);
         }
 
         var missingRequiredKeys = requiredSlots
             .Select(slot => slot.LogicalKey)
-            .Where(requiredKey => !mappedRequiredKeys.Contains(requiredKey))
+            .Where(requiredKey => !requiredMappings.ContainsKey(requiredKey))
             .ToList();
 
         if (missingRequiredKeys.Count > 0)
         {
             issues.Add($"Missing required logical keys: {string.Join(", ", missingRequiredKeys)}.");
+        }
+
+        if (!_connectionService.TryResolveDriver(line.Manufacturer, out var driver, out var driverError)
+            || driver is null)
+        {
+            issues.Add(driverError ?? "Unable to resolve PLC driver for commissioning.");
+        }
+
+        if (issues.Count == 0)
+        {
+            var connectionResult = await _connectionService.TestConnectionAsync(new PlcConnectionRequest
+            {
+                Driver = line.Manufacturer,
+                IpAddress = line.PlcIp.Trim(),
+            }, cancellationToken);
+
+            if (!connectionResult.IsConnected)
+            {
+                issues.Add($"PLC connection test failed: {connectionResult.Message}");
+            }
+        }
+
+        if (issues.Count == 0 && driver is not null)
+        {
+            var requiredAddresses = requiredMappings
+                .Values
+                .Select(x => x.PlcAddress.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var readResults = await driver.ReadTagsAsync(line.PlcIp.Trim(), requiredAddresses, cancellationToken);
+            var readMap = readResults
+                .Where(x => !string.IsNullOrWhiteSpace(x.Name))
+                .ToDictionary(x => x.Name.Trim(), x => x, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (logicalKey, mapping) in requiredMappings)
+            {
+                var address = mapping.PlcAddress.Trim();
+
+                if (!readMap.TryGetValue(address, out var read))
+                {
+                    issues.Add($"Required logical key '{logicalKey}' did not return a read result.");
+                    continue;
+                }
+
+                if (read.CanRead == false)
+                {
+                    issues.Add($"Required logical key '{logicalKey}' is not readable at '{address}'.");
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(read.Error))
+                {
+                    issues.Add($"Required logical key '{logicalKey}' read failed at '{address}': {read.Error}");
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(read.Value))
+                {
+                    issues.Add($"Required logical key '{logicalKey}' returned an empty value from '{address}'.");
+                    continue;
+                }
+
+                if (LooksLikeStructuredOrRawPayload(read.Value))
+                {
+                    issues.Add($"Required logical key '{logicalKey}' at '{address}' returned a structured/raw payload that cannot be used by runtime mappings.");
+                    continue;
+                }
+
+                if (!TryConvertToExpectedRuntimeValue(logicalKey, read.Value, out var conversionError))
+                {
+                    issues.Add($"Required logical key '{logicalKey}' returned unsupported value '{read.Value}' at '{address}': {conversionError}");
+                }
+            }
         }
 
         return new CommissioningReadinessDto
@@ -383,11 +518,199 @@ public sealed class PlcProtocolAdminController : ControllerBase
             PresetVersion = assignment.PresetVersion,
             IsReady = issues.Count == 0,
             RequiredTagCount = requiredSlots.Count,
-            MappedRequiredTagCount = requiredSlots.Count - missingRequiredKeys.Count,
+            MappedRequiredTagCount = requiredMappings.Count,
             MissingRequiredTagKeys = missingRequiredKeys,
             Issues = issues,
             CheckedAtUtc = DateTime.UtcNow,
         };
+    }
+
+    private static bool IsAllenBradleyManufacturer(string? manufacturer)
+    {
+        return string.Equals(manufacturer?.Trim(), "AllenBradley", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(manufacturer?.Trim(), "AB", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeStructuredOrRawPayload(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith("{", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return trimmed.Contains("\"kind\":\"metadata\"", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("\"fields\"", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("\"typeClass\"", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ValidateLogicalKeyDataType(string logicalKey, string? dataType, ICollection<string> issues)
+    {
+        var normalizedDataType = dataType?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedDataType))
+        {
+            issues.Add($"Required logical key '{logicalKey}' has no configured data type.");
+            return;
+        }
+
+        if (NumericLogicalKeys.Contains(logicalKey))
+        {
+            if (!NumericDataTypes.Contains(normalizedDataType))
+            {
+                issues.Add($"Required logical key '{logicalKey}' must use a numeric data type (int, dint, real). Received '{normalizedDataType}'.");
+            }
+
+            return;
+        }
+
+        if (logicalKey.Equals("control_mode", StringComparison.OrdinalIgnoreCase)
+            || logicalKey.Equals("machine_state", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TextOrCodeDataTypes.Contains(normalizedDataType))
+            {
+                issues.Add($"Required logical key '{logicalKey}' must use int, dint, or string. Received '{normalizedDataType}'.");
+            }
+
+            return;
+        }
+
+        if (logicalKey.Equals("product_id", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!ProductIdDataTypes.Contains(normalizedDataType))
+            {
+                issues.Add($"Required logical key '{logicalKey}' must use string, int, or dint. Received '{normalizedDataType}'.");
+            }
+
+            return;
+        }
+
+        if (logicalKey.Equals("line_id", StringComparison.OrdinalIgnoreCase)
+            && !TextOrCodeDataTypes.Contains(normalizedDataType))
+        {
+            issues.Add($"Required logical key '{logicalKey}' must use int, dint, or string. Received '{normalizedDataType}'.");
+        }
+    }
+
+    private static bool TryConvertToExpectedRuntimeValue(string logicalKey, string rawValue, out string error)
+    {
+        error = string.Empty;
+        var trimmed = rawValue.Trim();
+
+        if (NumericLogicalKeys.Contains(logicalKey))
+        {
+            if (!double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+            {
+                error = "Expected a numeric value.";
+                return false;
+            }
+
+            return true;
+        }
+
+        if (logicalKey.Equals("control_mode", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryConvertControlMode(trimmed, out _))
+            {
+                error = "Control mode conversion is not supported. Expected Auto/Manual or 1/0.";
+                return false;
+            }
+
+            return true;
+        }
+
+        if (logicalKey.Equals("machine_state", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryConvertMachineState(trimmed, out _))
+            {
+                error = "Machine state conversion is not supported. Expected known state text or code (0-5).";
+                return false;
+            }
+
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(trimmed);
+    }
+
+    private static bool TryConvertControlMode(string rawValue, out string normalized)
+    {
+        normalized = string.Empty;
+        var value = rawValue.Trim().ToLowerInvariant();
+
+        if (value is "1" or "auto")
+        {
+            normalized = "Auto";
+            return true;
+        }
+
+        if (value is "0" or "manual")
+        {
+            normalized = "Manual";
+            return true;
+        }
+
+        if (value.Contains("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Auto";
+            return true;
+        }
+
+        if (value.Contains("manual", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Manual";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryConvertMachineState(string rawValue, out string normalized)
+    {
+        normalized = string.Empty;
+        var value = rawValue.Trim().ToLowerInvariant();
+
+        if (value == "0" || value.Contains("stop", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Stopped";
+            return true;
+        }
+
+        if (value == "1" || value.Contains("run", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Running";
+            return true;
+        }
+
+        if (value == "2" || value.Contains("bleedout", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Bleedout";
+            return true;
+        }
+
+        if (value == "3" || value.Contains("startup", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Startup";
+            return true;
+        }
+
+        if (value == "4" || value.Contains("fault", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Faulted";
+            return true;
+        }
+
+        if (value == "5" || value.Contains("maintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "Maintenance";
+            return true;
+        }
+
+        return false;
     }
 
     private void ResetLineToDraftIfActive(int lineId)

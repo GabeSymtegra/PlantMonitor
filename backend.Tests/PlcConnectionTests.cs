@@ -321,6 +321,145 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
         Assert.NotNull(payload?["issues"]?.AsArray());
     }
 
+    [Fact]
+    public async Task CommissioningCheck_WithCompleteCatalogAndReadableTags_ReturnsReady()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
+        {
+            manufacturer = "AllenBradley",
+            presetName = "BasicStatus",
+            presetVersion = 1,
+            pollIntervalMs = 1500,
+        });
+
+        upsertResponse.EnsureSuccessStatusCode();
+
+        var catalogResponse = await client.PutAsJsonAsync("/api/admin/lines/101/tag-catalog", new
+        {
+            driver = "AllenBradley",
+            tags = BuildRequiredCatalog("real"),
+        });
+
+        catalogResponse.EnsureSuccessStatusCode();
+
+        var response = await client.GetAsync("/api/admin/lines/101/commissioning-check");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.True(payload?["isReady"]?.GetValue<bool>());
+        Assert.Equal(11, payload?["requiredTagCount"]?.GetValue<int>());
+        Assert.Equal(11, payload?["mappedRequiredTagCount"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task CommissioningCheck_WithBooleanNumericMapping_ReturnsDetailedTypeIssue()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
+        {
+            manufacturer = "AllenBradley",
+            presetName = "BasicStatus",
+            presetVersion = 1,
+            pollIntervalMs = 1500,
+        });
+
+        upsertResponse.EnsureSuccessStatusCode();
+
+        var catalogResponse = await client.PutAsJsonAsync("/api/admin/lines/101/tag-catalog", new
+        {
+            driver = "AllenBradley",
+            tags = BuildRequiredCatalog("bool"),
+        });
+
+        catalogResponse.EnsureSuccessStatusCode();
+
+        var response = await client.GetAsync("/api/admin/lines/101/commissioning-check");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.False(payload?["isReady"]?.GetValue<bool>());
+
+        var issues = payload?["issues"]?.AsArray();
+        Assert.NotNull(issues);
+        Assert.Contains(issues!, issue =>
+            (issue?.GetValue<string>() ?? string.Empty).Contains("production_length", StringComparison.OrdinalIgnoreCase)
+            && (issue?.GetValue<string>() ?? string.Empty).Contains("numeric data type", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ActivateCommissionedLine_WithPassingValidation_ReturnsActive()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
+        {
+            manufacturer = "AllenBradley",
+            presetName = "BasicStatus",
+            presetVersion = 1,
+            pollIntervalMs = 1500,
+        });
+
+        upsertResponse.EnsureSuccessStatusCode();
+
+        var catalogResponse = await client.PutAsJsonAsync("/api/admin/lines/101/tag-catalog", new
+        {
+            driver = "AllenBradley",
+            tags = BuildRequiredCatalog("real"),
+        });
+
+        catalogResponse.EnsureSuccessStatusCode();
+
+        var activateResponse = await client.PostAsJsonAsync("/api/admin/lines/101/commissioning-activate", new { });
+        activateResponse.EnsureSuccessStatusCode();
+
+        var payload = await activateResponse.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal(101, payload?["lineId"]?.GetValue<int>());
+        Assert.Equal("Active", payload?["lineLifecycleState"]?.GetValue<string>());
+    }
+
+    private static object[] BuildRequiredCatalog(string productionLengthDataType)
+    {
+        return
+        [
+            CreateTag("line_id", "Program:LineData.LineId", "int"),
+            CreateTag("product_id", "Program:LineData.ProductId", "string"),
+            CreateTag("control_mode", "Program:LineData.ControlMode", "int"),
+            CreateTag("machine_state", "Program:LineData.MachineState", "string"),
+            CreateTag("production_length", "Program:LineData.ProductionLength", productionLengthDataType),
+            CreateTag("bare_setpoint", "Program:LineData.BareSetpoint", "real"),
+            CreateTag("bare_actual", "Program:LineData.BareActual", "real"),
+            CreateTag("hot_setpoint", "Program:LineData.HotSetpoint", "real"),
+            CreateTag("hot_actual", "Program:LineData.HotActual", "real"),
+            CreateTag("cold_setpoint", "Program:LineData.ColdSetpoint", "real"),
+            CreateTag("cold_actual", "Program:LineData.ColdActual", "real"),
+        ];
+    }
+
+    private static object CreateTag(string logicalKey, string plcAddress, string dataType)
+    {
+        return new
+        {
+            logicalKey,
+            displayName = logicalKey,
+            driver = "AllenBradley",
+            plcAddress,
+            dataType,
+            scale = 1.0m,
+            isEnabled = true,
+            isRequired = true,
+            readFrequencyMs = 1000,
+        };
+    }
+
     private static async Task LoginAsync(HttpClient client, string username, string password)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new
@@ -431,30 +570,39 @@ public sealed class PlcConnectionApiFactory : TestWebApplicationFactory
 
         public Task<PlcTagReadResultDto> ReadTagAsync(string ipAddress, string tagName, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(new PlcTagReadResultDto
-            {
-                Name = tagName,
-                DataType = "real",
-                Value = "125.4",
-                LastReadUtc = DateTime.UtcNow,
-                CanRead = true,
-                CanWrite = false,
-            });
+            return Task.FromResult(BuildReadResult(tagName));
         }
 
         public Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(string ipAddress, IReadOnlyCollection<string> tagNames, CancellationToken cancellationToken = default)
         {
-            var results = tagNames.Select(tagName => new PlcTagReadResultDto
+            var results = tagNames.Select(BuildReadResult).ToArray();
+
+            return Task.FromResult<IReadOnlyCollection<PlcTagReadResultDto>>(results);
+        }
+
+        private static PlcTagReadResultDto BuildReadResult(string tagName)
+        {
+            var value = tagName switch
+            {
+                var name when name.Contains("ControlMode", StringComparison.OrdinalIgnoreCase) => "1",
+                var name when name.Contains("MachineState", StringComparison.OrdinalIgnoreCase) => "Running",
+                var name when name.Contains("ProductId", StringComparison.OrdinalIgnoreCase) => "P-101",
+                var name when name.Contains("LineId", StringComparison.OrdinalIgnoreCase) => "101",
+                var name when name.Contains("ProductionLength", StringComparison.OrdinalIgnoreCase) => "125.4",
+                var name when name.Contains("Setpoint", StringComparison.OrdinalIgnoreCase) => "10.5",
+                var name when name.Contains("Actual", StringComparison.OrdinalIgnoreCase) => "10.2",
+                _ => "125.4",
+            };
+
+            return new PlcTagReadResultDto
             {
                 Name = tagName,
                 DataType = "real",
-                Value = "125.4",
+                Value = value,
                 LastReadUtc = DateTime.UtcNow,
                 CanRead = true,
                 CanWrite = false,
-            }).ToArray();
-
-            return Task.FromResult<IReadOnlyCollection<PlcTagReadResultDto>>(results);
+            };
         }
 
         public Task<PlcTagWriteResultDto> WriteTagAsync(string ipAddress, string tagName, string value, CancellationToken cancellationToken = default)
