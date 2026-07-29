@@ -672,12 +672,21 @@ static void EnsureLegacyRuntimeSchema(PlantMonitorDbContext dbContext)
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "ProductId", "TEXT NOT NULL DEFAULT ''");
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "PlcIp", "TEXT NOT NULL DEFAULT ''");
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "IsActive", "INTEGER NOT NULL DEFAULT 1");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "LineLifecycleState", "TEXT NOT NULL DEFAULT 'Draft'");
 
     dbContext.Database.ExecuteSqlRaw(@"
 UPDATE line_protocol_assignments
 SET LineNumber = CASE WHEN LineNumber = 0 THEN LineId ELSE LineNumber END,
     LineName = CASE WHEN trim(coalesce(LineName, '')) = '' THEN 'Line ' || LineId ELSE LineName END,
-    IsActive = CASE WHEN IsActive = 0 THEN 1 ELSE IsActive END;
+    LineLifecycleState = CASE
+        WHEN trim(coalesce(LineLifecycleState, '')) = '' AND IsActive = 1 THEN 'Active'
+        WHEN trim(coalesce(LineLifecycleState, '')) = '' AND IsActive = 0 THEN 'Disabled'
+        ELSE LineLifecycleState
+    END,
+    IsActive = CASE
+        WHEN LineLifecycleState = 'Active' THEN 1
+        ELSE 0
+    END;
 ");
 
     if (!HasSqliteTable(dbContext, "recipe_tolerances"))
