@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "c:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj": {}
+    "C:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj": {}
   },
   "projects": {
-    "c:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj": {
+    "C:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "c:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj",
+        "projectUniqueName": "C:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj",
         "projectName": "backend",
-        "projectPath": "c:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj",
+        "projectPath": "C:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\backend.csproj",
         "packagesPath": "C:\\Users\\Gabe\\.nuget\\packages\\",
-        "outputPath": "c:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\obj\\",
+        "outputPath": "C:\\Users\\Gabe\\Desktop\\PlantMonitor\\backend\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Gabe\\AppData\\Roaming\\NuGet\\NuGet.Config"
