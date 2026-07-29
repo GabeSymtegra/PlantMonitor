@@ -134,6 +134,125 @@ public sealed class LineLifecycleApiTests : IClassFixture<TestWebApplicationFact
         Assert.False(line.IsActive);
     }
 
+    [Fact]
+    public async Task CreateLine_WithUnsupportedManufacturer_ReturnsBadRequest()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var response = await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = 904,
+            lineName = "Unsupported Driver Line",
+            productId = "123-456-78-6",
+            recipeId = "RCP-904",
+            machineId = "MX-904",
+            operatorName = "operator-904",
+            plcIp = "192.168.10.94",
+            manufacturer = "Siemens",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateLine_WithDuplicateLineNumber_ReturnsConflict()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = 905,
+            lineName = "Primary Number Line",
+            productId = "123-456-78-5",
+            recipeId = "RCP-905",
+            machineId = "MX-905",
+            operatorName = "operator-905",
+            plcIp = "192.168.10.95",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = 906,
+            lineName = "Secondary Number Line",
+            productId = "123-456-78-4",
+            recipeId = "RCP-906",
+            machineId = "MX-906",
+            operatorName = "operator-906",
+            plcIp = "192.168.10.96",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        var updateResponse = await client.PutAsJsonAsync("/api/lines/906", new
+        {
+            lineNumber = 905,
+            lineName = "Secondary Number Line",
+            productId = "123-456-78-4",
+            recipeId = "RCP-906",
+            machineId = "MX-906",
+            operatorName = "operator-906",
+            plcIp = "192.168.10.96",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, updateResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateLine_WithDuplicatePlcConnection_ReturnsConflict()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var createFirst = await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = 907,
+            lineName = "Primary Connection Line",
+            productId = "123-456-78-3",
+            recipeId = "RCP-907",
+            machineId = "MX-907",
+            operatorName = "operator-907",
+            plcIp = "192.168.10.97",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        createFirst.EnsureSuccessStatusCode();
+
+        var createDuplicate = await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = 908,
+            lineName = "Duplicate Connection Line",
+            productId = "123-456-78-2",
+            recipeId = "RCP-908",
+            machineId = "MX-908",
+            operatorName = "operator-908",
+            plcIp = "192.168.10.97",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, createDuplicate.StatusCode);
+    }
+
     private static async Task LoginAsync(HttpClient client, string username, string password)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new

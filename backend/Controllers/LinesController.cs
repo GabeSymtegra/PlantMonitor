@@ -4,6 +4,7 @@ using backend.Models.Plc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
 
 namespace backend.Controllers;
 
@@ -35,14 +36,10 @@ public sealed class LinesController : ControllerBase
     [Authorize(Policy = "AdminOnly")]
     public ActionResult<LineConfigDto> CreateLine([FromBody] UpsertLineConfigRequestDto request)
     {
-        if (request.LineNumber <= 0)
+        var validationResult = ValidateRequest(request, null);
+        if (validationResult is not null)
         {
-            return BadRequestProblem("Line number must be greater than 0.", "invalid_line_number");
-        }
-
-        if (_dbContext.LineProtocolAssignments.Any(x => x.LineNumber == request.LineNumber))
-        {
-            return ConflictProblem("A line configuration already exists for that line number.", "line_number_conflict");
+            return validationResult;
         }
 
         var entity = new LineProtocolAssignmentEntity();
@@ -66,6 +63,12 @@ public sealed class LinesController : ControllerBase
         if (entity is null)
         {
             return NotFoundProblem("Line configuration not found.", "line_config_not_found");
+        }
+
+        var validationResult = ValidateRequest(request, lineId);
+        if (validationResult is not null)
+        {
+            return validationResult;
         }
 
         var wasActive = IsActiveState(entity.LineLifecycleState);
@@ -159,6 +162,91 @@ public sealed class LinesController : ControllerBase
     private static bool IsActiveState(string? lifecycleState)
     {
         return string.Equals(lifecycleState, LineLifecycleState.Active, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private ActionResult? ValidateRequest(UpsertLineConfigRequestDto request, int? currentLineId)
+    {
+        if (request.LineNumber <= 0)
+        {
+            return BadRequestProblem("Line number must be greater than 0.", "invalid_line_number");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.LineName))
+        {
+            return BadRequestProblem("Line name is required.", "missing_line_name");
+        }
+
+        if (!IsValidIpv4(request.PlcIp))
+        {
+            return BadRequestProblem("PLC IP must be a valid IPv4 address.", "invalid_plc_ip");
+        }
+
+        if (!string.Equals(request.Manufacturer?.Trim(), "AllenBradley", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequestProblem("Only AllenBradley is currently supported.", "unsupported_manufacturer");
+        }
+
+        if (request.PollIntervalMs is < 500 or > 60000)
+        {
+            return BadRequestProblem("Poll interval must be between 500 and 60000 milliseconds.", "invalid_poll_interval");
+        }
+
+        if (request.ProductId.Trim().Length is 0 or > 128)
+        {
+            return BadRequestProblem("Product must be between 1 and 128 characters.", "invalid_product_length");
+        }
+
+        if (request.RecipeId.Trim().Length is 0 or > 128)
+        {
+            return BadRequestProblem("Recipe ID must be between 1 and 128 characters.", "invalid_recipe_length");
+        }
+
+        if (request.MachineId.Trim().Length is 0 or > 128)
+        {
+            return BadRequestProblem("Machine ID must be between 1 and 128 characters.", "invalid_machine_length");
+        }
+
+        if (request.OperatorName.Trim().Length is 0 or > 128)
+        {
+            return BadRequestProblem("Operator must be between 1 and 128 characters.", "invalid_operator_length");
+        }
+
+        var lineNumberConflict = _dbContext.LineProtocolAssignments.Any(x =>
+            x.LineNumber == request.LineNumber
+            && (!currentLineId.HasValue || x.LineId != currentLineId.Value));
+
+        if (lineNumberConflict)
+        {
+            return ConflictProblem("A line configuration already exists for that line number.", "line_number_conflict");
+        }
+
+        var normalizedIp = request.PlcIp.Trim();
+        var duplicateConnectionConflict = _dbContext.LineProtocolAssignments.Any(x =>
+            x.PlcIp == normalizedIp
+            && x.Manufacturer.ToLower() == "allenbradley"
+            && (!currentLineId.HasValue || x.LineId != currentLineId.Value));
+
+        if (duplicateConnectionConflict)
+        {
+            return ConflictProblem("A line configuration with the same PLC connection already exists.", "duplicate_plc_connection");
+        }
+
+        return null;
+    }
+
+    private static bool IsValidIpv4(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (!IPAddress.TryParse(value.Trim(), out var address))
+        {
+            return false;
+        }
+
+        return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
     }
 
     private ActionResult BadRequestProblem(string detail, string code)
