@@ -486,7 +486,7 @@ export default function Administration() {
       if (result.isConnected) {
         setSuccess("PLC connection verified successfully.");
         await discoverTags(result.driver, form.plcIp.trim());
-        await handleAutoMapTagCatalog();
+        await handleAutoMapTagCatalog(result);
       } else {
         resetTagBrowser();
         setError(formatConnectionTaskTrace(result));
@@ -598,10 +598,12 @@ export default function Administration() {
     );
   }
 
-  async function handleAutoMapTagCatalog() {
+  async function handleAutoMapTagCatalog(connectedResult?: PlcConnectionResult) {
     setMappingStatus("");
 
-    if (!connectionResult?.isConnected) {
+    const source = connectedResult ?? connectionResult;
+
+    if (!source?.isConnected) {
       setMappingStatus("Run a successful PLC connection test before auto-map.");
       return;
     }
@@ -615,8 +617,8 @@ export default function Administration() {
       }
 
       const result = await autoMapTagCatalog({
-        driver: form.manufacturer,
-        ipAddress: form.plcIp.trim(),
+        driver: source.driver,
+        ipAddress: source.ipAddress,
       });
 
       setTagCatalog(buildCatalogFromSlots(slots, result.suggestedMappings));

@@ -21,7 +21,38 @@ vi.mock("../services/plcConnectionService", () => ({
 }));
 
 vi.mock("../services/plcTagBrowserService", () => ({
+  autoMapTagCatalog: vi.fn().mockResolvedValue({
+    driver: "AllenBradley",
+    scannedTagCount: 1,
+    suggestedMappings: [
+      {
+        logicalKey: "production_length",
+        displayName: "Production Length",
+        driver: "AllenBradley",
+        plcAddress: "Line.ProductionLength",
+        dataType: "real",
+        unit: "ft",
+        scale: 1,
+        description: "Length",
+        isEnabled: true,
+        sortOrder: 0,
+        readFrequencyMs: 1000,
+        isRequired: true,
+      },
+    ],
+    missingLogicalKeys: [],
+  }),
   browsePlcTags: vi.fn().mockResolvedValue([]),
+  getCommissioningReadiness: vi.fn(),
+  getLineTagCatalog: vi.fn().mockResolvedValue([]),
+  getTagSlots: vi.fn().mockResolvedValue([
+    {
+      logicalKey: "production_length",
+      displayName: "Production Length",
+      isRequired: true,
+      description: "Length",
+    },
+  ]),
   readPlcTag: vi.fn().mockResolvedValue({
     name: "Test_Motor_val",
     dataType: "int",
@@ -31,11 +62,17 @@ vi.mock("../services/plcTagBrowserService", () => ({
     canWrite: false,
     error: null,
   }),
+  replaceLineTagCatalog: vi.fn(),
 }));
 
 import Administration from "../pages/Administration";
 import { testPlcConnection } from "../services/plcConnectionService";
-import { browsePlcTags, readPlcTag } from "../services/plcTagBrowserService";
+import {
+  autoMapTagCatalog,
+  browsePlcTags,
+  getTagSlots,
+  readPlcTag,
+} from "../services/plcTagBrowserService";
 
 describe("Administration", () => {
   beforeEach(() => {
@@ -297,5 +334,61 @@ describe("Administration", () => {
 
     expect(screen.getByDisplayValue(/metadata\/diagnostic payload returned because a direct value read was not available/i)).toBeInTheDocument();
     expect(screen.getByText(/direct read for this discovered symbol returned errornotfound/i)).toBeInTheDocument();
+  });
+
+  it("auto-maps on first successful connection attempt and shows suggested assignments", async () => {
+    vi.mocked(browsePlcTags).mockResolvedValueOnce([
+      {
+        name: "Line.ProductionLength",
+        dataType: "real",
+        isFolder: false,
+        parentPath: "Line",
+        canRead: true,
+        canWrite: false,
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <Administration />
+      </MemoryRouter>
+    );
+
+    fireEvent.change(screen.getByLabelText(/line name/i), {
+      target: { value: "Main Extruder" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/plc ip address/i), {
+      target: { value: "192.168.1.105" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /test connection/i }));
+
+    await waitFor(() => {
+      expect(testPlcConnection).toHaveBeenCalledWith({
+        driver: "AllenBradley",
+        ipAddress: "192.168.1.105",
+      });
+    });
+
+    await waitFor(() => {
+      expect(browsePlcTags).toHaveBeenCalledWith({
+        driver: "AllenBradley",
+        ipAddress: "192.168.1.105",
+      });
+    });
+
+    await waitFor(() => {
+      expect(autoMapTagCatalog).toHaveBeenCalledWith({
+        driver: "AllenBradley",
+        ipAddress: "192.168.1.105",
+      });
+    });
+
+    expect(getTagSlots).toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getByText(/auto-map completed\. review the suggested assignments/i)).toBeInTheDocument();
+    });
   });
 });
