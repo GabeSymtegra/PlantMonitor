@@ -9,9 +9,9 @@ Primary operating model:
 - PLC telemetry ingestion through adapter services (mock now, real adapters next)
 
 ## Current Status
-- Branch: tagsort
-- Stage: Runtime integration, reporting, and maintainability cleanup
-- Focus: Live PLC-driven dashboard behavior, reporting history, offline handling, and codebase documentation
+- Branch: export
+- Stage: Runtime integration, local launch reliability, and maintainability cleanup
+- Focus: Live PLC-driven dashboard behavior, reporting history, offline handling, local dev startup, and codebase documentation
 
 ## Finalized Changes (Completed)
 
@@ -81,6 +81,17 @@ Primary operating model:
 - Fixed repeated stop-state persistence loops that were inserting duplicate completed-run records.
 - Changed disconnected PLC behavior so failed PLC polling marks the line `Offline` instead of generating simulated live statuses.
 - Updated the PLC failure path to emit runtime status transitions when moving into `Offline`.
+- Added persisted active runtime checkpoints so line state restores after restart instead of remaining memory-only.
+- Replaced synthetic runtime metadata with explicit line-configured `RecipeId`, `MachineId`, and `OperatorName` fields.
+- Fixed mode attribution in statistics so auto/manual intervals are credited from the sample mode instead of the previous cached mode.
+- Tightened lifecycle locking and checkpoint persistence in the runtime loop to reduce state races.
+
+### Local Launch and Live Validation
+- Fixed the frontend dev API path so `/api` and `/hubs` requests proxy to the backend during local development.
+- Fixed the PowerShell port cleanup helper so it can safely clear stale listeners before launching the stack.
+- Verified live browser login through the frontend origin using the built-in dev accounts.
+- Verified authenticated dashboard access through the frontend proxy after login.
+- Confirmed direct backend auth, frontend-proxied auth, and authenticated dashboard API access all return `200` in live checks.
 
 ### PLC State Mapping and Runtime Semantics
 - Implemented explicit machine-state decoding for live PLC values:
@@ -113,6 +124,7 @@ Primary operating model:
 - Added folder-level READMEs to the main backend, frontend, docs, and scripts directories so the code layout is easier to understand.
 - Added a user guide in docs/User-Guide.md and linked it from the root README.
 - Updated the root README to reflect the current architecture, runtime behavior, reports support, and documentation map.
+- Updated the developer log with the latest runtime persistence, frontend proxy, and live-verification work.
 
 ## Release Readiness Roadmap (Items 1-6)
 
@@ -139,6 +151,11 @@ Planned deliverables:
 Exit criteria:
 - One command boots local stack.
 - One command shuts down cleanly without lock artifacts.
+
+Status update:
+- `scripts/dev.ps1` now starts the frontend and backend for local development.
+- `scripts/cleanup-ports.ps1` was fixed to clear stale listeners correctly.
+- The browser-login flow was verified end-to-end after the proxy fix.
 
 ## 3) End-to-End UI Smoke Tests
 Objective:
@@ -189,6 +206,10 @@ Planned deliverables:
 Exit criteria:
 - Pre-release checklist completed and signed off.
 
+Status update:
+- The remediation checklist was updated with the latest fixed runtime, frontend, and documentation items.
+- Live validation evidence was added through direct backend, frontend-proxy, and browser checks.
+
 ## Deployment Readiness for Server + PLC Ethernet
 
 ### Target Installation Model
@@ -229,4 +250,4 @@ Immediate next coding slice:
 4. Continue replacing remaining outdated assumptions in docs and log files with current runtime behavior.
 
 ---
-Last updated: 2026-07-15
+Last updated: 2026-07-29
