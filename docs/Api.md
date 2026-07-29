@@ -345,10 +345,16 @@ Response 200:
 
 {
 	"lineId": 101,
-	"manufacturer": "AB",
+	"manufacturer": "AllenBradley",
 	"presetName": "BasicStatus",
 	"presetVersion": 1,
 	"pollIntervalMs": 1500,
+	"routePath": "1,0",
+	"processorType": "ControlLogix",
+	"connectionTimeoutMs": 3000,
+	"readTimeoutMs": 3000,
+	"retryCount": 1,
+	"retryDelayMs": 250,
 	"updatedAtUtc": "2026-07-02T15:30:00Z"
 }
 
@@ -363,10 +369,16 @@ PUT /api/admin/lines/{lineId}/protocol-assignment
 Request:
 
 {
-	"manufacturer": "AB",
+	"manufacturer": "AllenBradley",
 	"presetName": "BasicStatus",
 	"presetVersion": 1,
-	"pollIntervalMs": 1500
+	"pollIntervalMs": 1500,
+	"routePath": "1,0",
+	"processorType": "ControlLogix",
+	"connectionTimeoutMs": 3000,
+	"readTimeoutMs": 3000,
+	"retryCount": 1,
+	"retryDelayMs": 250
 }
 
 Response 200:

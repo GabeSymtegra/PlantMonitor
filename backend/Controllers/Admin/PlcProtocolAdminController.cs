@@ -166,7 +166,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return errorResult!;
         }
 
-        var tags = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Search, cancellationToken);
+        var tags = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Options, request.Search, cancellationToken);
         return Ok(tags);
     }
 
@@ -180,7 +180,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return errorResult!;
         }
 
-        var discovered = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), null, cancellationToken);
+        var discovered = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Options, null, cancellationToken);
         var readableLeafTags = discovered
             .Where(tag => !tag.IsFolder && tag.CanRead != false)
             .ToList();
@@ -240,7 +240,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return BadRequestProblem("Tag name is required.", "missing_tag_name");
         }
 
-        var result = await driver!.ReadTagAsync(request.IpAddress.Trim(), request.TagName.Trim(), cancellationToken);
+        var result = await driver!.ReadTagAsync(request.IpAddress.Trim(), request.Options, request.TagName.Trim(), cancellationToken);
         return Ok(result);
     }
 
@@ -259,7 +259,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return BadRequestProblem("At least one tag name is required.", "missing_tag_names");
         }
 
-        var result = await driver!.ReadTagsAsync(request.IpAddress.Trim(), request.TagNames, cancellationToken);
+        var result = await driver!.ReadTagsAsync(request.IpAddress.Trim(), request.Options, request.TagNames, cancellationToken);
         return Ok(result);
     }
 
@@ -448,6 +448,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             {
                 Driver = line.Manufacturer,
                 IpAddress = line.PlcIp.Trim(),
+                Options = BuildConnectionOptions(assignment),
             }, cancellationToken);
 
             if (!connectionResult.IsConnected)
@@ -464,7 +465,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var readResults = await driver.ReadTagsAsync(line.PlcIp.Trim(), requiredAddresses, cancellationToken);
+            var readResults = await driver.ReadTagsAsync(line.PlcIp.Trim(), BuildConnectionOptions(assignment), requiredAddresses, cancellationToken);
             var readMap = readResults
                 .Where(x => !string.IsNullOrWhiteSpace(x.Name))
                 .ToDictionary(x => x.Name.Trim(), x => x, StringComparer.OrdinalIgnoreCase);
@@ -529,6 +530,19 @@ public sealed class PlcProtocolAdminController : ControllerBase
     {
         return string.Equals(manufacturer?.Trim(), "AllenBradley", StringComparison.OrdinalIgnoreCase)
             || string.Equals(manufacturer?.Trim(), "AB", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static PlcConnectionOptionsDto BuildConnectionOptions(LineProtocolAssignmentDto assignment)
+    {
+        return new PlcConnectionOptionsDto
+        {
+            RoutePath = string.IsNullOrWhiteSpace(assignment.RoutePath) ? "1,0" : assignment.RoutePath,
+            ProcessorType = string.IsNullOrWhiteSpace(assignment.ProcessorType) ? "ControlLogix" : assignment.ProcessorType,
+            ConnectionTimeoutMs = assignment.ConnectionTimeoutMs <= 0 ? 3000 : assignment.ConnectionTimeoutMs,
+            ReadTimeoutMs = assignment.ReadTimeoutMs <= 0 ? 3000 : assignment.ReadTimeoutMs,
+            RetryCount = assignment.RetryCount < 0 ? 0 : assignment.RetryCount,
+            RetryDelayMs = assignment.RetryDelayMs < 0 ? 0 : assignment.RetryDelayMs,
+        };
     }
 
     private static bool LooksLikeStructuredOrRawPayload(string? value)

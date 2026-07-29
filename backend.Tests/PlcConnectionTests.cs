@@ -88,7 +88,7 @@ public sealed class PlcConnectionServiceTests
 
         public Func<PlcConnectionRequest, PlcConnectionResult>? ResultFactory { get; init; }
 
-        public Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, CancellationToken cancellationToken = default)
+        public Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, PlcConnectionOptionsDto? options, CancellationToken cancellationToken = default)
         {
             CallCount++;
 
@@ -109,12 +109,39 @@ public sealed class PlcConnectionServiceTests
             return Task.FromResult(result);
         }
 
+        public Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, CancellationToken cancellationToken = default)
+        {
+            return TestConnectionAsync(ipAddress, null, cancellationToken);
+        }
+
+        public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(
+            string ipAddress,
+            PlcConnectionOptionsDto? options,
+            string? search = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>([]);
+        }
+
         public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(
             string ipAddress,
             string? search = null,
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>([]);
+        }
+
+        public Task<PlcTagReadResultDto> ReadTagAsync(
+            string ipAddress,
+            PlcConnectionOptionsDto? options,
+            string tagName,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new PlcTagReadResultDto
+            {
+                Name = tagName,
+                LastReadUtc = DateTime.UtcNow,
+            });
         }
 
         public Task<PlcTagReadResultDto> ReadTagAsync(
@@ -127,6 +154,15 @@ public sealed class PlcConnectionServiceTests
                 Name = tagName,
                 LastReadUtc = DateTime.UtcNow,
             });
+        }
+
+        public Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(
+            string ipAddress,
+            PlcConnectionOptionsDto? options,
+            IReadOnlyCollection<string> tagNames,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyCollection<PlcTagReadResultDto>>([]);
         }
 
         public Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(
@@ -426,6 +462,64 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
         Assert.Equal("Active", payload?["lineLifecycleState"]?.GetValue<string>());
     }
 
+    [Fact]
+    public async Task UpsertProtocolAssignment_WithConnectionSettings_PersistsOptions()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
+        {
+            manufacturer = "AllenBradley",
+            presetName = "BasicStatus",
+            presetVersion = 1,
+            pollIntervalMs = 1750,
+            routePath = "1,2",
+            processorType = "CompactLogix",
+            connectionTimeoutMs = 4500,
+            readTimeoutMs = 4800,
+            retryCount = 2,
+            retryDelayMs = 400,
+        });
+
+        upsertResponse.EnsureSuccessStatusCode();
+
+        var getResponse = await client.GetAsync("/api/admin/lines/101/protocol-assignment");
+        getResponse.EnsureSuccessStatusCode();
+
+        var payload = await getResponse.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("1,2", payload?["routePath"]?.GetValue<string>());
+        Assert.Equal("CompactLogix", payload?["processorType"]?.GetValue<string>());
+        Assert.Equal(4500, payload?["connectionTimeoutMs"]?.GetValue<int>());
+        Assert.Equal(4800, payload?["readTimeoutMs"]?.GetValue<int>());
+        Assert.Equal(2, payload?["retryCount"]?.GetValue<int>());
+        Assert.Equal(400, payload?["retryDelayMs"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task UpsertProtocolAssignment_WithInvalidRoutePath_ReturnsBadRequest()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var response = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
+        {
+            manufacturer = "AllenBradley",
+            presetName = "BasicStatus",
+            presetVersion = 1,
+            pollIntervalMs = 1500,
+            routePath = "1/a",
+            processorType = "ControlLogix",
+            connectionTimeoutMs = 3000,
+            readTimeoutMs = 3000,
+            retryCount = 1,
+            retryDelayMs = 250,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private static object[] BuildRequiredCatalog(string productionLengthDataType)
     {
         return
@@ -538,7 +632,7 @@ public sealed class PlcConnectionApiFactory : TestWebApplicationFactory
     {
         public string DriverName => "AllenBradley";
 
-        public Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, CancellationToken cancellationToken = default)
+        public Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, PlcConnectionOptionsDto? options, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new PlcConnectionResult
             {
@@ -552,7 +646,12 @@ public sealed class PlcConnectionApiFactory : TestWebApplicationFactory
             });
         }
 
-        public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(string ipAddress, string? search = null, CancellationToken cancellationToken = default)
+        public Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, CancellationToken cancellationToken = default)
+        {
+            return TestConnectionAsync(ipAddress, null, cancellationToken);
+        }
+
+        public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(string ipAddress, PlcConnectionOptionsDto? options, string? search = null, CancellationToken cancellationToken = default)
         {
             return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>(
             [
@@ -568,16 +667,31 @@ public sealed class PlcConnectionApiFactory : TestWebApplicationFactory
             ]);
         }
 
-        public Task<PlcTagReadResultDto> ReadTagAsync(string ipAddress, string tagName, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(string ipAddress, string? search = null, CancellationToken cancellationToken = default)
+        {
+            return BrowseTagsAsync(ipAddress, null, search, cancellationToken);
+        }
+
+        public Task<PlcTagReadResultDto> ReadTagAsync(string ipAddress, PlcConnectionOptionsDto? options, string tagName, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(BuildReadResult(tagName));
         }
 
-        public Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(string ipAddress, IReadOnlyCollection<string> tagNames, CancellationToken cancellationToken = default)
+        public Task<PlcTagReadResultDto> ReadTagAsync(string ipAddress, string tagName, CancellationToken cancellationToken = default)
+        {
+            return ReadTagAsync(ipAddress, null, tagName, cancellationToken);
+        }
+
+        public Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(string ipAddress, PlcConnectionOptionsDto? options, IReadOnlyCollection<string> tagNames, CancellationToken cancellationToken = default)
         {
             var results = tagNames.Select(BuildReadResult).ToArray();
 
             return Task.FromResult<IReadOnlyCollection<PlcTagReadResultDto>>(results);
+        }
+
+        public Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(string ipAddress, IReadOnlyCollection<string> tagNames, CancellationToken cancellationToken = default)
+        {
+            return ReadTagsAsync(ipAddress, null, tagNames, cancellationToken);
         }
 
         private static PlcTagReadResultDto BuildReadResult(string tagName)

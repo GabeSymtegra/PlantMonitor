@@ -671,6 +671,12 @@ static void EnsureLegacyRuntimeSchema(PlantMonitorDbContext dbContext)
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "LineName", "TEXT NOT NULL DEFAULT ''");
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "ProductId", "TEXT NOT NULL DEFAULT ''");
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "PlcIp", "TEXT NOT NULL DEFAULT ''");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "RoutePath", "TEXT NOT NULL DEFAULT '1,0'");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "ProcessorType", "TEXT NOT NULL DEFAULT 'ControlLogix'");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "ConnectionTimeoutMs", "INTEGER NOT NULL DEFAULT 3000");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "ReadTimeoutMs", "INTEGER NOT NULL DEFAULT 3000");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "RetryCount", "INTEGER NOT NULL DEFAULT 1");
+    EnsureSqliteColumn(dbContext, "line_protocol_assignments", "RetryDelayMs", "INTEGER NOT NULL DEFAULT 250");
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "IsActive", "INTEGER NOT NULL DEFAULT 1");
     EnsureSqliteColumn(dbContext, "line_protocol_assignments", "LineLifecycleState", "TEXT NOT NULL DEFAULT 'Draft'");
 
@@ -678,6 +684,12 @@ static void EnsureLegacyRuntimeSchema(PlantMonitorDbContext dbContext)
 UPDATE line_protocol_assignments
 SET LineNumber = CASE WHEN LineNumber = 0 THEN LineId ELSE LineNumber END,
     LineName = CASE WHEN trim(coalesce(LineName, '')) = '' THEN 'Line ' || LineId ELSE LineName END,
+    RoutePath = CASE WHEN trim(coalesce(RoutePath, '')) = '' THEN '1,0' ELSE RoutePath END,
+    ProcessorType = CASE WHEN trim(coalesce(ProcessorType, '')) = '' THEN 'ControlLogix' ELSE ProcessorType END,
+    ConnectionTimeoutMs = CASE WHEN ConnectionTimeoutMs < 500 THEN 3000 ELSE ConnectionTimeoutMs END,
+    ReadTimeoutMs = CASE WHEN ReadTimeoutMs < 500 THEN 3000 ELSE ReadTimeoutMs END,
+    RetryCount = CASE WHEN RetryCount < 0 THEN 0 ELSE RetryCount END,
+    RetryDelayMs = CASE WHEN RetryDelayMs < 0 THEN 0 ELSE RetryDelayMs END,
     LineLifecycleState = CASE
         WHEN trim(coalesce(LineLifecycleState, '')) = '' AND IsActive = 1 THEN 'Active'
         WHEN trim(coalesce(LineLifecycleState, '')) = '' AND IsActive = 0 THEN 'Disabled'

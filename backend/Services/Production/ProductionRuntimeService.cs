@@ -280,6 +280,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                         plcIp: assignment.PlcIp,
                         manufacturer: assignment.Manufacturer,
                         pollIntervalMs: assignment.PollIntervalMs,
+                        connectionOptions: BuildConnectionOptions(assignment),
                         metadata: BuildRunMetadata(
                             assignment,
                             assignment.ProductId,
@@ -298,6 +299,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                 state.PlcIp = assignment.PlcIp;
                 state.Manufacturer = assignment.Manufacturer;
                 state.PollIntervalMs = Math.Clamp(assignment.PollIntervalMs, 500, 60000);
+                state.ConnectionOptions = BuildConnectionOptions(assignment);
                 state.IsEnabled = true;
 
                 var productId = string.IsNullOrWhiteSpace(state.CurrentProductId)
@@ -355,7 +357,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             return false;
         }
 
-        var readResults = await driver.ReadTagsAsync(state.PlcIp, addresses, cancellationToken);
+        var readResults = await driver.ReadTagsAsync(state.PlcIp, state.ConnectionOptions, addresses, cancellationToken);
         var readMap = readResults
             .Where(x => !string.IsNullOrWhiteSpace(x.Name))
             .ToDictionary(x => x.Name.Trim(), x => x, StringComparer.OrdinalIgnoreCase);
@@ -502,6 +504,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
                 plcIp: line.PlcIp,
                 manufacturer: line.Manufacturer,
                 pollIntervalMs: line.PollIntervalMs,
+                connectionOptions: BuildConnectionOptions(line),
                 metadata: BuildRunMetadata(line, line.ProductId, now));
 
             if (persistedRuntimeStates.TryGetValue(line.LineId, out var checkpoint))
@@ -1211,6 +1214,19 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         };
     }
 
+    private static PlcConnectionOptionsDto BuildConnectionOptions(LineProtocolAssignmentEntity assignment)
+    {
+        return new PlcConnectionOptionsDto
+        {
+            RoutePath = string.IsNullOrWhiteSpace(assignment.RoutePath) ? "1,0" : assignment.RoutePath,
+            ProcessorType = string.IsNullOrWhiteSpace(assignment.ProcessorType) ? "ControlLogix" : assignment.ProcessorType,
+            ConnectionTimeoutMs = assignment.ConnectionTimeoutMs <= 0 ? 3000 : assignment.ConnectionTimeoutMs,
+            ReadTimeoutMs = assignment.ReadTimeoutMs <= 0 ? 3000 : assignment.ReadTimeoutMs,
+            RetryCount = assignment.RetryCount < 0 ? 0 : assignment.RetryCount,
+            RetryDelayMs = assignment.RetryDelayMs < 0 ? 0 : assignment.RetryDelayMs,
+        };
+    }
+
     // Mutable in-memory state for a single configured line.
     private sealed class LineRuntimeState
     {
@@ -1222,6 +1238,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         public string PlcIp { get; set; }
         public string Manufacturer { get; set; }
         public int PollIntervalMs { get; set; }
+        public PlcConnectionOptionsDto ConnectionOptions { get; set; }
         public DateTime NextPollAtUtc { get; private set; }
         public bool IsEnabled { get; set; } = true;
         public string Status { get; set; } = "Offline";
@@ -1243,6 +1260,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             string plcIp,
             string manufacturer,
             int pollIntervalMs,
+            PlcConnectionOptionsDto connectionOptions,
             ProductionRunMetadata metadata)
         {
             LineId = lineId;
@@ -1251,6 +1269,7 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
             PlcIp = plcIp;
             Manufacturer = manufacturer;
             PollIntervalMs = Math.Clamp(pollIntervalMs, 500, 60000);
+            ConnectionOptions = connectionOptions;
             Metadata = metadata;
             CurrentProductId = metadata.ProductId;
 

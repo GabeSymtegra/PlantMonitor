@@ -14,6 +14,12 @@ public sealed class LineProtocolAssignmentEntity
     public string PresetName { get; set; } = string.Empty;
     public int PresetVersion { get; set; }
     public int PollIntervalMs { get; set; }
+    public string RoutePath { get; set; } = "1,0";
+    public string ProcessorType { get; set; } = "ControlLogix";
+    public int ConnectionTimeoutMs { get; set; } = 3000;
+    public int ReadTimeoutMs { get; set; } = 3000;
+    public int RetryCount { get; set; } = 1;
+    public int RetryDelayMs { get; set; } = 250;
     public bool IsActive { get; set; }
     public string LineLifecycleState { get; set; } = Plc.LineLifecycleState.Draft;
     public DateTime UpdatedAtUtc { get; set; }

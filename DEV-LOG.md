@@ -42,6 +42,7 @@ Primary operating model:
 - Fixed frontend API success handling for empty responses (`204`, empty body, and `Content-Length: 0`) so successful no-content auth flows no longer throw JSON parse errors; updated change-password to `apiPost<void>()` and validated redirect behavior with new frontend tests.
 - Fixed admin auto-map first-attempt behavior by passing the fresh successful PLC connection result directly into auto-map/discovery flow instead of relying on same-tick React state, and added frontend test coverage for connection -> discovery -> auto-map orchestration.
 - Replaced line activation semantics with explicit lifecycle states (`Draft`, `Commissioning`, `Active`, `CommissioningFailed`, `Disabled`) including migration support, runtime polling restricted to `Active`, admin activation endpoint (`POST /api/admin/lines/{lineId}/commissioning-activate`), and integration tests validating draft default, reset-to-draft on active connection changes, and failed activation conflict behavior.
+- Added configurable per-line Allen-Bradley connection settings (`routePath`, `processorType`, connection/read timeout, retry count, retry delay, poll interval) with persistence, migration support, runtime usage, commissioning/read/browse/auto-map request wiring, and admin UI controls.
 
 ## Production Readiness Checklist Snapshot (2026-07-29)
 - Done: frontend publishing now builds and copies `frontend/dist` into backend publish output.

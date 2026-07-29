@@ -3,6 +3,7 @@ using backend.DTOs.Plc;
 using backend.Interfaces.Plc;
 using backend.Models.Plc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 
 namespace backend.Services.Plc;
 
@@ -24,6 +25,13 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         "dint",
         "real",
         "string",
+    ];
+
+    private static readonly HashSet<string> AllowedProcessorTypes =
+    [
+        "controllogix",
+        "compactlogix",
+        "micro800",
     ];
 
     private static readonly IReadOnlyList<TagSlotDefinitionDto> RequiredTagSlots =
@@ -300,6 +308,56 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             return false;
         }
 
+        if (string.IsNullOrWhiteSpace(request.RoutePath))
+        {
+            error = "Route path is required.";
+            return false;
+        }
+
+        if (request.RoutePath.Length > 64)
+        {
+            error = "Route path must be 64 characters or fewer.";
+            return false;
+        }
+
+        var routePath = request.RoutePath.Trim();
+        if (!Regex.IsMatch(routePath, "^\\d+(,\\d+)*$"))
+        {
+            error = "Route path must be a comma-separated list of integers (example: 1,0).";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ProcessorType)
+            || !AllowedProcessorTypes.Contains(request.ProcessorType.Trim().ToLowerInvariant()))
+        {
+            error = "Processor type must be one of: ControlLogix, CompactLogix, Micro800.";
+            return false;
+        }
+
+        if (request.ConnectionTimeoutMs is < 500 or > 30000)
+        {
+            error = "Connection timeout must be between 500 and 30000 milliseconds.";
+            return false;
+        }
+
+        if (request.ReadTimeoutMs is < 500 or > 30000)
+        {
+            error = "Read timeout must be between 500 and 30000 milliseconds.";
+            return false;
+        }
+
+        if (request.RetryCount is < 0 or > 5)
+        {
+            error = "Retry count must be between 0 and 5.";
+            return false;
+        }
+
+        if (request.RetryDelayMs is < 0 or > 10000)
+        {
+            error = "Retry delay must be between 0 and 10000 milliseconds.";
+            return false;
+        }
+
         var assignment = _dbContext.LineProtocolAssignments.SingleOrDefault(a => a.LineId == lineId);
 
         if (assignment is null)
@@ -317,6 +375,12 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         assignment.PresetName = request.PresetName.Trim();
         assignment.PresetVersion = request.PresetVersion;
         assignment.PollIntervalMs = request.PollIntervalMs;
+        assignment.RoutePath = routePath;
+        assignment.ProcessorType = NormalizeProcessorType(request.ProcessorType);
+        assignment.ConnectionTimeoutMs = request.ConnectionTimeoutMs;
+        assignment.ReadTimeoutMs = request.ReadTimeoutMs;
+        assignment.RetryCount = request.RetryCount;
+        assignment.RetryDelayMs = request.RetryDelayMs;
         assignment.UpdatedAtUtc = DateTime.UtcNow;
 
         _dbContext.SaveChanges();
@@ -550,7 +614,24 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             PresetName = assignment.PresetName,
             PresetVersion = assignment.PresetVersion,
             PollIntervalMs = assignment.PollIntervalMs,
+            RoutePath = string.IsNullOrWhiteSpace(assignment.RoutePath) ? "1,0" : assignment.RoutePath,
+            ProcessorType = NormalizeProcessorType(assignment.ProcessorType),
+            ConnectionTimeoutMs = assignment.ConnectionTimeoutMs <= 0 ? 3000 : assignment.ConnectionTimeoutMs,
+            ReadTimeoutMs = assignment.ReadTimeoutMs <= 0 ? 3000 : assignment.ReadTimeoutMs,
+            RetryCount = assignment.RetryCount < 0 ? 0 : assignment.RetryCount,
+            RetryDelayMs = assignment.RetryDelayMs < 0 ? 0 : assignment.RetryDelayMs,
             UpdatedAtUtc = assignment.UpdatedAtUtc,
+        };
+    }
+
+    private static string NormalizeProcessorType(string? processorType)
+    {
+        var normalized = processorType?.Trim().ToLowerInvariant() ?? "controllogix";
+        return normalized switch
+        {
+            "compactlogix" => "CompactLogix",
+            "micro800" => "Micro800",
+            _ => "ControlLogix",
         };
     }
 

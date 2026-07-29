@@ -28,7 +28,7 @@ public sealed class PlcConnectionService : IPlcConnectionService
             return CreateFailure(request, InvalidIpMessage);
         }
 
-        return await driver!.TestConnectionAsync(request.IpAddress.Trim(), cancellationToken);
+        return await driver!.TestConnectionAsync(request.IpAddress.Trim(), request.Options, cancellationToken);
     }
 
     public bool TryResolveDriver(string? driverName, out IPlcDriver? driver, out string? errorMessage)

@@ -1,9 +1,10 @@
 import { apiGet, apiPost, apiPut } from "./api/client";
-import type { PlcDriver } from "./plcConnectionService";
+import type { PlcConnectionOptions, PlcDriver } from "./plcConnectionService";
 
 export interface PlcTagBrowseRequest {
   driver: PlcDriver;
   ipAddress: string;
+  options?: PlcConnectionOptions;
   search?: string;
 }
 
@@ -19,7 +20,15 @@ export interface PlcTagBrowseItem {
 export interface PlcTagReadRequest {
   driver: PlcDriver;
   ipAddress: string;
+  options?: PlcConnectionOptions;
   tagName: string;
+}
+
+export interface PlcTagReadManyRequest {
+  driver: PlcDriver;
+  ipAddress: string;
+  options?: PlcConnectionOptions;
+  tagNames: string[];
 }
 
 export interface PlcTagReadResult {
@@ -57,6 +66,35 @@ export interface LineTagCatalogEntry {
 export interface AutoMapTagCatalogRequest {
   driver: PlcDriver;
   ipAddress: string;
+  options?: PlcConnectionOptions;
+}
+
+export interface LineProtocolAssignment {
+  lineId: number;
+  manufacturer: PlcDriver;
+  presetName: string;
+  presetVersion: number;
+  pollIntervalMs: number;
+  routePath: string;
+  processorType: "ControlLogix" | "CompactLogix" | "Micro800";
+  connectionTimeoutMs: number;
+  readTimeoutMs: number;
+  retryCount: number;
+  retryDelayMs: number;
+  updatedAtUtc: string;
+}
+
+export interface UpdateLineProtocolAssignmentRequest {
+  manufacturer: PlcDriver;
+  presetName: string;
+  presetVersion: number;
+  pollIntervalMs: number;
+  routePath: string;
+  processorType: "ControlLogix" | "CompactLogix" | "Micro800";
+  connectionTimeoutMs: number;
+  readTimeoutMs: number;
+  retryCount: number;
+  retryDelayMs: number;
 }
 
 export interface AutoMapTagCatalogResult {
@@ -143,4 +181,20 @@ export async function activateCommissionedLine(
   lineId: number
 ): Promise<CommissioningActivateResult> {
   return apiPost<CommissioningActivateResult, object>(`/admin/lines/${lineId}/commissioning-activate`, {});
+}
+
+export async function getLineProtocolAssignment(
+  lineId: number
+): Promise<LineProtocolAssignment> {
+  return apiGet<LineProtocolAssignment>(`/admin/lines/${lineId}/protocol-assignment`);
+}
+
+export async function upsertLineProtocolAssignment(
+  lineId: number,
+  request: UpdateLineProtocolAssignmentRequest
+): Promise<LineProtocolAssignment> {
+  return apiPut<LineProtocolAssignment, UpdateLineProtocolAssignmentRequest>(
+    `/admin/lines/${lineId}/protocol-assignment`,
+    request
+  );
 }

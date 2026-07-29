@@ -1,5 +1,6 @@
 using backend.DTOs.Plc;
 using backend.Interfaces.Plc;
+using System.Text.RegularExpressions;
 
 namespace backend.Services.Plc;
 
@@ -21,6 +22,13 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
         "dint",
         "real",
         "string",
+    ];
+
+    private static readonly HashSet<string> AllowedProcessorTypes =
+    [
+        "controllogix",
+        "compactlogix",
+        "micro800",
     ];
 
     private static readonly IReadOnlyList<TagSlotDefinitionDto> RequiredTagSlots =
@@ -222,6 +230,56 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
             return false;
         }
 
+        if (string.IsNullOrWhiteSpace(request.RoutePath))
+        {
+            error = "Route path is required.";
+            return false;
+        }
+
+        if (request.RoutePath.Length > 64)
+        {
+            error = "Route path must be 64 characters or fewer.";
+            return false;
+        }
+
+        var routePath = request.RoutePath.Trim();
+        if (!Regex.IsMatch(routePath, "^\\d+(,\\d+)*$"))
+        {
+            error = "Route path must be a comma-separated list of integers (example: 1,0).";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ProcessorType)
+            || !AllowedProcessorTypes.Contains(request.ProcessorType.Trim().ToLowerInvariant()))
+        {
+            error = "Processor type must be one of: ControlLogix, CompactLogix, Micro800.";
+            return false;
+        }
+
+        if (request.ConnectionTimeoutMs is < 500 or > 30000)
+        {
+            error = "Connection timeout must be between 500 and 30000 milliseconds.";
+            return false;
+        }
+
+        if (request.ReadTimeoutMs is < 500 or > 30000)
+        {
+            error = "Read timeout must be between 500 and 30000 milliseconds.";
+            return false;
+        }
+
+        if (request.RetryCount is < 0 or > 5)
+        {
+            error = "Retry count must be between 0 and 5.";
+            return false;
+        }
+
+        if (request.RetryDelayMs is < 0 or > 10000)
+        {
+            error = "Retry delay must be between 0 and 10000 milliseconds.";
+            return false;
+        }
+
         lock (_sync)
         {
             _assignments[lineId] = new LineProtocolAssignmentDto
@@ -231,6 +289,12 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
                 PresetName = preset.PresetName,
                 PresetVersion = preset.PresetVersion,
                 PollIntervalMs = request.PollIntervalMs,
+                RoutePath = routePath,
+                ProcessorType = NormalizeProcessorType(request.ProcessorType),
+                ConnectionTimeoutMs = request.ConnectionTimeoutMs,
+                ReadTimeoutMs = request.ReadTimeoutMs,
+                RetryCount = request.RetryCount,
+                RetryDelayMs = request.RetryDelayMs,
                 UpdatedAtUtc = DateTime.UtcNow,
             };
         }
@@ -437,6 +501,17 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
         return manufacturer.Trim().Equals("AB", StringComparison.OrdinalIgnoreCase)
             ? "AllenBradley"
             : manufacturer.Trim();
+    }
+
+    private static string NormalizeProcessorType(string? processorType)
+    {
+        var normalized = processorType?.Trim().ToLowerInvariant() ?? "controllogix";
+        return normalized switch
+        {
+            "compactlogix" => "CompactLogix",
+            "micro800" => "Micro800",
+            _ => "ControlLogix",
+        };
     }
 
     private static EffectiveTagMappingDto CloneTag(EffectiveTagMappingDto source)

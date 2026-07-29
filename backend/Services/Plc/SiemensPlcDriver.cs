@@ -20,6 +20,11 @@ public sealed class SiemensPlcDriver : IPlcDriver
 
     public string DriverName => "Siemens";
 
+    public Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, PlcConnectionOptionsDto? options, CancellationToken cancellationToken = default)
+    {
+        return TestConnectionAsync(ipAddress, cancellationToken);
+    }
+
     public async Task<PlcConnectionResult> TestConnectionAsync(string ipAddress, CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask;
@@ -112,12 +117,30 @@ public sealed class SiemensPlcDriver : IPlcDriver
 
     public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(
         string ipAddress,
+        PlcConnectionOptionsDto? options,
+        string? search = null,
+        CancellationToken cancellationToken = default)
+    {
+        return BrowseTagsAsync(ipAddress, search, cancellationToken);
+    }
+
+    public Task<IReadOnlyCollection<PlcTagBrowseItemDto>> BrowseTagsAsync(
+        string ipAddress,
         string? search = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         return Task.FromResult<IReadOnlyCollection<PlcTagBrowseItemDto>>([]);
+    }
+
+    public Task<PlcTagReadResultDto> ReadTagAsync(
+        string ipAddress,
+        PlcConnectionOptionsDto? options,
+        string tagName,
+        CancellationToken cancellationToken = default)
+    {
+        return ReadTagAsync(ipAddress, tagName, cancellationToken);
     }
 
     public Task<PlcTagReadResultDto> ReadTagAsync(
@@ -134,6 +157,15 @@ public sealed class SiemensPlcDriver : IPlcDriver
             CanWrite = false,
             Error = "Siemens monitoring is not supported in this build.",
         });
+    }
+
+    public async Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(
+        string ipAddress,
+        PlcConnectionOptionsDto? options,
+        IReadOnlyCollection<string> tagNames,
+        CancellationToken cancellationToken = default)
+    {
+        return await ReadTagsAsync(ipAddress, tagNames, cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<PlcTagReadResultDto>> ReadTagsAsync(

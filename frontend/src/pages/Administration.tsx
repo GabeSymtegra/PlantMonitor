@@ -26,17 +26,20 @@ import {
 } from "../services/dashboardService";
 import {
   testPlcConnection,
+  type PlcConnectionOptions,
   type PlcConnectionResult,
 } from "../services/plcConnectionService";
 import {
   activateCommissionedLine,
   autoMapTagCatalog,
   getCommissioningReadiness,
+  getLineProtocolAssignment,
   browsePlcTags,
   getLineTagCatalog,
   getTagSlots,
   readPlcTag,
   replaceLineTagCatalog,
+  upsertLineProtocolAssignment,
   type LineTagCatalogEntry,
   type PlcTagBrowseItem,
   type PlcTagReadResult,
@@ -62,6 +65,16 @@ type LineConfigForm = {
   lineLifecycleState: LineLifecycleState;
 };
 
+type LinePlcSettingsForm = {
+  pollIntervalMs: number;
+  routePath: string;
+  processorType: "ControlLogix" | "CompactLogix" | "Micro800";
+  connectionTimeoutMs: number;
+  readTimeoutMs: number;
+  retryCount: number;
+  retryDelayMs: number;
+};
+
 const emptyLineForm: LineConfigForm = {
   lineNumber: 1,
   lineName: "",
@@ -72,6 +85,16 @@ const emptyLineForm: LineConfigForm = {
   plcIp: "",
   manufacturer: "AllenBradley",
   lineLifecycleState: "Draft",
+};
+
+const defaultPlcSettings: LinePlcSettingsForm = {
+  pollIntervalMs: 2000,
+  routePath: "1,0",
+  processorType: "ControlLogix",
+  connectionTimeoutMs: 3000,
+  readTimeoutMs: 3000,
+  retryCount: 1,
+  retryDelayMs: 250,
 };
 
 const productSerialPattern = /^\d{3}-\d{3}-\d{2}-\d{1}$/;
@@ -175,6 +198,7 @@ export default function Administration() {
   const [activatingLine, setActivatingLine] = useState(false);
   const [commissioningStatus, setCommissioningStatus] = useState("");
   const [commissioningReady, setCommissioningReady] = useState<boolean | null>(null);
+  const [plcSettings, setPlcSettings] = useState<LinePlcSettingsForm>(defaultPlcSettings);
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.lineLifecycleState === "Active"),
@@ -203,6 +227,27 @@ export default function Administration() {
   }, [discoveredTags, tagSearch]);
 
   const hasDiscoveredTags = discoveredTags.length > 0;
+
+  function toConnectionOptions(settings: LinePlcSettingsForm): PlcConnectionOptions {
+    return {
+      routePath: settings.routePath.trim() || "1,0",
+      processorType: settings.processorType,
+      connectionTimeoutMs: Math.max(500, settings.connectionTimeoutMs),
+      readTimeoutMs: Math.max(500, settings.readTimeoutMs),
+      retryCount: Math.max(0, settings.retryCount),
+      retryDelayMs: Math.max(0, settings.retryDelayMs),
+    };
+  }
+
+  function updatePlcSetting<K extends keyof LinePlcSettingsForm>(
+    key: K,
+    value: LinePlcSettingsForm[K]
+  ) {
+    setPlcSettings((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
+  }
 
   // Initial data for the page comes from line configuration and slot metadata.
   useEffect(() => {
@@ -261,14 +306,33 @@ export default function Administration() {
     }
   }, [buildCatalogFromSlots, tagSlots]);
 
+  const loadProtocolAssignment = useCallback(async (lineId: number) => {
+    try {
+      const assignment = await getLineProtocolAssignment(lineId);
+      setPlcSettings({
+        pollIntervalMs: assignment.pollIntervalMs,
+        routePath: assignment.routePath,
+        processorType: assignment.processorType,
+        connectionTimeoutMs: assignment.connectionTimeoutMs,
+        readTimeoutMs: assignment.readTimeoutMs,
+        retryCount: assignment.retryCount,
+        retryDelayMs: assignment.retryDelayMs,
+      });
+    } catch {
+      setPlcSettings(defaultPlcSettings);
+    }
+  }, []);
+
   useEffect(() => {
     if (selectedLineId === "new") {
       setTagCatalog([]);
+      setPlcSettings(defaultPlcSettings);
       return;
     }
 
     void loadLineTagCatalog(selectedLineId);
-  }, [loadLineTagCatalog, selectedLineId]);
+    void loadProtocolAssignment(selectedLineId);
+  }, [loadLineTagCatalog, loadProtocolAssignment, selectedLineId]);
 
   function resetTagBrowser() {
     setBrowsingTags(false);
@@ -291,6 +355,7 @@ export default function Administration() {
 
     if (value === "new") {
       setForm(emptyLineForm);
+      setPlcSettings(defaultPlcSettings);
       return;
     }
 
@@ -440,6 +505,25 @@ export default function Administration() {
     const refreshed = await getAllLines();
     setLines(refreshed);
 
+    const assignmentLineId = selectedLineId === "new"
+      ? refreshed[refreshed.length - 1]?.id
+      : selectedLineId;
+
+    if (assignmentLineId) {
+      await upsertLineProtocolAssignment(assignmentLineId, {
+        manufacturer: form.manufacturer,
+        presetName: "BasicStatus",
+        presetVersion: 1,
+        pollIntervalMs: plcSettings.pollIntervalMs,
+        routePath: plcSettings.routePath.trim() || "1,0",
+        processorType: plcSettings.processorType,
+        connectionTimeoutMs: plcSettings.connectionTimeoutMs,
+        readTimeoutMs: plcSettings.readTimeoutMs,
+        retryCount: plcSettings.retryCount,
+        retryDelayMs: plcSettings.retryDelayMs,
+      });
+    }
+
     if (selectedLineId === "new") {
       const newest = refreshed[refreshed.length - 1];
 
@@ -480,6 +564,7 @@ export default function Administration() {
       const result = await testPlcConnection({
         driver: form.manufacturer,
         ipAddress: form.plcIp.trim(),
+        options: toConnectionOptions(plcSettings),
       });
 
       setConnectionResult(result);
@@ -521,6 +606,7 @@ export default function Administration() {
       const tags = await browsePlcTags({
         driver,
         ipAddress,
+        options: toConnectionOptions(plcSettings),
       });
 
       if (tags.length === 0) {
@@ -561,6 +647,7 @@ export default function Administration() {
       const result = await readPlcTag({
         driver: form.manufacturer,
         ipAddress: form.plcIp.trim(),
+        options: toConnectionOptions(plcSettings),
         tagName: tag.name,
       });
 
@@ -620,6 +707,7 @@ export default function Administration() {
       const result = await autoMapTagCatalog({
         driver: source.driver,
         ipAddress: source.ipAddress,
+        options: toConnectionOptions(plcSettings),
       });
 
       setTagCatalog(buildCatalogFromSlots(slots, result.suggestedMappings));
@@ -767,7 +855,8 @@ export default function Administration() {
     }
   }
 
-  const canTestConnection = isValidIpv4Address(form.plcIp) && !testingConnection;
+  const hasValidRoutePath = /^\d+(,\d+)*$/.test(plcSettings.routePath.trim());
+  const canTestConnection = isValidIpv4Address(form.plcIp) && hasValidRoutePath && !testingConnection;
   const isNewLine = selectedLineId === "new";
   const canSaveLine = !isNewLine || connectionResult?.isConnected === true;
 
@@ -913,6 +1002,100 @@ export default function Administration() {
               placeholder="192.168.1.105"
             />
           </Stack>
+
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Stack spacing={2}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Allen-Bradley Connection Settings
+              </Typography>
+
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                <TextField
+                  label="Poll Interval (ms)"
+                  type="number"
+                  value={plcSettings.pollIntervalMs}
+                  onChange={(event) =>
+                    updatePlcSetting("pollIntervalMs", Number(event.target.value))
+                  }
+                  fullWidth
+                  inputProps={{ min: 500, max: 60000 }}
+                />
+
+                <TextField
+                  label="Route/Path"
+                  value={plcSettings.routePath}
+                  onChange={(event) => updatePlcSetting("routePath", event.target.value)}
+                  fullWidth
+                  placeholder="1,0"
+                />
+
+                <FormControl fullWidth>
+                  <InputLabel id="processor-type-label">Processor Type</InputLabel>
+                  <Select
+                    labelId="processor-type-label"
+                    label="Processor Type"
+                    value={plcSettings.processorType}
+                    onChange={(event) =>
+                      updatePlcSetting(
+                        "processorType",
+                        event.target.value as LinePlcSettingsForm["processorType"]
+                      )
+                    }
+                  >
+                    <MenuItem value="ControlLogix">ControlLogix</MenuItem>
+                    <MenuItem value="CompactLogix">CompactLogix</MenuItem>
+                    <MenuItem value="Micro800">Micro800</MenuItem>
+                  </Select>
+                </FormControl>
+              </Stack>
+
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                <TextField
+                  label="Connection Timeout (ms)"
+                  type="number"
+                  value={plcSettings.connectionTimeoutMs}
+                  onChange={(event) =>
+                    updatePlcSetting("connectionTimeoutMs", Number(event.target.value))
+                  }
+                  fullWidth
+                  inputProps={{ min: 500, max: 30000 }}
+                />
+
+                <TextField
+                  label="Read Timeout (ms)"
+                  type="number"
+                  value={plcSettings.readTimeoutMs}
+                  onChange={(event) =>
+                    updatePlcSetting("readTimeoutMs", Number(event.target.value))
+                  }
+                  fullWidth
+                  inputProps={{ min: 500, max: 30000 }}
+                />
+
+                <TextField
+                  label="Retry Count"
+                  type="number"
+                  value={plcSettings.retryCount}
+                  onChange={(event) =>
+                    updatePlcSetting("retryCount", Number(event.target.value))
+                  }
+                  fullWidth
+                  inputProps={{ min: 0, max: 5 }}
+                />
+
+                <TextField
+                  label="Retry Delay (ms)"
+                  type="number"
+                  value={plcSettings.retryDelayMs}
+                  onChange={(event) =>
+                    updatePlcSetting("retryDelayMs", Number(event.target.value))
+                  }
+                  fullWidth
+                  inputProps={{ min: 0, max: 10000 }}
+                />
+              </Stack>
+            </Stack>
+          </Paper>
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
             <TextField

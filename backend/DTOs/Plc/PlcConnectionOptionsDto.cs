@@ -1,11 +1,7 @@
 namespace backend.DTOs.Plc;
 
-public sealed class UpdateLineProtocolAssignmentRequestDto
+public sealed class PlcConnectionOptionsDto
 {
-    public string Manufacturer { get; set; } = string.Empty;
-    public string PresetName { get; set; } = string.Empty;
-    public int PresetVersion { get; set; }
-    public int PollIntervalMs { get; set; } = 2000;
     public string RoutePath { get; set; } = "1,0";
     public string ProcessorType { get; set; } = "ControlLogix";
     public int ConnectionTimeoutMs { get; set; } = 3000;
