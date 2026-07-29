@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   Checkbox,
   FormControl,
   InputLabel,
@@ -35,6 +36,7 @@ import {
 
 type ReportsView = "runs" | "events";
 type RunSort = "newest" | "oldest" | "lineAsc" | "lineDesc";
+type DatePreset = "today" | "last7" | "last30" | "clear";
 
 const REPORT_REFRESH_MS = 10000;
 const RUNS_PAGE_SIZE = 25;
@@ -78,6 +80,33 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]): voi
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function toDateInputValue(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveDatePresetRange(preset: DatePreset): { from: string; to: string } {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (preset === "clear") {
+    return { from: "", to: "" };
+  }
+
+  if (preset === "today") {
+    const value = toDateInputValue(today);
+    return { from: value, to: value };
+  }
+
+  const days = preset === "last7" ? 6 : 29;
+  const from = new Date(today);
+  from.setDate(today.getDate() - days);
+
+  return {
+    from: toDateInputValue(from),
+    to: toDateInputValue(today),
+  };
 }
 
 // Reports combines two historical views: completed runs and transition events.
@@ -215,6 +244,44 @@ export default function Reports() {
 
   const filteredEvents = events;
 
+  const runAggregates = useMemo(() => {
+    if (sortedRuns.length === 0) {
+      return {
+        totalLength: 0,
+        averageRuntimeSeconds: 0,
+        averageAutoPercentage: 0,
+        statusCounts: new Map<string, number>(),
+      };
+    }
+
+    const totalLength = sortedRuns.reduce((sum, row) => sum + row.productionLength, 0);
+    const averageRuntimeSeconds =
+      sortedRuns.reduce((sum, row) => sum + row.runtimeSeconds, 0) / sortedRuns.length;
+    const averageAutoPercentage =
+      sortedRuns.reduce((sum, row) => sum + row.autoPercentage, 0) / sortedRuns.length;
+
+    const statusCounts = new Map<string, number>();
+    for (const row of sortedRuns) {
+      statusCounts.set(row.finalStatus, (statusCounts.get(row.finalStatus) ?? 0) + 1);
+    }
+
+    return {
+      totalLength,
+      averageRuntimeSeconds,
+      averageAutoPercentage,
+      statusCounts,
+    };
+  }, [sortedRuns]);
+
+  const eventAggregates = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of filteredEvents) {
+      counts.set(row.eventType, (counts.get(row.eventType) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [filteredEvents]);
+
   // ---------------------------------------------------------------------------
   // UI actions
   // ---------------------------------------------------------------------------
@@ -225,6 +292,12 @@ export default function Reports() {
 
   function handleRunSortChange(event: SelectChangeEvent<string>) {
     setRunSort(event.target.value as RunSort);
+  }
+
+  function handleDatePreset(preset: DatePreset) {
+    const { from, to } = resolveDatePresetRange(preset);
+    setStartDate(from);
+    setEndDate(to);
   }
 
   function handleToggleRunSelection(runId: string) {
@@ -407,6 +480,16 @@ export default function Reports() {
           InputLabelProps={{ shrink: true }}
         />
 
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+          <Typography variant="caption" color="text.secondary">
+            Presets
+          </Typography>
+          <Button size="small" variant="text" onClick={() => handleDatePreset("today")}>Today</Button>
+          <Button size="small" variant="text" onClick={() => handleDatePreset("last7")}>Last 7d</Button>
+          <Button size="small" variant="text" onClick={() => handleDatePreset("last30")}>Last 30d</Button>
+          <Button size="small" variant="text" onClick={() => handleDatePreset("clear")}>Clear</Button>
+        </Stack>
+
         {activeView === "runs" ? (
           <FormControl size="small" sx={{ minWidth: 220 }}>
             <InputLabel id="completed-runs-sort-label">Sort</InputLabel>
@@ -435,6 +518,24 @@ export default function Reports() {
 
       {activeView === "runs" ? (
         <Paper sx={{ p: 2 }}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ mb: 2 }}>
+            <Alert severity="info" sx={{ flex: 1 }}>
+              <Typography variant="body2">Total Length: {runAggregates.totalLength.toFixed(2)}</Typography>
+            </Alert>
+            <Alert severity="info" sx={{ flex: 1 }}>
+              <Typography variant="body2">Average Runtime: {formatDuration(runAggregates.averageRuntimeSeconds)}</Typography>
+            </Alert>
+            <Alert severity="info" sx={{ flex: 1 }}>
+              <Typography variant="body2">Average Auto %: {runAggregates.averageAutoPercentage.toFixed(1)}%</Typography>
+            </Alert>
+          </Stack>
+
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+            {Array.from(runAggregates.statusCounts.entries()).map(([status, count]) => (
+              <Chip key={status} label={`${status}: ${count}`} size="small" variant="outlined" />
+            ))}
+          </Stack>
+
           <Stack
             direction={{ xs: "column", sm: "row" }}
             justifyContent="space-between"
@@ -573,6 +674,15 @@ export default function Reports() {
         </Paper>
       ) : (
         <Paper sx={{ p: 2 }}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+            {Array.from(eventAggregates.entries()).map(([eventType, count]) => (
+              <Chip key={eventType} label={`${eventType}: ${count}`} size="small" variant="outlined" />
+            ))}
+            {eventAggregates.size === 0 ? (
+              <Chip label="No events in current filter" size="small" variant="outlined" />
+            ) : null}
+          </Stack>
+
           <Stack
             direction={{ xs: "column", sm: "row" }}
             justifyContent="space-between"

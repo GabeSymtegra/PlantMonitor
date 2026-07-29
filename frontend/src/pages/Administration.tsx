@@ -32,6 +32,7 @@ import {
 } from "../services/plcConnectionService";
 import {
   autoMapTagCatalog,
+  getCommissioningReadiness,
   browsePlcTags,
   getLineTagCatalog,
   getTagSlots,
@@ -171,6 +172,9 @@ export default function Administration() {
   const [savingTagCatalog, setSavingTagCatalog] = useState(false);
   const [autoMapping, setAutoMapping] = useState(false);
   const [mappingStatus, setMappingStatus] = useState("");
+  const [commissioningChecking, setCommissioningChecking] = useState(false);
+  const [commissioningStatus, setCommissioningStatus] = useState("");
+  const [commissioningReady, setCommissioningReady] = useState<boolean | null>(null);
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.isActive),
@@ -664,6 +668,47 @@ export default function Administration() {
     }
   }
 
+  async function handleCommissioningCheck() {
+    setCommissioningStatus("");
+    setCommissioningReady(null);
+
+    if (selectedLineId === "new") {
+      setCommissioningStatus("Save the line first, then run commissioning readiness checks.");
+      return;
+    }
+
+    setCommissioningChecking(true);
+    try {
+      const result = await getCommissioningReadiness(selectedLineId);
+      setCommissioningReady(result.isReady);
+
+      if (result.isReady) {
+        setCommissioningStatus(
+          `Commissioning check passed. ${result.mappedRequiredTagCount}/${result.requiredTagCount} required slots are mapped.`
+        );
+      } else {
+        const issues = result.issues.length > 0
+          ? result.issues.join("\n")
+          : "Commissioning check failed due to missing required mappings.";
+
+        setCommissioningStatus(
+          `Commissioning check found gaps. ${result.mappedRequiredTagCount}/${result.requiredTagCount} required slots mapped.\n${issues}`
+        );
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Commissioning check failed.";
+
+      setCommissioningStatus(message);
+    } finally {
+      setCommissioningChecking(false);
+    }
+  }
+
   const canTestConnection = isValidIpv4Address(form.plcIp) && !testingConnection;
   const isNewLine = selectedLineId === "new";
   const canSaveLine = !isNewLine || connectionResult?.isConnected === true;
@@ -1090,6 +1135,14 @@ export default function Administration() {
                 <Stack direction="row" spacing={1}>
                   <Button
                     variant="outlined"
+                    onClick={handleCommissioningCheck}
+                    disabled={commissioningChecking || selectedLineId === "new"}
+                  >
+                    {commissioningChecking ? "Checking..." : "Commissioning Check"}
+                  </Button>
+
+                  <Button
+                    variant="outlined"
                     onClick={handleAutoMapTagCatalog}
                     disabled={autoMapping || selectedLineId === "new" || !connectionResult?.isConnected}
                   >
@@ -1110,6 +1163,14 @@ export default function Administration() {
                 <Alert severity="info">
                   <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
                     {mappingStatus}
+                  </Typography>
+                </Alert>
+              ) : null}
+
+              {commissioningStatus ? (
+                <Alert severity={commissioningReady === false ? "warning" : "success"}>
+                  <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                    {commissioningStatus}
                   </Typography>
                 </Alert>
               ) : null}

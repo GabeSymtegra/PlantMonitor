@@ -81,13 +81,19 @@ public sealed class ProductionStatisticsEngineTests
             ProductionLength: 15,
             Zones: new Dictionary<MeasurementZone, ZoneSample>()));
 
+        engine.ApplySample(new ProductionTelemetrySample(
+            TimestampUtc: new DateTime(2026, 7, 14, 10, 0, 10, DateTimeKind.Utc),
+            Mode: ControlMode.Manual,
+            ProductionLength: 25,
+            Zones: new Dictionary<MeasurementZone, ZoneSample>()));
+
         var snapshot = engine.GetSnapshot();
 
-        Assert.Equal(2d, snapshot.AutoTimeSeconds, 6);
-        Assert.Equal(6d, snapshot.ManualTimeSeconds, 6);
-        Assert.Equal(8d, snapshot.TotalControlTimeSeconds, 6);
-        Assert.Equal(25d, snapshot.AutoPercentage, 6);
-        Assert.Equal(75d, snapshot.ManualPercentage, 6);
+        Assert.Equal(8d, snapshot.AutoTimeSeconds, 6);
+        Assert.Equal(2d, snapshot.ManualTimeSeconds, 6);
+        Assert.Equal(10d, snapshot.TotalControlTimeSeconds, 6);
+        Assert.Equal(80d, snapshot.AutoPercentage, 6);
+        Assert.Equal(20d, snapshot.ManualPercentage, 6);
     }
 
     [Fact]

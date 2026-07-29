@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using backend.DTOs.Plc;
@@ -41,7 +40,7 @@ public sealed class PlcConnectionServiceTests
         });
 
         Assert.False(result.IsConnected);
-        Assert.Equal("Wrong driver selected. Choose AllenBradley or Siemens.", result.Message);
+        Assert.Equal("Wrong driver selected. Choose AllenBradley.", result.Message);
     }
 
     [Fact]
@@ -167,8 +166,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     public async Task TestConnection_WithAdminToken_ReturnsConnectionResult()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.PostAsJsonAsync("/api/admin/plc/test-connection", new
         {
@@ -192,8 +190,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     public async Task TestConnection_WithDriverFailure_ReturnsBadGateway()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.PostAsJsonAsync("/api/admin/plc/test-connection", new
         {
@@ -208,8 +205,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     public async Task ReplaceTagCatalog_WithUnknownLogicalKey_ReturnsBadRequest()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.PutAsJsonAsync("/api/admin/lines/101/tag-catalog", new
         {
@@ -238,8 +234,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     public async Task BrowseTags_WithAdminToken_ReturnsResolvedDriverTags()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.PostAsJsonAsync("/api/admin/plc/browse-tags", new
         {
@@ -259,8 +254,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     public async Task ReadTag_WithAdminToken_ReturnsResolvedDriverValue()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.PostAsJsonAsync("/api/admin/plc/read-tag", new
         {
@@ -277,7 +271,57 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
         Assert.Equal("125.4", payload?["value"]?.GetValue<string>());
     }
 
-    private static async Task<string> GetAccessToken(HttpClient client, string username, string password)
+    [Fact]
+    public async Task AutoMapTags_WithAdminToken_ReturnsSuggestionPayload()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var response = await client.PostAsJsonAsync("/api/admin/plc/auto-map-tags", new
+        {
+            driver = "AllenBradley",
+            ipAddress = "192.168.1.10",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("AllenBradley", payload?["driver"]?.GetValue<string>());
+        Assert.True(payload?["scannedTagCount"]?.GetValue<int>() > 0);
+        Assert.NotNull(payload?["suggestedMappings"]?.AsArray());
+        Assert.NotNull(payload?["missingLogicalKeys"]?.AsArray());
+    }
+
+    [Fact]
+    public async Task CommissioningCheck_WithAdminToken_ReturnsReadinessPayload()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
+        {
+            manufacturer = "AllenBradley",
+            presetName = "BasicStatus",
+            presetVersion = 1,
+            pollIntervalMs = 1500,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, upsertResponse.StatusCode);
+
+        var response = await client.GetAsync("/api/admin/lines/101/commissioning-check");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal(101, payload?["lineId"]?.GetValue<int>());
+        Assert.Equal("AllenBradley", payload?["manufacturer"]?.GetValue<string>());
+        Assert.NotNull(payload?["missingRequiredTagKeys"]?.AsArray());
+        Assert.NotNull(payload?["issues"]?.AsArray());
+    }
+
+    private static async Task LoginAsync(HttpClient client, string username, string password)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new
         {
@@ -286,23 +330,15 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
         });
 
         loginResponse.EnsureSuccessStatusCode();
-
-        var payload = await loginResponse.Content.ReadFromJsonAsync<JsonObject>();
-        var token = payload?["accessToken"]?.GetValue<string>();
-
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            throw new InvalidOperationException("Access token was not returned by login endpoint.");
-        }
-
-        return token;
     }
 }
 
-public sealed class PlcConnectionApiFactory : WebApplicationFactory<Program>
+public sealed class PlcConnectionApiFactory : TestWebApplicationFactory
 {
     protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
     {
+        base.ConfigureWebHost(builder);
+
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<IPlcConnectionService>();
@@ -349,7 +385,7 @@ public sealed class PlcConnectionApiFactory : WebApplicationFactory<Program>
             }
 
             driver = null;
-            errorMessage = "Wrong driver selected. Choose AllenBradley or Siemens.";
+            errorMessage = "Wrong driver selected. Choose AllenBradley.";
             return false;
         }
 

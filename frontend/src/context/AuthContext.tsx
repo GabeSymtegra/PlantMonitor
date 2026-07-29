@@ -13,7 +13,6 @@ import {
 // -----------------------------------------------------------------------------
 
 interface LoginResponse {
-  accessToken?: string | null;
   username: string;
   role: User["role"];
   mustChangePassword: boolean;
@@ -21,6 +20,7 @@ interface LoginResponse {
 
 interface AuthContextType {
   user: User | null;
+  mustChangePassword: boolean;
   authError: string | null;
   initializing: boolean;
   isAuthenticated: boolean;
@@ -30,7 +30,7 @@ interface AuthContextType {
     username: string,
     password: string,
     rememberMe: boolean
-  ) => Promise<boolean>;
+  ) => Promise<{ authenticated: boolean; mustChangePassword: boolean }>;
   logout: () => void;
 }
 
@@ -78,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const authenticatedUser: User = {
           username: response.username,
           role: response.role,
+          mustChangePassword: response.mustChangePassword,
         };
 
         setUser(authenticatedUser);
@@ -125,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     username: string,
     password: string,
     rememberMe: boolean
-  ): Promise<boolean> {
+  ): Promise<{ authenticated: boolean; mustChangePassword: boolean }> {
     setAuthError(null);
 
     try {
@@ -141,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const authenticatedUser: User = {
         username: response.username,
         role: response.role,
+        mustChangePassword: response.mustChangePassword,
       };
 
       // Local storage is used for remembered sessions, session storage for
@@ -148,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(authenticatedUser);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(authenticatedUser));
 
-      return true;
+      return { authenticated: true, mustChangePassword: response.mustChangePassword };
     } catch (error) {
       setUser(null);
 
@@ -171,7 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       clearStoredAuth();
-      return false;
+      return { authenticated: false, mustChangePassword: false };
     }
   }
 
@@ -187,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       user,
+      mustChangePassword: user?.mustChangePassword ?? false,
       authError,
       initializing,
       isAuthenticated: Boolean(user),

@@ -383,13 +383,12 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         }
 
         if (!request.Manufacturer.Equals("AB", StringComparison.OrdinalIgnoreCase)
-            && !request.Manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase)
-            && !request.Manufacturer.Equals("Siemens", StringComparison.OrdinalIgnoreCase))
+            && !request.Manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase))
         {
             issues.Add(new TagValidationIssueDto
             {
                 Field = "manufacturer",
-                Message = "Manufacturer must be AllenBradley or Siemens.",
+                Message = "Manufacturer must be AllenBradley.",
             });
         }
 

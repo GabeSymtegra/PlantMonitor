@@ -32,12 +32,17 @@ export default function Login() {
     setError("");
     setSubmitting(true);
 
-    const authenticated = await login(username.trim(), password, rememberMe);
+    const result = await login(username.trim(), password, rememberMe);
 
     setSubmitting(false);
 
-    if (!authenticated) {
+    if (!result.authenticated) {
       setError(authError ?? "Invalid credentials.");
+      return;
+    }
+
+    if (result.mustChangePassword) {
+      navigate("/change-password", { replace: true, state: { from: redirectTo } });
       return;
     }
 

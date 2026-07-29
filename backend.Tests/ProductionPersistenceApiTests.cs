@@ -1,17 +1,15 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace backend.Tests;
 
-public sealed class ProductionPersistenceApiTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ProductionPersistenceApiTests : IClassFixture<TestWebApplicationFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestWebApplicationFactory _factory;
 
-    public ProductionPersistenceApiTests(WebApplicationFactory<Program> factory)
+    public ProductionPersistenceApiTests(TestWebApplicationFactory factory)
     {
         _factory = factory;
     }
@@ -20,9 +18,7 @@ public sealed class ProductionPersistenceApiTests : IClassFixture<WebApplication
     public async Task RecipeTolerances_WithAdminToken_ReturnsSeededRows()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.GetAsync("/api/recipe-tolerances");
 
@@ -42,9 +38,7 @@ public sealed class ProductionPersistenceApiTests : IClassFixture<WebApplication
     public async Task ProductionRuns_WithAdminToken_ReturnsPagedPayload()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.GetAsync("/api/production-runs?take=5");
 
@@ -60,29 +54,39 @@ public sealed class ProductionPersistenceApiTests : IClassFixture<WebApplication
     public async Task RuntimeEvents_WithInvalidLineId_ReturnsBadRequest()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.GetAsync("/api/reports/events?lineId=9999");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("Invalid request parameters.", payload!["title"]?.GetValue<string>());
+        Assert.Equal(400, payload["status"]?.GetValue<int>());
+        Assert.Equal("lineId was not found.", payload["detail"]?.GetValue<string>());
+        Assert.Equal("line_not_found", payload["code"]?.GetValue<string>());
     }
 
     [Fact]
     public async Task ProductionRuns_WithInvalidDateRange_ReturnsBadRequest()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.GetAsync("/api/production-runs?fromDate=2026-07-10&toDate=2026-07-01");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("Invalid request parameters.", payload!["title"]?.GetValue<string>());
+        Assert.Equal(400, payload["status"]?.GetValue<int>());
+        Assert.Equal("toDate must be on or after fromDate.", payload["detail"]?.GetValue<string>());
+        Assert.Equal("invalid_date_range", payload["code"]?.GetValue<string>());
     }
 
-    private static async Task<string> GetAccessToken(HttpClient client, string username, string password)
+    private static async Task LoginAsync(HttpClient client, string username, string password)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new
         {
@@ -91,15 +95,5 @@ public sealed class ProductionPersistenceApiTests : IClassFixture<WebApplication
         });
 
         loginResponse.EnsureSuccessStatusCode();
-
-        var payload = await loginResponse.Content.ReadFromJsonAsync<JsonObject>();
-        var token = payload?["accessToken"]?.GetValue<string>();
-
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            throw new InvalidOperationException("Access token was not returned by login endpoint.");
-        }
-
-        return token;
     }
 }

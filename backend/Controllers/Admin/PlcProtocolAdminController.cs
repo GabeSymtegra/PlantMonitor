@@ -48,7 +48,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (assignment is null)
         {
-            return NotFound(new { message = "Protocol assignment not found for line." });
+            return NotFoundProblem("Protocol assignment not found for line.", "protocol_assignment_not_found");
         }
 
         return Ok(assignment);
@@ -65,7 +65,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
     {
         if (!_protocolConfigService.TryReplaceTagCatalog(lineId, request, out var tags, out var error))
         {
-            return BadRequest(new { message = error });
+            return BadRequestProblem(error ?? "Tag catalog update failed.", "invalid_tag_catalog");
         }
 
         return Ok(tags);
@@ -76,7 +76,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
     {
         if (!_protocolConfigService.TryUpsertAssignment(lineId, request, out var error))
         {
-            return BadRequest(new { message = error });
+            return BadRequestProblem(error ?? "Protocol assignment update failed.", "invalid_protocol_assignment");
         }
 
         var assignment = _protocolConfigService.GetAssignment(lineId);
@@ -90,7 +90,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (tags is null)
         {
-            return NotFound(new { message = error });
+            return NotFoundProblem(error ?? "Effective tags were not found.", "effective_tags_not_found");
         }
 
         return Ok(tags);
@@ -114,7 +114,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
     {
         if (!_protocolConfigService.TryUpsertOverrides(lineId, request, out var effectiveTags, out var error))
         {
-            return BadRequest(new { message = error });
+            return BadRequestProblem(error ?? "Tag overrides update failed.", "invalid_tag_overrides");
         }
 
         return Ok(effectiveTags);
@@ -131,7 +131,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (!result.IsConnected)
         {
-            if (string.Equals(result.Message, "Wrong driver selected. Choose AllenBradley or Siemens.", StringComparison.OrdinalIgnoreCase)
+            if (string.Equals(result.Message, "Wrong driver selected. Choose AllenBradley.", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(result.Message, "Invalid IP address. Enter a valid IPv4 address.", StringComparison.OrdinalIgnoreCase))
             {
                 return BadRequest(result);
@@ -224,7 +224,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(request.TagName))
         {
-            return BadRequest(new { message = "Tag name is required." });
+            return BadRequestProblem("Tag name is required.", "missing_tag_name");
         }
 
         var result = await driver!.ReadTagAsync(request.IpAddress.Trim(), request.TagName.Trim(), cancellationToken);
@@ -243,11 +243,68 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (request.TagNames is null || request.TagNames.Count == 0)
         {
-            return BadRequest(new { message = "At least one tag name is required." });
+            return BadRequestProblem("At least one tag name is required.", "missing_tag_names");
         }
 
         var result = await driver!.ReadTagsAsync(request.IpAddress.Trim(), request.TagNames, cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("lines/{lineId:int}/commissioning-check")]
+    public ActionResult<CommissioningReadinessDto> GetCommissioningReadiness(int lineId)
+    {
+        var assignment = _protocolConfigService.GetAssignment(lineId);
+        if (assignment is null)
+        {
+            return NotFoundProblem("Protocol assignment not found for line.", "protocol_assignment_not_found");
+        }
+
+        var requiredSlots = _protocolConfigService.GetRequiredTagSlots()
+            .Where(slot => slot.IsRequired)
+            .ToList();
+
+        var issues = new List<string>();
+        var mappedRequiredKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var effectiveTags = _protocolConfigService.GetEffectiveTags(lineId, out var effectiveTagsError);
+        if (effectiveTags is null)
+        {
+            issues.Add(effectiveTagsError ?? "No effective tag mappings are available.");
+        }
+        else
+        {
+            foreach (var tag in effectiveTags)
+            {
+                if (tag.IsRequired && !string.IsNullOrWhiteSpace(tag.PlcAddress))
+                {
+                    mappedRequiredKeys.Add(tag.TagKey);
+                }
+            }
+        }
+
+        var missingRequiredKeys = requiredSlots
+            .Select(slot => slot.LogicalKey)
+            .Where(requiredKey => !mappedRequiredKeys.Contains(requiredKey))
+            .ToList();
+
+        if (missingRequiredKeys.Count > 0)
+        {
+            issues.Add($"Missing required logical keys: {string.Join(", ", missingRequiredKeys)}.");
+        }
+
+        return Ok(new CommissioningReadinessDto
+        {
+            LineId = lineId,
+            Manufacturer = assignment.Manufacturer,
+            PresetName = assignment.PresetName,
+            PresetVersion = assignment.PresetVersion,
+            IsReady = issues.Count == 0,
+            RequiredTagCount = requiredSlots.Count,
+            MappedRequiredTagCount = requiredSlots.Count - missingRequiredKeys.Count,
+            MissingRequiredTagKeys = missingRequiredKeys,
+            Issues = issues,
+            CheckedAtUtc = DateTime.UtcNow,
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -265,13 +322,13 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (!_connectionService.TryResolveDriver(driverName, out driver, out var driverError))
         {
-            errorResult = BadRequest(new { message = driverError });
+            errorResult = BadRequestProblem(driverError ?? "PLC driver is not supported.", "invalid_driver");
             return false;
         }
 
         if (!_connectionService.IsValidIpAddress(ipAddress))
         {
-            errorResult = BadRequest(new { message = "Invalid IP address. Enter a valid IPv4 address." });
+            errorResult = BadRequestProblem("Invalid IP address. Enter a valid IPv4 address.", "invalid_ip_address");
             return false;
         }
 
@@ -365,5 +422,31 @@ public sealed class PlcProtocolAdminController : ControllerBase
     private static string NormalizeTagName(string tagName)
     {
         return Regex.Replace(tagName.ToLowerInvariant(), "[^a-z0-9]+", "_").Trim('_');
+    }
+
+    private ActionResult BadRequestProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Invalid request parameters.",
+            detail: detail,
+            statusCode: StatusCodes.Status400BadRequest,
+            type: "https://httpstatuses.com/400",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+    }
+
+    private ActionResult NotFoundProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Resource not found.",
+            detail: detail,
+            statusCode: StatusCodes.Status404NotFound,
+            type: "https://httpstatuses.com/404",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
     }
 }

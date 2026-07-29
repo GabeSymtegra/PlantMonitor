@@ -32,6 +32,9 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
     public async Task EnsureBootstrapUsersAsync(CancellationToken cancellationToken = default)
     {
         var seedUsers = new List<(string Username, string Password, string Role, bool MustChangePassword)>();
+        var existingAdmins = await _dbContext.LocalUsers
+            .AsNoTracking()
+            .AnyAsync(x => x.Role == "Admin", cancellationToken);
 
         if (_environment.IsDevelopment())
         {
@@ -39,7 +42,7 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
             seedUsers.Add(("operator", "test", "Operator", false));
             seedUsers.Add(("viewer", "test", "Viewer", false));
         }
-        else
+        else if (!existingAdmins)
         {
             var bootstrapPassword = _configuration["Auth:BootstrapAdminPassword"];
             if (string.IsNullOrWhiteSpace(bootstrapPassword))
@@ -48,6 +51,16 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
             }
 
             seedUsers.Add(("admin", bootstrapPassword, "Admin", true));
+        }
+
+        if (_environment.IsDevelopment())
+        {
+            existingAdmins = true;
+        }
+
+        if (existingAdmins && !_environment.IsDevelopment())
+        {
+            return;
         }
 
         var existing = await _dbContext.LocalUsers

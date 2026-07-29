@@ -6,6 +6,7 @@ import AppShell from "../layouts/AppShell";
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const Lines = lazy(() => import("../pages/Lines"));
 const Login = lazy(() => import("../pages/Login"));
+const ChangePassword = lazy(() => import("../pages/ChangePassword"));
 const Administration = lazy(() => import("../pages/Administration"));
 const LineDetails = lazy(() => import("../pages/LineDetails"));
 const CompletedRunDetails = lazy(() => import("../pages/CompletedRunDetails"));
@@ -31,6 +32,8 @@ export default function AppRoutes() {
                 <Route element={<ProtectedRoute />}>
 
                     <Route path="/status-board" element={<StatusBoard />} />
+
+                    <Route path="/change-password" element={<ChangePassword />} />
 
                     <Route element={<AppShell />}>
 

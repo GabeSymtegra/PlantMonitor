@@ -13,6 +13,62 @@ Primary operating model:
 - Stage: Runtime integration, local launch reliability, and maintainability cleanup
 - Focus: Live PLC-driven dashboard behavior, reporting history, offline handling, local dev startup, and codebase documentation
 
+## Production Readiness Pass (2026-07-29)
+- Verified the frontend publish/runtime path by serving `frontend/dist` through backend `wwwroot` and checking referenced JS/CSS assets by real HTTP request.
+- Verified production-auth behavior in live browser flows, including login through the frontend origin and authenticated dashboard access after cookie-based sign-in.
+- Confirmed the current local production bootstrap path still requires the development accounts for local testing, while the production-only bootstrap guard remains a deployment concern.
+- Fixed the frontend dev proxy so `/api` and `/hubs` requests route to the backend during local development.
+- Fixed the PowerShell port cleanup helper used before local launches.
+- Deferred installer work until application correctness and publish/runtime validation are complete.
+- Verified backend test coverage for the fixed stop-ship slice, including mode-duration attribution, PLC preset cleanup, and PLC connection/config validation.
+- Extracted completed-run and runtime-event reporting queries into a dedicated reports service so ProductionRuntimeService now stays focused on live polling and snapshots.
+- Verified the backend test suite still passes after the reports-service split.
+- Standardized ProblemDetails responses for production/report query validation and not-found paths (`/api/lines/{id}/details`, `/api/production-runs`, `/api/production-runs/{id}`, `/api/reports/events`) with consistent status/title/detail/type and machine-readable `code` extension.
+- Added backend API test assertions for the new ProblemDetails payload contract and re-ran the full backend test suite.
+- Expanded ProblemDetails standardization across auth, lines, and admin PLC endpoints, replacing remaining ad-hoc `{ message }` payloads with consistent RFC7807 responses and stable error `code` extensions.
+- Implemented SignalR meaningful-change suppression so hub broadcast notifications fire on state-signature changes (with heartbeat fallback) instead of unconditional timer-only fan-out.
+- Hardened test reliability for auth/login by adding a test-only configuration switch that disables login rate-limiting in integration tests while preserving production behavior.
+- Improved readiness failure semantics by returning ProblemDetails for `/health/ready` database-unavailable responses.
+- Refreshed API and release docs to align with current cookie-auth and ProblemDetails behavior, including current integration-branch naming.
+- Validated backup and restore scripts end-to-end using test database artifacts (`db-backup.ps1`, `db-restore.ps1`) with successful backup creation and restore copy execution.
+- Expanded reports UX with preset date ranges and aggregate summary views for completed runs and runtime events.
+- Added backend API coverage for admin auto-map endpoint behavior and validated it in the backend integration suite.
+- Added Windows installer build automation (`scripts/build-installer.ps1`) plus Inno Setup definition (`installer/PlantMonitor.iss`) and successfully produced `artifacts/installer/PlantMonitor-Setup.exe`.
+- Added release packaging automation (`scripts/package-release.ps1`) and produced a versioned archive at `artifacts/packages/PlantMonitor-0.1.0-alpha-20260729-141034.zip`.
+- Added commissioning hardening endpoint `GET /api/admin/lines/{lineId}/commissioning-check` to validate required tag-slot readiness per line and surface missing logical keys/issue details.
+- Added backend integration coverage for commissioning readiness and validated end-to-end via admin assignment + commissioning-check flow.
+- Added runtime API correctness coverage for dashboard/detail contracts (`backend.Tests/RuntimeApiTests.cs`) and validated runtime endpoint ProblemDetails/shape behavior.
+
+## Production Readiness Checklist Snapshot (2026-07-29)
+- Done: frontend publishing now builds and copies `frontend/dist` into backend publish output.
+- Done: published release assets were verified over HTTP, including `/`, `/health/live`, `/health/ready`, and referenced JS/CSS files.
+- Done: auth is cookie-only and login/session responses no longer return JWTs in JSON.
+- Done: forced password-change gating is enforced on protected API routes and returns ProblemDetails.
+- Done: backend auth and API tests were converted to cookie-based session requests and pass.
+- Done: frontend auth and route tests pass after the auth contract change.
+- Done: frontend login, change-password, and protected-route flows were updated to match the new session model.
+- Done: bootstrap admin seeding no longer blocks production restarts once an admin already exists.
+- Done: allowed hosts were tightened away from wildcard defaults.
+- Done: frontend dev proxy for `/api` and `/hubs` was fixed.
+- Done: PowerShell launch and cleanup helpers were repaired.
+- Done: runtime mode-duration attribution now credits elapsed time to the previously active mode.
+- Done: bundled Siemens PLC presets were removed from the seed and fallback config paths.
+- Done: PLC connection and tag-validation messaging now reflects Allen-Bradley-only production support.
+- Done: backend integration tests now use isolated test databases to avoid stale lock/schema collisions.
+- Done: completed-run and runtime-event queries were moved into a dedicated reports service.
+- Done: production/report validation and not-found responses now use standardized ProblemDetails payloads with stable error codes.
+- Done: remaining auth/admin/line validation failures now emit standardized ProblemDetails payloads with stable error codes.
+- Done: SignalR refresh notifications now suppress non-meaningful state churn via snapshot-signature change detection.
+- Done: health/readiness failure path now returns structured ProblemDetails (`503`) instead of an empty status body.
+- Done: documentation refresh for API auth/error contract and release branch strategy completed to match current implementation.
+- Done: backup/restore replacement is implemented and validated via `scripts/db-backup.ps1` and `scripts/db-restore.ps1` execution.
+- Done: admin auto-map workflow is covered by backend integration tests and validated through the admin PLC API test suite.
+- Done: reports expansion and cleanup implemented with date-range presets and aggregate run/event summaries.
+- Done: Windows installer build is automated and validated with generated installer artifact.
+- Done: repository cleanup and release packaging now has executable automation and validated packaged output.
+- Done: PLC configuration and commissioning hardening includes explicit per-line commissioning readiness validation and test coverage.
+- Done: runtime correctness beyond the auth gate now has explicit dashboard/detail API correctness tests and passing suite validation.
+
 ## Finalized Changes (Completed)
 
 ### Security and Access Control
@@ -92,6 +148,7 @@ Primary operating model:
 - Verified live browser login through the frontend origin using the built-in dev accounts.
 - Verified authenticated dashboard access through the frontend proxy after login.
 - Confirmed direct backend auth, frontend-proxied auth, and authenticated dashboard API access all return `200` in live checks.
+- Confirmed the dashboard route loads after sign-in and renders live line data in the browser.
 
 ### PLC State Mapping and Runtime Semantics
 - Implemented explicit machine-state decoding for live PLC values:

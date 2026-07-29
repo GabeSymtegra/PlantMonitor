@@ -295,13 +295,12 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
         }
 
         if (!request.Manufacturer.Equals("AB", StringComparison.OrdinalIgnoreCase)
-            && !request.Manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase)
-            && !request.Manufacturer.Equals("Siemens", StringComparison.OrdinalIgnoreCase))
+            && !request.Manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase))
         {
             issues.Add(new TagValidationIssueDto
             {
                 Field = "manufacturer",
-                Message = "Manufacturer must be AllenBradley or Siemens.",
+                Message = "Manufacturer must be AllenBradley.",
             });
         }
 
@@ -488,21 +487,6 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
                     new EffectiveTagMappingDto { TagKey = "runtime_seconds", PlcAddress = "Program:LineData.RuntimeSeconds", DataType = "dint", Scale = 1.0m, IsRequired = true },
                     new EffectiveTagMappingDto { TagKey = "total_length", PlcAddress = "Program:LineData.TotalLength", DataType = "real", Scale = 1.0m, IsRequired = true },
                     new EffectiveTagMappingDto { TagKey = "control_mode", PlcAddress = "Program:LineData.ControlMode", DataType = "int", Scale = 1.0m, IsRequired = true },
-                ],
-            },
-            new PlcPresetDto
-            {
-                Manufacturer = "Siemens",
-                PresetName = "BasicStatus",
-                PresetVersion = 1,
-                Description = "Siemens baseline telemetry preset.",
-                Tags =
-                [
-                    new EffectiveTagMappingDto { TagKey = "status", PlcAddress = "DB12.DBW0", DataType = "int", Scale = 1.0m, IsRequired = true },
-                    new EffectiveTagMappingDto { TagKey = "product", PlcAddress = "DB12.DBD4", DataType = "string", Scale = 1.0m, IsRequired = true },
-                    new EffectiveTagMappingDto { TagKey = "runtime_seconds", PlcAddress = "DB12.DBD12", DataType = "dint", Scale = 1.0m, IsRequired = true },
-                    new EffectiveTagMappingDto { TagKey = "total_length", PlcAddress = "DB12.DBD20", DataType = "real", Scale = 1.0m, IsRequired = true },
-                    new EffectiveTagMappingDto { TagKey = "control_mode", PlcAddress = "DB12.DBW24", DataType = "int", Scale = 1.0m, IsRequired = true },
                 ],
             },
         ];

@@ -1,23 +1,21 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace backend.Tests;
 
-public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+public class AuthAndAuthorizationTests : IClassFixture<TestWebApplicationFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestWebApplicationFactory _factory;
 
-    public AuthAndAuthorizationTests(WebApplicationFactory<Program> factory)
+    public AuthAndAuthorizationTests(TestWebApplicationFactory factory)
     {
         _factory = factory;
     }
 
     [Fact]
-    public async Task Login_WithValidAdminCredentials_ReturnsTokenAndRole()
+    public async Task Login_WithValidAdminCredentials_ReturnsRoleAndCookie()
     {
         var client = _factory.CreateClient();
 
@@ -32,8 +30,9 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
 
         var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
         Assert.NotNull(payload);
-        Assert.False(string.IsNullOrWhiteSpace(payload?["accessToken"]?.GetValue<string>()));
         Assert.Equal("Admin", payload?["role"]?.GetValue<string>());
+        Assert.True(response.Headers.TryGetValues("Set-Cookie", out var cookies));
+        Assert.Contains(cookies!, value => value.Contains("pm_auth=", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -52,6 +51,27 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
+    public async Task Login_WithMissingCredentials_ReturnsProblemDetails()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = "",
+            password = "",
+            rememberMe = true,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("Invalid request parameters.", payload!["title"]?.GetValue<string>());
+        Assert.Equal(400, payload["status"]?.GetValue<int>());
+        Assert.Equal("missing_credentials", payload["code"]?.GetValue<string>());
+    }
+
+    [Fact]
     public async Task ConfigurationAccess_WithoutToken_ReturnsUnauthorized()
     {
         var client = _factory.CreateClient();
@@ -65,9 +85,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task ConfigurationAccess_WithOperatorToken_ReturnsForbidden()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "operator", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "operator", "test");
         var response = await client.GetAsync("/api/configuration/access-check");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -77,9 +95,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task ConfigurationAccess_WithAdminToken_ReturnsOk()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
         var response = await client.GetAsync("/api/configuration/access-check");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -89,9 +105,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task PlcPresetAccess_WithAdminToken_ReturnsOk()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
         var response = await client.GetAsync("/api/admin/plc/presets");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -101,9 +115,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task PlcPresetAccess_WithOperatorToken_ReturnsForbidden()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "operator", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "operator", "test");
         var response = await client.GetAsync("/api/admin/plc/presets");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -113,9 +125,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task PlcProtocolAssignment_WithAdminToken_CanUpsertAndReadBack()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -139,6 +149,28 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
+    public async Task PlcReadTag_WithoutTagName_ReturnsProblemDetails()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var response = await client.PostAsJsonAsync("/api/admin/plc/read-tag", new
+        {
+            driver = "AllenBradley",
+            ipAddress = "127.0.0.1",
+            tagName = ""
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("Invalid request parameters.", payload!["title"]?.GetValue<string>());
+        Assert.Equal(400, payload["status"]?.GetValue<int>());
+        Assert.Equal("missing_tag_name", payload["code"]?.GetValue<string>());
+    }
+
+    [Fact]
     public async Task DeleteCompletedRun_WithoutToken_ReturnsUnauthorized()
     {
         var client = _factory.CreateClient();
@@ -150,8 +182,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task DeleteCompletedRun_WithViewerToken_ReturnsForbidden()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "viewer", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "viewer", "test");
 
         var response = await client.DeleteAsync($"/api/production-runs/{Guid.NewGuid()}");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -161,8 +192,7 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task DeleteCompletedRun_WithOperatorToken_ReturnsForbidden()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "operator", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "operator", "test");
 
         var response = await client.DeleteAsync($"/api/production-runs/{Guid.NewGuid()}");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -172,14 +202,13 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
     public async Task DeleteCompletedRun_WithAdminToken_IsAuthorized()
     {
         var client = _factory.CreateClient();
-        var token = await GetAccessToken(client, "test", "test");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        await LoginAsync(client, "test", "test");
 
         var response = await client.DeleteAsync($"/api/production-runs/{Guid.NewGuid()}");
         Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
-    private static async Task<string> GetAccessToken(HttpClient client, string username, string password)
+    private static async Task LoginAsync(HttpClient client, string username, string password)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new
         {
@@ -189,15 +218,5 @@ public class AuthAndAuthorizationTests : IClassFixture<WebApplicationFactory<Pro
         });
 
         loginResponse.EnsureSuccessStatusCode();
-
-        var payload = await loginResponse.Content.ReadFromJsonAsync<JsonObject>();
-        var token = payload?["accessToken"]?.GetValue<string>();
-
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            throw new InvalidOperationException("Access token was not returned by login endpoint.");
-        }
-
-        return token;
     }
 }

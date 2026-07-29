@@ -6,10 +6,8 @@ namespace backend.Services.Plc;
 public sealed class PlcTagAddressValidator : IPlcTagAddressValidator
 {
     private const string AllenBradleyManufacturer = "AllenBradley";
-    private const string SiemensManufacturer = "Siemens";
     private const string AllenBradleyInvalidMessage = "AB addresses must match Program:Scope.Tag or Tag.SubTag format.";
-    private const string SiemensInvalidMessage = "Siemens addresses must match DBx.DBW0/DBD0/DBX0.0 or M/I/Q area format.";
-    private const string UnsupportedManufacturerMessage = "Unsupported manufacturer. Use AllenBradley or Siemens.";
+    private const string UnsupportedManufacturerMessage = "Unsupported manufacturer. Use AllenBradley.";
 
     private static readonly Regex AllenBradleyRegex = new(
         @"^(Program:[A-Za-z_][\w]*\.)?[A-Za-z_][\w]*(\.[A-Za-z_][\w]*|\[\d+\])*$",
@@ -37,13 +35,6 @@ public sealed class PlcTagAddressValidator : IPlcTagAddressValidator
         if (IsAllenBradley(normalizedManufacturer))
         {
             return Validate(normalizedAddress, AllenBradleyRegex, AllenBradleyInvalidMessage, out message);
-        }
-
-        if (normalizedManufacturer.Equals(SiemensManufacturer, StringComparison.OrdinalIgnoreCase))
-        {
-            var valid = SiemensDbRegex.IsMatch(normalizedAddress) || SiemensAreaRegex.IsMatch(normalizedAddress);
-            message = valid ? string.Empty : SiemensInvalidMessage;
-            return valid;
         }
 
         message = UnsupportedManufacturerMessage;

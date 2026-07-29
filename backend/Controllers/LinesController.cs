@@ -37,12 +37,12 @@ public sealed class LinesController : ControllerBase
     {
         if (request.LineNumber <= 0)
         {
-            return BadRequest(new { message = "Line number must be greater than 0." });
+            return BadRequestProblem("Line number must be greater than 0.", "invalid_line_number");
         }
 
         if (_dbContext.LineProtocolAssignments.Any(x => x.LineNumber == request.LineNumber))
         {
-            return Conflict(new { message = "A line configuration already exists for that line number." });
+            return ConflictProblem("A line configuration already exists for that line number.", "line_number_conflict");
         }
 
         var entity = new LineProtocolAssignmentEntity();
@@ -63,7 +63,7 @@ public sealed class LinesController : ControllerBase
         var entity = _dbContext.LineProtocolAssignments.SingleOrDefault(x => x.LineId == lineId);
         if (entity is null)
         {
-            return NotFound(new { message = "Line configuration not found." });
+            return NotFoundProblem("Line configuration not found.", "line_config_not_found");
         }
 
         ApplyRequest(entity, request);
@@ -81,7 +81,7 @@ public sealed class LinesController : ControllerBase
         var entity = _dbContext.LineProtocolAssignments.SingleOrDefault(x => x.LineId == lineId);
         if (entity is null)
         {
-            return NotFound(new { message = "Line configuration not found." });
+            return NotFoundProblem("Line configuration not found.", "line_config_not_found");
         }
 
         entity.IsActive = false;
@@ -127,5 +127,44 @@ public sealed class LinesController : ControllerBase
             IsActive = entity.IsActive,
             UpdatedAtUtc = entity.UpdatedAtUtc,
         };
+    }
+
+    private ActionResult BadRequestProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Invalid request parameters.",
+            detail: detail,
+            statusCode: StatusCodes.Status400BadRequest,
+            type: "https://httpstatuses.com/400",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+    }
+
+    private ActionResult ConflictProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Resource conflict.",
+            detail: detail,
+            statusCode: StatusCodes.Status409Conflict,
+            type: "https://httpstatuses.com/409",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+    }
+
+    private ActionResult NotFoundProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Resource not found.",
+            detail: detail,
+            statusCode: StatusCodes.Status404NotFound,
+            type: "https://httpstatuses.com/404",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
     }
 }

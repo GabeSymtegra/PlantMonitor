@@ -20,9 +20,10 @@ function renderWithAuth(
         authError: null,
         initializing: false,
         isAuthenticated: options.isAuthenticated,
+        mustChangePassword: false,
         isAdmin: options.user?.role === "Admin",
         canConfigure: options.user?.role === "Admin",
-        login: async () => true,
+        login: async () => ({ authenticated: true, mustChangePassword: false }),
         logout: () => undefined,
       }}
     >

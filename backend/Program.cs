@@ -20,6 +20,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.Threading.RateLimiting;
 
@@ -58,6 +59,7 @@ builder.Services.AddSingleton<IPlcConnectionService>(serviceProvider =>
 builder.Services.AddSingleton<ProductionRuntimeService>();
 builder.Services.AddSingleton<IProductionRuntimeService>(serviceProvider =>
     serviceProvider.GetRequiredService<ProductionRuntimeService>());
+builder.Services.AddSingleton<IProductionReportsService, ProductionReportsService>();
 builder.Services.AddScoped<IRecipeToleranceService, RecipeToleranceService>();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
@@ -276,6 +278,43 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.UseAuthentication();
+
+app.Use(async (context, next) =>
+{
+    if (context.User?.Identity?.IsAuthenticated == true
+        && context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)
+        && !context.Request.Path.StartsWithSegments("/api/auth/session", StringComparison.OrdinalIgnoreCase)
+        && !context.Request.Path.StartsWithSegments("/api/auth/logout", StringComparison.OrdinalIgnoreCase)
+        && !context.Request.Path.StartsWithSegments("/api/auth/change-password", StringComparison.OrdinalIgnoreCase))
+    {
+        var username = context.User.Identity?.Name;
+        if (!string.IsNullOrWhiteSpace(username))
+        {
+            var authService = context.RequestServices.GetRequiredService<ILocalUserAuthService>();
+            var account = await authService.GetByUsernameAsync(username, context.RequestAborted);
+            if (account is not null && account.MustChangePassword)
+            {
+                var problem = new ProblemDetails
+                {
+                    Title = "Password change required",
+                    Detail = "You must change your password before using this endpoint.",
+                    Status = StatusCodes.Status403Forbidden,
+                    Type = "https://httpstatuses.com/403",
+                    Instance = context.Request.Path,
+                };
+
+                problem.Extensions["traceId"] = context.TraceIdentifier;
+                problem.Extensions["requiredAction"] = "change-password";
+
+                await Results.Json(problem, statusCode: StatusCodes.Status403Forbidden).ExecuteAsync(context);
+                return;
+            }
+        }
+    }
+
+    await next();
+});
+
 app.UseAuthorization();
 app.MapControllers();
 
@@ -283,7 +322,7 @@ app.MapControllers();
 // Minimal API surface
 // -----------------------------------------------------------------------------
 
-app.MapPost("/api/auth/login", async (
+var loginEndpoint = app.MapPost("/api/auth/login", async (
     LoginRequestDto request,
     HttpContext httpContext,
     ILocalUserAuthService localUserAuthService,
@@ -292,7 +331,7 @@ app.MapPost("/api/auth/login", async (
 {
     if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
     {
-        return Results.BadRequest(new { message = "Username and password are required." });
+        return BadRequestProblem("Username and password are required.", "missing_credentials");
     }
 
     var auth = await localUserAuthService.AuthenticateAsync(request.Username, request.Password, cancellationToken);
@@ -300,7 +339,7 @@ app.MapPost("/api/auth/login", async (
     {
         if (auth.IsLockedOut)
         {
-            return Results.StatusCode(StatusCodes.Status423Locked);
+            return LockedProblem("Account is temporarily locked due to repeated failed login attempts.", "account_locked");
         }
 
         return Results.Unauthorized();
@@ -325,9 +364,14 @@ app.MapPost("/api/auth/login", async (
         Role = auth.User.Role,
         ExpiresAtUtc = expiresAt,
         MustChangePassword = auth.User.MustChangePassword,
-        AccessToken = accessToken,
     });
-}).RequireRateLimiting("LoginLimiter");
+});
+
+var disableLoginRateLimiter = builder.Configuration.GetValue<bool>("App:DisableLoginRateLimiter");
+if (!disableLoginRateLimiter)
+{
+    loginEndpoint.RequireRateLimiting("LoginLimiter");
+}
 
 app.MapPost("/api/auth/logout", (HttpContext httpContext) =>
 {
@@ -358,7 +402,6 @@ app.MapGet("/api/auth/session", async (
         Role = account.Role,
         ExpiresAtUtc = DateTime.UtcNow.AddMinutes(jwtOptions.ExpirationMinutes),
         MustChangePassword = account.MustChangePassword,
-        AccessToken = null,
     });
 }).RequireAuthorization();
 
@@ -376,7 +419,7 @@ app.MapPost("/api/auth/change-password", async (
 
     if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 12)
     {
-        return Results.BadRequest(new { message = "New password must be at least 12 characters long." });
+        return BadRequestProblem("New password must be at least 12 characters long.", "weak_password");
     }
 
     var changed = await localUserAuthService.ChangePasswordAsync(
@@ -385,7 +428,9 @@ app.MapPost("/api/auth/change-password", async (
         request.NewPassword,
         cancellationToken);
 
-    return changed ? Results.NoContent() : Results.BadRequest(new { message = "Password change failed." });
+    return changed
+        ? Results.NoContent()
+        : BadRequestProblem("Password change failed.", "password_change_failed");
 }).RequireAuthorization();
 
 app.MapGet("/api/status", (IProductionRuntimeService runtimeService) =>
@@ -403,19 +448,19 @@ app.MapGet("/api/lines/{lineId:int}/details", (int lineId, IProductionRuntimeSer
 {
     var detail = runtimeService.GetLineDetail(lineId);
     return detail is null
-        ? Results.NotFound(new { message = "Line runtime details were not found." })
+    ? NotFoundProblem("Line runtime details were not found.", "line_runtime_not_found")
         : Results.Ok(detail);
 }).RequireAuthorization();
 
 app.MapGet("/api/production-runs", async (
     [AsParameters] ProductionRunsQuery query,
     PlantMonitorDbContext dbContext,
-    IProductionRuntimeService runtimeService,
+    IProductionReportsService reportsService,
     CancellationToken cancellationToken) =>
 {
     if (query.LineId is <= 0)
     {
-        return Results.BadRequest(new { message = "lineId must be a positive integer." });
+        return BadRequestProblem("lineId must be a positive integer.", "invalid_line_id");
     }
 
     if (query.LineId.HasValue)
@@ -426,7 +471,7 @@ app.MapGet("/api/production-runs", async (
 
         if (!lineExists)
         {
-            return Results.BadRequest(new { message = "lineId was not found." });
+            return BadRequestProblem("lineId was not found.", "line_not_found");
         }
     }
 
@@ -434,49 +479,49 @@ app.MapGet("/api/production-runs", async (
     var toUtc = query.ToDate?.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
     if (fromUtc.HasValue && toUtc.HasValue && toUtc.Value < fromUtc.Value)
     {
-        return Results.BadRequest(new { message = "toDate must be on or after fromDate." });
+        return BadRequestProblem("toDate must be on or after fromDate.", "invalid_date_range");
     }
 
     var (skip, take) = ResolvePagination(query.Page, query.PageSize, query.Skip, query.Take, 50, 500);
-    var rows = await runtimeService.GetCompletedRunsAsync(query.LineId, fromUtc, toUtc, skip, take, cancellationToken);
+    var rows = await reportsService.GetCompletedRunsAsync(query.LineId, fromUtc, toUtc, skip, take, cancellationToken);
     return Results.Ok(rows);
 }).RequireAuthorization();
 
 app.MapGet("/api/production-runs/{runId:guid}", async (
     Guid runId,
-    IProductionRuntimeService runtimeService,
+    IProductionReportsService reportsService,
     CancellationToken cancellationToken) =>
 {
-    var run = await runtimeService.GetCompletedRunAsync(runId, cancellationToken);
+    var run = await reportsService.GetCompletedRunAsync(runId, cancellationToken);
     return run is null
-        ? Results.NotFound(new { message = "Completed production run was not found." })
+    ? NotFoundProblem("Completed production run was not found.", "production_run_not_found")
         : Results.Ok(run);
 }).RequireAuthorization();
 
 app.MapDelete("/api/production-runs/{runId:guid}", async (
     Guid runId,
     ClaimsPrincipal user,
-    IProductionRuntimeService runtimeService,
+    IProductionReportsService reportsService,
     CancellationToken cancellationToken) =>
 {
     var username = user.Identity?.Name ?? "unknown";
     var role = user.FindFirstValue(ClaimTypes.Role) ?? "unknown";
 
-    var deleted = await runtimeService.DeleteCompletedRunAsync(runId, username, role, cancellationToken);
+    var deleted = await reportsService.DeleteCompletedRunAsync(runId, username, role, cancellationToken);
     return deleted
         ? Results.NoContent()
-        : Results.NotFound(new { message = "Completed production run was not found." });
+        : NotFoundProblem("Completed production run was not found.", "production_run_not_found");
 }).RequireAuthorization("AdminOnly");
 
 app.MapGet("/api/reports/events", async (
     [AsParameters] RuntimeEventsQuery query,
     PlantMonitorDbContext dbContext,
-    IProductionRuntimeService runtimeService,
+    IProductionReportsService reportsService,
     CancellationToken cancellationToken) =>
 {
     if (query.LineId is <= 0)
     {
-        return Results.BadRequest(new { message = "lineId must be a positive integer." });
+        return BadRequestProblem("lineId must be a positive integer.", "invalid_line_id");
     }
 
     if (query.LineId.HasValue)
@@ -487,7 +532,7 @@ app.MapGet("/api/reports/events", async (
 
         if (!lineExists)
         {
-            return Results.BadRequest(new { message = "lineId was not found." });
+            return BadRequestProblem("lineId was not found.", "line_not_found");
         }
     }
 
@@ -495,11 +540,11 @@ app.MapGet("/api/reports/events", async (
     var toUtc = query.ToDate?.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
     if (fromUtc.HasValue && toUtc.HasValue && toUtc.Value < fromUtc.Value)
     {
-        return Results.BadRequest(new { message = "toDate must be on or after fromDate." });
+        return BadRequestProblem("toDate must be on or after fromDate.", "invalid_date_range");
     }
 
     var (skip, take) = ResolvePagination(query.Page, query.PageSize, query.Skip, query.Take, 100, 1000);
-    var rows = await runtimeService.GetRuntimeEventsAsync(query.LineId, fromUtc, toUtc, skip, take, cancellationToken);
+    var rows = await reportsService.GetRuntimeEventsAsync(query.LineId, fromUtc, toUtc, skip, take, cancellationToken);
     return Results.Ok(rows);
 }).RequireAuthorization();
 
@@ -535,7 +580,9 @@ app.MapGet("/health/ready", async (PlantMonitorDbContext dbContext, Cancellation
     var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
     if (!canConnect)
     {
-        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        return ServiceUnavailableProblem(
+            "Database connectivity check failed.",
+            "database_unavailable");
     }
 
     return Results.Ok(new
@@ -994,6 +1041,58 @@ static (int Skip, int Take) ResolvePagination(
     }
 
     return (Math.Max(0, skip ?? 0), normalizedTake);
+}
+
+static IResult BadRequestProblem(string detail, string code)
+{
+    return Results.Problem(
+        detail: detail,
+        statusCode: StatusCodes.Status400BadRequest,
+        title: "Invalid request parameters.",
+        type: "https://httpstatuses.com/400",
+        extensions: new Dictionary<string, object?>
+        {
+            ["code"] = code,
+        });
+}
+
+static IResult NotFoundProblem(string detail, string code)
+{
+    return Results.Problem(
+        detail: detail,
+        statusCode: StatusCodes.Status404NotFound,
+        title: "Resource not found.",
+        type: "https://httpstatuses.com/404",
+        extensions: new Dictionary<string, object?>
+        {
+            ["code"] = code,
+        });
+}
+
+static IResult LockedProblem(string detail, string code)
+{
+    return Results.Problem(
+        detail: detail,
+        statusCode: StatusCodes.Status423Locked,
+        title: "Resource is locked.",
+        type: "https://httpstatuses.com/423",
+        extensions: new Dictionary<string, object?>
+        {
+            ["code"] = code,
+        });
+}
+
+static IResult ServiceUnavailableProblem(string detail, string code)
+{
+    return Results.Problem(
+        detail: detail,
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Service temporarily unavailable.",
+        type: "https://httpstatuses.com/503",
+        extensions: new Dictionary<string, object?>
+        {
+            ["code"] = code,
+        });
 }
 
 public partial class Program;

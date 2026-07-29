@@ -33,7 +33,7 @@ public sealed class ProductionStatisticsEngine
         if (_lastTimestampUtc is DateTime previous)
         {
             var elapsedSeconds = Math.Max(0d, (sample.TimestampUtc - previous).TotalSeconds);
-            if (sample.Mode == ControlMode.Auto)
+            if (_currentMode == ControlMode.Auto)
             {
                 _autoTimeSeconds += elapsedSeconds;
             }

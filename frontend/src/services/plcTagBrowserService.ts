@@ -66,6 +66,19 @@ export interface AutoMapTagCatalogResult {
   missingLogicalKeys: string[];
 }
 
+export interface CommissioningReadinessResult {
+  lineId: number;
+  manufacturer: string;
+  presetName: string;
+  presetVersion: number;
+  isReady: boolean;
+  requiredTagCount: number;
+  mappedRequiredTagCount: number;
+  missingRequiredTagKeys: string[];
+  issues: string[];
+  checkedAtUtc: string;
+}
+
 export async function browsePlcTags(
   request: PlcTagBrowseRequest
 ): Promise<PlcTagBrowseItem[]> {
@@ -113,4 +126,10 @@ export async function autoMapTagCatalog(
     "/admin/plc/auto-map-tags",
     request
   );
+}
+
+export async function getCommissioningReadiness(
+  lineId: number
+): Promise<CommissioningReadinessResult> {
+  return apiGet<CommissioningReadinessResult>(`/admin/lines/${lineId}/commissioning-check`);
 }

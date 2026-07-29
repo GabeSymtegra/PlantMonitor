@@ -34,6 +34,8 @@ Allowed line status values:
 
 - Running
 - Stopped
+- Startup
+- Bleedout
 - Faulted
 - Offline
 - Maintenance
@@ -47,7 +49,8 @@ Allowed controlMode values:
 
 Auth method:
 
-- JWT Bearer token in Authorization header.
+- Cookie-based session auth using HttpOnly `pm_auth` token cookie.
+- SignalR hub connections may also use `access_token` query values during WebSocket negotiation.
 
 Roles:
 
@@ -62,21 +65,22 @@ Endpoint policy summary:
 
 ## 4. Error Contract
 
-All non-2xx responses use this envelope:
+Validation and domain failures use RFC7807 ProblemDetails payloads:
 
 {
-	"traceId": "string",
-	"code": "string",
-	"message": "string",
-	"details": {
-		"fieldName": ["error1", "error2"]
-	}
+	"type": "https://httpstatuses.com/400",
+	"title": "Invalid request parameters.",
+	"status": 400,
+	"detail": "lineId must be a positive integer.",
+	"instance": "/api/production-runs",
+	"code": "invalid_line_id"
 }
 
 Rules:
 
-- details is optional and used for validation errors.
-- code examples: ValidationError, Unauthorized, Forbidden, NotFound, ServerError.
+- `code` is a machine-readable extension for client logic.
+- `traceId` may be included for correlation depending on middleware path.
+- Authorization failures continue to use standard 401/403 semantics.
 
 ## 5. DTO Models
 
@@ -157,19 +161,15 @@ Request:
 Response 200:
 
 {
-	"accessToken": "jwt",
+	"username": "test",
+	"role": "Admin",
 	"expiresAtUtc": "2026-07-01T20:00:00Z",
-	"user": {
-		"id": 1,
-		"username": "admin",
-		"role": "Admin",
-		"displayName": "Plant Admin"
-	}
+	"mustChangePassword": false
 }
 
 Response codes:
 
-- 200, 400, 401, 500
+- 200, 400, 401, 423
 
 ### 6.2 Dashboard
 
@@ -375,6 +375,30 @@ LineProtocolAssignmentDto
 Response codes:
 
 - 200, 400, 401, 403
+
+GET /api/admin/lines/{lineId}/commissioning-check
+
+- Evaluates whether all required logical tag slots are mapped for the line assignment.
+- Returns readiness state, missing required keys, and issue messages for commissioning handoff.
+
+Response 200:
+
+{
+	"lineId": 101,
+	"manufacturer": "AllenBradley",
+	"presetName": "BasicStatus",
+	"presetVersion": 1,
+	"isReady": false,
+	"requiredTagCount": 10,
+	"mappedRequiredTagCount": 8,
+	"missingRequiredTagKeys": ["machine_state", "control_mode"],
+	"issues": ["Missing required logical keys: machine_state, control_mode."],
+	"checkedAtUtc": "2026-07-29T18:10:00Z"
+}
+
+Response codes:
+
+- 200, 401, 403, 404
 
 GET /api/admin/lines/{lineId}/effective-tags
 

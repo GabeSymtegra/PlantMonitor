@@ -11,7 +11,7 @@ This document defines release gates for shipping PlantMonitor to a server-hosted
 
 ## Release Branch Strategy
 - main: stable release branch
-- copilothelpbranch (current): active integration branch
+- export (current): active integration branch
 - release/*: staged hardening and final verification
 
 ## Required Gates Before Release
