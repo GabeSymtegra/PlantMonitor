@@ -33,8 +33,6 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
 
     private static readonly IReadOnlyList<TagSlotDefinitionDto> RequiredTagSlots =
     [
-        new() { LogicalKey = "line_id", DisplayName = "Line ID", IsRequired = true, Description = "Unique line identifier from PLC." },
-        new() { LogicalKey = "product_id", DisplayName = "Product ID", IsRequired = true, Description = "Current product identifier/serial." },
         new() { LogicalKey = "control_mode", DisplayName = "Control Mode", IsRequired = true, Description = "Current control mode (Auto/Manual)." },
         new() { LogicalKey = "machine_state", DisplayName = "Machine State", IsRequired = true, Description = "Current machine state/status code." },
         new() { LogicalKey = "production_length", DisplayName = "Production Length", IsRequired = true, Description = "Current produced length." },

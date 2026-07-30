@@ -933,17 +933,17 @@ public sealed class PlcProtocolAdminController : ControllerBase
     {
         return logicalKey switch
         {
-            "line_id" => ["lineid", "line_id", "line.number", "line.numberid"],
-            "product_id" => ["productid", "product_id", "product", "productserial"],
-            "control_mode" => ["controlmode", "control_mode", "mode", "automanual"],
-            "machine_state" => ["machinestate", "machine_state", "state", "status"],
-            "production_length" => ["productionlength", "production_length", "totallength", "length"],
-            "bare_setpoint" => ["bareodsetpoint", "bare_setpoint", "bare.od.sp", "baretarget"],
-            "bare_actual" => ["bareodactual", "bare_actual", "bare.od.pv", "baremeasured"],
-            "hot_setpoint" => ["hotodsetpoint", "hot_setpoint", "hot.od.sp", "hottarget"],
-            "hot_actual" => ["hotodactual", "hot_actual", "hot.od.pv", "hotmeasured"],
-            "cold_setpoint" => ["coldodsetpoint", "cold_setpoint", "cold.od.sp", "coldtarget"],
-            "cold_actual" => ["coldodactual", "cold_actual", "cold.od.pv", "coldmeasured"],
+            "line_id" => ["line_id", "lineid"],
+            "product_id" => ["product_id", "productid"],
+            "control_mode" => ["control_status", "controlstatus", "control_mode", "controlmode"],
+            "machine_state" => ["machine_state", "machinestate"],
+            "production_length" => ["linespeed_sp", "line_speed_sp", "linespeedsetpoint", "line_speed_setpoint"],
+            "bare_setpoint" => ["bare_od_sp", "bareodsp", "bare_setpoint", "bareodsetpoint", "baretarget"],
+            "bare_actual" => ["bare_od_act", "bareodact", "bare_actual", "bareodactual", "baremeasured", "bareact"],
+            "hot_setpoint" => ["hot_od_sp", "hotodsp", "hot_setpoint", "hotodsetpoint", "hottarget"],
+            "hot_actual" => ["hot_od_act", "hotodact", "hot_actual", "hotodactual", "hotmeasured", "hotact"],
+            "cold_setpoint" => ["cold_od_sp", "coldodsp", "cold_setpoint", "coldodsetpoint", "coldtarget"],
+            "cold_actual" => ["cold_od_act", "coldodact", "cold_actual", "coldodactual", "coldmeasured", "coldact"],
             _ => [logicalKey],
         };
     }

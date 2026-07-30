@@ -1,11 +1,20 @@
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
   CircularProgress,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   FormControl,
   InputLabel,
+  LinearProgress,
   List,
   ListItemButton,
   ListItemText,
@@ -17,6 +26,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 import {
   addLine,
@@ -46,6 +56,7 @@ import {
   type TagSlotDefinition,
 } from "../services/plcTagBrowserService";
 import { ApiRequestError } from "../services/api/client";
+import { useDashboard } from "../context/useDashboard";
 import { LineStatus } from "../types/LineStatus";
 import type { LineLifecycleState, PlcManufacturer, ProductionLine } from "../types/ProductionLine";
 
@@ -173,6 +184,7 @@ function describeTagReadability(result: PlcTagReadResult): string {
 // Administration combines line configuration, PLC connection diagnostics, tag
 // discovery, and tag-to-logical-slot mapping in one workflow-heavy screen.
 export default function Administration() {
+  const { refresh: refreshDashboard } = useDashboard();
   const [lines, setLines] = useState<ProductionLine[]>([]);
   const [selectedLineId, setSelectedLineId] = useState<number | "new">("new");
   const [form, setForm] = useState<LineConfigForm>(emptyLineForm);
@@ -199,6 +211,12 @@ export default function Administration() {
   const [commissioningStatus, setCommissioningStatus] = useState("");
   const [commissioningReady, setCommissioningReady] = useState<boolean | null>(null);
   const [plcSettings, setPlcSettings] = useState<LinePlcSettingsForm>(defaultPlcSettings);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [testConnectionCompleted, setTestConnectionCompleted] = useState(false);
+  const [autoPopulateCompleted, setAutoPopulateCompleted] = useState(false);
+  const [newLineTagAssignmentsSaved, setNewLineTagAssignmentsSaved] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.lineLifecycleState === "Active"),
@@ -343,6 +361,8 @@ export default function Administration() {
     setDiscoveredTags([]);
     setSelectedTag(null);
     setSelectedTagResult(null);
+    setAutoPopulateCompleted(false);
+    setNewLineTagAssignmentsSaved(false);
   }
 
   function handleSelectLine(value: number | "new") {
@@ -356,6 +376,9 @@ export default function Administration() {
     if (value === "new") {
       setForm(emptyLineForm);
       setPlcSettings(defaultPlcSettings);
+      setTestConnectionCompleted(false);
+      setAutoPopulateCompleted(false);
+      setNewLineTagAssignmentsSaved(false);
       return;
     }
 
@@ -375,6 +398,9 @@ export default function Administration() {
       };
 
       setForm(lineForm);
+      setTestConnectionCompleted(true);
+      setAutoPopulateCompleted(true);
+      setNewLineTagAssignmentsSaved(true);
     }
   }
 
@@ -384,6 +410,7 @@ export default function Administration() {
   ) {
     if (key === "manufacturer" || key === "plcIp") {
       setConnectionResult(null);
+      setTestConnectionCompleted(false);
       setSuccess("");
       resetTagBrowser();
       setMappingStatus("");
@@ -460,11 +487,26 @@ export default function Administration() {
     }
 
     if (selectedLineId === "new") {
+      if (!testConnectionCompleted || connectionResult?.isConnected !== true) {
+        setError("Run a successful Test Connection before adding the line.");
+        return;
+      }
+
+      if (!autoPopulateCompleted) {
+        setError("Run Auto Populate before adding the line.");
+        return;
+      }
+
+      if (!newLineTagAssignmentsSaved) {
+        setError("Save Tag Assignments before adding the line.");
+        return;
+      }
+
       const nextLineNumber = lines.length
         ? Math.max(...lines.map((line) => line.lineNumber || 0)) + 1
         : 1;
 
-      await addLine({
+      const createdLine = await addLine({
         ...form,
         lineNumber: nextLineNumber,
         lineName: form.lineName.trim(),
@@ -486,7 +528,65 @@ export default function Administration() {
         plcIp: form.plcIp.trim(),
         isActive: false,
       });
-      setSuccess("Line added successfully.");
+
+      await upsertLineProtocolAssignment(createdLine.id, {
+        manufacturer: form.manufacturer,
+        presetName: "BasicStatus",
+        presetVersion: 1,
+        pollIntervalMs: plcSettings.pollIntervalMs,
+        routePath: plcSettings.routePath.trim() || "1,0",
+        processorType: plcSettings.processorType,
+        connectionTimeoutMs: plcSettings.connectionTimeoutMs,
+        readTimeoutMs: plcSettings.readTimeoutMs,
+        retryCount: plcSettings.retryCount,
+        retryDelayMs: plcSettings.retryDelayMs,
+      });
+
+      await replaceLineTagCatalog(createdLine.id, form.manufacturer, tagCatalog);
+
+      const readiness = await getCommissioningReadiness(createdLine.id);
+      setCommissioningReady(readiness.isReady);
+
+      if (readiness.isReady) {
+        await activateCommissionedLine(createdLine.id);
+        setCommissioningStatus("Commissioning passed and line was activated automatically.");
+      } else {
+        const issues = readiness.issues.length > 0
+          ? readiness.issues.join("\n")
+          : "Commissioning requirements are not fully satisfied yet.";
+
+        setCommissioningStatus(
+          `Line saved in Draft state. Resolve these issues, then activate:\n${issues}`
+        );
+      }
+
+      const refreshed = await getAllLines();
+      setLines(refreshed);
+      const current = refreshed.find((line) => line.id === createdLine.id);
+      if (current) {
+        setSelectedLineId(current.id);
+        setForm({
+          lineNumber: current.lineNumber,
+          lineName: current.lineName,
+          product: current.product,
+          recipeId: current.recipeId || "Unknown",
+          machineId: current.machineId || "Unknown",
+          operatorName: current.operatorName || "Unknown",
+          plcIp: current.plcIp,
+          manufacturer: current.manufacturer,
+          lineLifecycleState: current.lineLifecycleState,
+        });
+      }
+
+      setSuccess("Line added successfully. Configuration and tag assignments were saved.");
+
+      try {
+        await refreshDashboard();
+      } catch {
+        // Keep admin flow successful even if dashboard refresh falls back to polling.
+      }
+
+      return;
     } else {
       await updateLine(selectedLineId, {
         lineNumber: selectedLine?.lineNumber ?? form.lineNumber,
@@ -505,9 +605,7 @@ export default function Administration() {
     const refreshed = await getAllLines();
     setLines(refreshed);
 
-    const assignmentLineId = selectedLineId === "new"
-      ? refreshed[refreshed.length - 1]?.id
-      : selectedLineId;
+    const assignmentLineId = selectedLineId;
 
     if (assignmentLineId) {
       await upsertLineProtocolAssignment(assignmentLineId, {
@@ -524,12 +622,18 @@ export default function Administration() {
       });
     }
 
-    if (selectedLineId === "new") {
-      const newest = refreshed[refreshed.length - 1];
+    try {
+      await refreshDashboard();
+    } catch {
+      // Keep admin flow successful even if dashboard refresh falls back to polling.
+    }
 
-      if (newest) {
-        handleSelectLine(newest.id);
-      }
+    const current = refreshed.find((line) => line.id === selectedLineId);
+    if (current) {
+      setForm((previous) => ({
+        ...previous,
+        lineLifecycleState: current.lineLifecycleState,
+      }));
     }
   }
 
@@ -538,13 +642,19 @@ export default function Administration() {
       return;
     }
 
+    setConfirmDeleteOpen(true);
+  }
+
+  async function confirmDeleteLine() {
+    if (selectedLineId === "new") {
+      setConfirmDeleteOpen(false);
+      return;
+    }
+
     setError("");
     setSuccess("");
 
-    const confirmed = window.confirm("Delete this line configuration?");
-    if (!confirmed) {
-      return;
-    }
+    setConfirmDeleteOpen(false);
 
     await deleteLine(selectedLineId);
     const refreshed = await getAllLines();
@@ -552,6 +662,12 @@ export default function Administration() {
     setSelectedLineId("new");
     setForm(emptyLineForm);
     setSuccess("Line deleted successfully.");
+
+    try {
+      await refreshDashboard();
+    } catch {
+      // Keep admin flow successful even if dashboard refresh falls back to polling.
+    }
   }
 
   async function handleTestConnection() {
@@ -570,10 +686,11 @@ export default function Administration() {
       setConnectionResult(result);
 
       if (result.isConnected) {
+        setTestConnectionCompleted(true);
         setSuccess("PLC connection verified successfully.");
         await discoverTags(result.driver, form.plcIp.trim());
-        await handleAutoMapTagCatalog(result);
       } else {
+        setTestConnectionCompleted(false);
         resetTagBrowser();
         setError(formatConnectionTaskTrace(result));
       }
@@ -591,6 +708,7 @@ export default function Administration() {
         ipAddress: form.plcIp.trim(),
         message,
       });
+      setTestConnectionCompleted(false);
       resetTagBrowser();
       setError(message);
     } finally {
@@ -674,6 +792,10 @@ export default function Administration() {
   }
 
   function updateTagCatalog(logicalKey: string, updates: Partial<LineTagCatalogEntry>) {
+    if (selectedLineId === "new") {
+      setNewLineTagAssignmentsSaved(false);
+    }
+
     setTagCatalog((previous) =>
       previous.map((entry) =>
         entry.logicalKey === logicalKey
@@ -710,7 +832,42 @@ export default function Administration() {
         options: toConnectionOptions(plcSettings),
       });
 
-      setTagCatalog(buildCatalogFromSlots(slots, result.suggestedMappings));
+      const suggestedByKey = new Map(
+        result.suggestedMappings.map((entry) => [entry.logicalKey, entry])
+      );
+
+      const baseCatalog = tagCatalog.length > 0
+        ? tagCatalog
+        : buildCatalogFromSlots(slots);
+
+      let filledBlankCount = 0;
+      let preservedManualCount = 0;
+
+      const mergedCatalog = baseCatalog.map((entry) => {
+        const suggestion = suggestedByKey.get(entry.logicalKey);
+        const hasManualAssignment = entry.plcAddress.trim().length > 0;
+
+        if (hasManualAssignment) {
+          preservedManualCount += 1;
+          return entry;
+        }
+
+        if (!suggestion || suggestion.plcAddress.trim().length === 0) {
+          return entry;
+        }
+
+        filledBlankCount += 1;
+        return {
+          ...entry,
+          plcAddress: suggestion.plcAddress,
+          dataType: suggestion.dataType,
+          driver: suggestion.driver,
+        };
+      });
+
+      setTagCatalog(mergedCatalog);
+      setAutoPopulateCompleted(true);
+      setNewLineTagAssignmentsSaved(false);
 
       const lowConfidence = result.suggestionDetails
         .filter((suggestion) => suggestion.confidence < 80)
@@ -720,12 +877,18 @@ export default function Administration() {
         ? ` Low confidence suggestions: ${lowConfidence.join(", ")}.`
         : "";
 
+      const preservationSummary = preservedManualCount > 0
+        ? ` Preserved ${preservedManualCount} manual assignment${preservedManualCount === 1 ? "" : "s"}.`
+        : "";
+
+      const fillSummary = ` Filled ${filledBlankCount} blank slot${filledBlankCount === 1 ? "" : "s"}.`;
+
       if (result.missingLogicalKeys.length > 0) {
         setMappingStatus(
-          `Auto-map completed with gaps. Missing: ${result.missingLogicalKeys.join(", ")}. Use the PLC Tag dropdowns to override any slot manually.${guidance}`
+          `Auto-map completed with gaps.${fillSummary}${preservationSummary} Missing: ${result.missingLogicalKeys.join(", ")}. Use the PLC Tag dropdowns to override any slot manually.${guidance}`
         );
       } else {
-        setMappingStatus(`Auto-map completed. Review the suggested assignments or override any slot manually before saving.${guidance}`);
+        setMappingStatus(`Auto-map completed.${fillSummary}${preservationSummary} Review the suggested assignments or override any slot manually before saving.${guidance}`);
       }
     } catch (requestError) {
       const message =
@@ -736,6 +899,7 @@ export default function Administration() {
             : "Auto-map request failed.";
 
       setMappingStatus(message);
+      setAutoPopulateCompleted(false);
     } finally {
       setAutoMapping(false);
     }
@@ -745,7 +909,18 @@ export default function Administration() {
     setMappingStatus("");
 
     if (selectedLineId === "new") {
-      setMappingStatus("Save the line first, then save tag assignments.");
+      if (!testConnectionCompleted || connectionResult?.isConnected !== true) {
+        setMappingStatus("Run Test Connection before saving tag assignments.");
+        return;
+      }
+
+      if (!autoPopulateCompleted) {
+        setMappingStatus("Run Auto Populate before saving tag assignments.");
+        return;
+      }
+
+      setNewLineTagAssignmentsSaved(true);
+      setMappingStatus("Tag assignments staged. Click Add Line to persist configuration and assignments.");
       return;
     }
 
@@ -754,6 +929,11 @@ export default function Administration() {
       const saved = await replaceLineTagCatalog(selectedLineId, form.manufacturer, tagCatalog);
       setTagCatalog(buildCatalogFromSlots(tagSlots, saved));
       setMappingStatus("Tag assignments saved.");
+      try {
+        await refreshDashboard();
+      } catch {
+        // Keep admin flow successful even if dashboard refresh falls back to polling.
+      }
     } catch (requestError) {
       const message =
         requestError instanceof ApiRequestError
@@ -848,6 +1028,11 @@ export default function Administration() {
 
       setCommissioningStatus("Line activation completed. Lifecycle state is now Active.");
       setCommissioningReady(true);
+      try {
+        await refreshDashboard();
+      } catch {
+        // Keep admin flow successful even if dashboard refresh falls back to polling.
+      }
     } catch (requestError) {
       const message =
         requestError instanceof ApiRequestError
@@ -866,7 +1051,39 @@ export default function Administration() {
   const hasValidRoutePath = /^\d+(,\d+)*$/.test(plcSettings.routePath.trim());
   const canTestConnection = isValidIpv4Address(form.plcIp) && hasValidRoutePath && !testingConnection;
   const isNewLine = selectedLineId === "new";
-  const canSaveLine = !isNewLine || connectionResult?.isConnected === true;
+  const canSaveLine = isNewLine
+    ? testConnectionCompleted && autoPopulateCompleted && newLineTagAssignmentsSaved
+    : true;
+  const stepStatuses = [
+    {
+      label: "Test Connection",
+      complete: testConnectionCompleted,
+    },
+    {
+      label: "Auto Populate",
+      complete: autoPopulateCompleted,
+    },
+    {
+      label: "Manual Tag Edits",
+      complete: autoPopulateCompleted,
+    },
+    {
+      label: "Save Tag Assignments",
+      complete: newLineTagAssignmentsSaved,
+    },
+    {
+      label: "Add Line",
+      complete: selectedLineId !== "new",
+    },
+  ];
+  const totalSteps = stepStatuses.length;
+  const completedStepCount = stepStatuses.filter((step) => step.complete).length;
+  const currentStepIndex = stepStatuses.findIndex((step) => !step.complete);
+  const displayStepNumber = currentStepIndex === -1 ? totalSteps : currentStepIndex + 1;
+  const currentStepLabel = currentStepIndex === -1
+    ? "Complete"
+    : stepStatuses[currentStepIndex].label;
+  const progressPercent = (completedStepCount / totalSteps) * 100;
 
   return (
     <Stack spacing={3}>
@@ -942,6 +1159,30 @@ export default function Administration() {
             </Alert>
           ) : null}
 
+          <Paper variant="outlined" sx={{ p: 1.5 }}>
+            <Stack spacing={1}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                justifyContent="space-between"
+                alignItems={{ xs: "flex-start", sm: "center" }}
+                spacing={0.5}
+              >
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                  Commissioning Progress
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {`Step ${displayStepNumber} of ${totalSteps}: ${currentStepLabel}`}
+                </Typography>
+              </Stack>
+              <LinearProgress
+                variant="determinate"
+                value={progressPercent}
+                aria-label="Commissioning Progress"
+                sx={{ height: 8, borderRadius: 999 }}
+              />
+            </Stack>
+          </Paper>
+
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
             <TextField
               label="Line Name"
@@ -1011,143 +1252,102 @@ export default function Administration() {
             />
           </Stack>
 
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Stack spacing={2}>
+          <Accordion expanded={showAdvancedSettings} onChange={(_, expanded) => setShowAdvancedSettings(expanded)}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                Allen-Bradley Connection Settings
+                Advanced Connection Settings
               </Typography>
-
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                <TextField
-                  label="Poll Interval (ms)"
-                  type="number"
-                  value={plcSettings.pollIntervalMs}
-                  onChange={(event) =>
-                    updatePlcSetting("pollIntervalMs", Number(event.target.value))
-                  }
-                  fullWidth
-                  inputProps={{ min: 500, max: 60000 }}
-                />
-
-                <TextField
-                  label="Route/Path"
-                  value={plcSettings.routePath}
-                  onChange={(event) => updatePlcSetting("routePath", event.target.value)}
-                  fullWidth
-                  placeholder="1,0"
-                />
-
-                <FormControl fullWidth>
-                  <InputLabel id="processor-type-label">Processor Type</InputLabel>
-                  <Select
-                    labelId="processor-type-label"
-                    label="Processor Type"
-                    value={plcSettings.processorType}
+            </AccordionSummary>
+            <AccordionDetails>
+              <Stack spacing={2}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  <TextField
+                    label="Poll Interval (ms)"
+                    type="number"
+                    value={plcSettings.pollIntervalMs}
                     onChange={(event) =>
-                      updatePlcSetting(
-                        "processorType",
-                        event.target.value as LinePlcSettingsForm["processorType"]
-                      )
+                      updatePlcSetting("pollIntervalMs", Number(event.target.value))
                     }
-                  >
-                    <MenuItem value="ControlLogix">ControlLogix</MenuItem>
-                    <MenuItem value="CompactLogix">CompactLogix</MenuItem>
-                    <MenuItem value="Micro800">Micro800</MenuItem>
-                  </Select>
-                </FormControl>
+                    fullWidth
+                    inputProps={{ min: 500, max: 60000 }}
+                  />
+
+                  <TextField
+                    label="Route/Path"
+                    value={plcSettings.routePath}
+                    onChange={(event) => updatePlcSetting("routePath", event.target.value)}
+                    fullWidth
+                    placeholder="1,0"
+                  />
+
+                  <FormControl fullWidth>
+                    <InputLabel id="processor-type-label">Processor Type</InputLabel>
+                    <Select
+                      labelId="processor-type-label"
+                      label="Processor Type"
+                      value={plcSettings.processorType}
+                      onChange={(event) =>
+                        updatePlcSetting(
+                          "processorType",
+                          event.target.value as LinePlcSettingsForm["processorType"]
+                        )
+                      }
+                    >
+                      <MenuItem value="ControlLogix">ControlLogix</MenuItem>
+                      <MenuItem value="CompactLogix">CompactLogix</MenuItem>
+                      <MenuItem value="Micro800">Micro800</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Stack>
+
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  <TextField
+                    label="Connection Timeout (ms)"
+                    type="number"
+                    value={plcSettings.connectionTimeoutMs}
+                    onChange={(event) =>
+                      updatePlcSetting("connectionTimeoutMs", Number(event.target.value))
+                    }
+                    fullWidth
+                    inputProps={{ min: 500, max: 30000 }}
+                  />
+
+                  <TextField
+                    label="Read Timeout (ms)"
+                    type="number"
+                    value={plcSettings.readTimeoutMs}
+                    onChange={(event) =>
+                      updatePlcSetting("readTimeoutMs", Number(event.target.value))
+                    }
+                    fullWidth
+                    inputProps={{ min: 500, max: 30000 }}
+                  />
+
+                  <TextField
+                    label="Retry Count"
+                    type="number"
+                    value={plcSettings.retryCount}
+                    onChange={(event) =>
+                      updatePlcSetting("retryCount", Number(event.target.value))
+                    }
+                    fullWidth
+                    inputProps={{ min: 0, max: 5 }}
+                  />
+
+                  <TextField
+                    label="Retry Delay (ms)"
+                    type="number"
+                    value={plcSettings.retryDelayMs}
+                    onChange={(event) =>
+                      updatePlcSetting("retryDelayMs", Number(event.target.value))
+                    }
+                    fullWidth
+                    inputProps={{ min: 0, max: 10000 }}
+                  />
+                </Stack>
               </Stack>
-
-              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-                <TextField
-                  label="Connection Timeout (ms)"
-                  type="number"
-                  value={plcSettings.connectionTimeoutMs}
-                  onChange={(event) =>
-                    updatePlcSetting("connectionTimeoutMs", Number(event.target.value))
-                  }
-                  fullWidth
-                  inputProps={{ min: 500, max: 30000 }}
-                />
-
-                <TextField
-                  label="Read Timeout (ms)"
-                  type="number"
-                  value={plcSettings.readTimeoutMs}
-                  onChange={(event) =>
-                    updatePlcSetting("readTimeoutMs", Number(event.target.value))
-                  }
-                  fullWidth
-                  inputProps={{ min: 500, max: 30000 }}
-                />
-
-                <TextField
-                  label="Retry Count"
-                  type="number"
-                  value={plcSettings.retryCount}
-                  onChange={(event) =>
-                    updatePlcSetting("retryCount", Number(event.target.value))
-                  }
-                  fullWidth
-                  inputProps={{ min: 0, max: 5 }}
-                />
-
-                <TextField
-                  label="Retry Delay (ms)"
-                  type="number"
-                  value={plcSettings.retryDelayMs}
-                  onChange={(event) =>
-                    updatePlcSetting("retryDelayMs", Number(event.target.value))
-                  }
-                  fullWidth
-                  inputProps={{ min: 0, max: 10000 }}
-                />
-              </Stack>
-            </Stack>
-          </Paper>
-
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField
-              label="Status (PLC)"
-              value={selectedLine?.status ?? "Offline"}
-              fullWidth
-              disabled
-            />
-
-            <TextField
-              label="Control Mode (PLC)"
-              value={selectedLine?.controlMode ?? "Auto"}
-              fullWidth
-              disabled
-            />
-
-             <TextField
-               label="Lifecycle State"
-               value={selectedLine?.lineLifecycleState ?? "Draft"}
-               fullWidth
-               disabled
-             />
-          </Stack>
-
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField
-              label="Total Length (ft) (PLC)"
-              value={selectedLine ? selectedLine.totalLength.toLocaleString() : "0"}
-              fullWidth
-              disabled
-            />
-
-            <TextField
-              label="Runtime (PLC)"
-              value={selectedLine?.runtime ?? "00:00:00"}
-              fullWidth
-              disabled
-            />
-          </Stack>
-
-          <Alert severity="info">
-            Status, control mode, total length, and runtime are PLC-driven values and cannot be edited here.
-            Administration is used for network and line configuration.
-          </Alert>
+            </AccordionDetails>
+          </Accordion>
 
           <Paper
             variant="outlined"
@@ -1163,7 +1363,7 @@ export default function Administration() {
               </Typography>
 
               <Typography color="text.secondary">
-                Test the selected driver against the entered PLC IP before saving the line.
+                Step 1 of 5: test the selected driver against the entered PLC IP.
               </Typography>
 
               {connectionResult ? (
@@ -1211,6 +1411,14 @@ export default function Administration() {
                   )}
                 </Button>
               </Stack>
+
+              <Alert severity={testConnectionCompleted ? "success" : "info"}>
+                <Typography variant="body2">
+                  {testConnectionCompleted
+                    ? "Step 1 complete. Continue with Auto Populate."
+                    : "Complete Step 1 before tag mapping actions are available."}
+                </Typography>
+              </Alert>
             </Stack>
           </Paper>
 
@@ -1384,7 +1592,7 @@ export default function Administration() {
                     Tag Slot Assignment
                   </Typography>
                   <Typography color="text.secondary">
-                    Auto-map the discovered PLC tags into the required logical slots, then use the dropdowns to assign a different tag to any column if needed. Each PLC tag can only be used once per line.
+                    Steps 2-4: Auto Populate, adjust tags manually if needed, then Save Tag Assignments. Each PLC tag can only be used once per line.
                   </Typography>
                 </Stack>
 
@@ -1411,7 +1619,11 @@ export default function Administration() {
                     onClick={() => {
                       void handleAutoMapTagCatalog();
                     }}
-                    disabled={autoMapping || selectedLineId === "new" || !connectionResult?.isConnected}
+                    disabled={
+                      autoMapping
+                      || !testConnectionCompleted
+                      || !connectionResult?.isConnected
+                    }
                   >
                     {autoMapping ? "Auto-Mapping..." : "Auto Populate"}
                   </Button>
@@ -1419,12 +1631,23 @@ export default function Administration() {
                   <Button
                     variant="contained"
                     onClick={handleSaveTagCatalog}
-                    disabled={savingTagCatalog || selectedLineId === "new"}
+                    disabled={
+                      savingTagCatalog
+                      || (selectedLineId === "new" && (!testConnectionCompleted || !autoPopulateCompleted))
+                    }
                   >
                     {savingTagCatalog ? "Saving..." : "Save Tag Assignments"}
                   </Button>
                 </Stack>
               </Stack>
+
+              <Alert severity={newLineTagAssignmentsSaved ? "success" : "info"}>
+                <Typography variant="body2">
+                  {newLineTagAssignmentsSaved
+                    ? "Step 4 complete. Tag assignments are ready."
+                    : "Complete Step 4 by saving tag assignments before Add Line."}
+                </Typography>
+              </Alert>
 
               {mappingStatus ? (
                 <Alert severity="info">
@@ -1526,8 +1749,77 @@ export default function Administration() {
               {selectedLineId === "new" ? "Add Line" : "Save Changes"}
             </Button>
           </Stack>
+
+          <Accordion expanded={showDiagnostics} onChange={(_, expanded) => setShowDiagnostics(expanded)}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                Diagnostics (Read Only)
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Stack spacing={2}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  <TextField
+                    label="Status (PLC)"
+                    value={selectedLine?.status ?? "Offline"}
+                    fullWidth
+                    disabled
+                  />
+
+                  <TextField
+                    label="Control Mode (PLC)"
+                    value={selectedLine?.controlMode ?? "Auto"}
+                    fullWidth
+                    disabled
+                  />
+
+                  <TextField
+                    label="Lifecycle State"
+                    value={selectedLine?.lineLifecycleState ?? "Draft"}
+                    fullWidth
+                    disabled
+                  />
+                </Stack>
+
+                <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                  <TextField
+                    label="Total Length (ft) (PLC)"
+                    value={selectedLine ? selectedLine.totalLength.toLocaleString() : "0"}
+                    fullWidth
+                    disabled
+                  />
+
+                  <TextField
+                    label="Runtime (PLC)"
+                    value={selectedLine?.runtime ?? "00:00:00"}
+                    fullWidth
+                    disabled
+                  />
+                </Stack>
+
+                <Alert severity="info">
+                  Status, control mode, total length, and runtime are PLC-driven values and cannot be edited here.
+                </Alert>
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
         </Stack>
       </Paper>
+
+      <Dialog open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)}>
+        <DialogTitle>Delete line configuration</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will remove the line from active use and keep the action in your audit trail. Continue?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeleteOpen(false)}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={() => void confirmDeleteLine()}>
+            Delete Line
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

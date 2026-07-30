@@ -41,7 +41,9 @@ builder.Services.PostConfigure<JwtOptions>(options =>
 
 var connectionString = builder.Configuration.GetConnectionString("PlantMonitor")
     ?? "Data Source=plantmonitor.db";
-connectionString = ResolvePlantMonitorConnectionString(connectionString, builder.Environment);
+connectionString = ResolvePlantMonitorConnectionString(
+    connectionString,
+    builder.Configuration["App:DatabasePath"]);
 
 builder.Services.AddDbContext<PlantMonitorDbContext>(options =>
     options.UseSqlite(connectionString));
@@ -993,13 +995,11 @@ static string ResolveJwtSigningKey(IConfiguration configuration, IWebHostEnviron
     return generated;
 }
 
-static string ResolvePlantMonitorConnectionString(string configuredConnectionString, IWebHostEnvironment environment)
+static string ResolvePlantMonitorConnectionString(string configuredConnectionString, string? configuredDatabasePath)
 {
     var sqlite = new SqliteConnectionStringBuilder(configuredConnectionString);
-    if (string.IsNullOrWhiteSpace(sqlite.DataSource)
-        || sqlite.DataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase)
-        || Path.IsPathRooted(sqlite.DataSource)
-        || environment.IsDevelopment())
+
+    if (string.Equals(sqlite.DataSource, ":memory:", StringComparison.OrdinalIgnoreCase))
     {
         return sqlite.ToString();
     }
@@ -1007,6 +1007,22 @@ static string ResolvePlantMonitorConnectionString(string configuredConnectionStr
     var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
     var dataDir = Path.Combine(programData, "PlantMonitor", "Data");
     Directory.CreateDirectory(dataDir);
+
+    if (!string.IsNullOrWhiteSpace(configuredDatabasePath))
+    {
+        var overridePath = configuredDatabasePath.Trim();
+        sqlite.DataSource = Path.IsPathRooted(overridePath)
+            ? overridePath
+            : Path.Combine(dataDir, overridePath);
+
+        return sqlite.ToString();
+    }
+
+    if (string.IsNullOrWhiteSpace(sqlite.DataSource)
+        || Path.IsPathRooted(sqlite.DataSource))
+    {
+        return sqlite.ToString();
+    }
 
     sqlite.DataSource = Path.Combine(dataDir, sqlite.DataSource);
     return sqlite.ToString();

@@ -8,16 +8,29 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IDispos
 {
     private readonly string _databasePath;
     private readonly string _locksDirectory;
+    private readonly bool _cleanOnStart;
+    private readonly bool _cleanOnDispose;
 
     public TestWebApplicationFactory()
+        : this(databasePath: null, cleanOnStart: true, cleanOnDispose: true)
     {
-        _databasePath = Path.Combine(AppContext.BaseDirectory, "plantmonitor.db");
-        _locksDirectory = Path.Combine(AppContext.BaseDirectory, ".locks");
+    }
 
-        TryDelete(_databasePath);
-        TryDelete(_databasePath + "-wal");
-        TryDelete(_databasePath + "-shm");
-        TryDeleteDirectory(_locksDirectory);
+    internal TestWebApplicationFactory(
+        string? databasePath = null,
+        bool cleanOnStart = true,
+        bool cleanOnDispose = true)
+    {
+        _databasePath = databasePath
+            ?? Path.Combine(Path.GetTempPath(), $"plantmonitor-tests-{Guid.NewGuid():N}.db");
+        _locksDirectory = Path.Combine(Path.GetDirectoryName(_databasePath) ?? AppContext.BaseDirectory, ".locks");
+        _cleanOnStart = cleanOnStart;
+        _cleanOnDispose = cleanOnDispose;
+
+        if (_cleanOnStart)
+        {
+            CleanupDatabaseArtifacts();
+        }
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -27,6 +40,7 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IDispos
             var overrides = new Dictionary<string, string?>
             {
                 ["App:DisableLoginRateLimiter"] = "true",
+                ["App:DatabasePath"] = _databasePath,
             };
 
             configBuilder.AddInMemoryCollection(overrides);
@@ -42,17 +56,18 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IDispos
             return;
         }
 
-        try
+        if (_cleanOnDispose)
         {
-            if (File.Exists(_databasePath))
-            {
-                File.Delete(_databasePath);
-            }
+            CleanupDatabaseArtifacts();
         }
-        catch
-        {
-            // Best-effort cleanup for test database files.
-        }
+    }
+
+    private void CleanupDatabaseArtifacts()
+    {
+        TryDelete(_databasePath);
+        TryDelete(_databasePath + "-wal");
+        TryDelete(_databasePath + "-shm");
+        TryDeleteDirectory(_locksDirectory);
     }
 
     private static void TryDelete(string path)
