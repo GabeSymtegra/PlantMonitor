@@ -242,6 +242,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.1.101");
 
         var response = await client.PutAsJsonAsync("/api/admin/lines/101/tag-catalog", new
         {
@@ -361,6 +362,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.1.101");
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -389,6 +391,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.1.101");
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -423,6 +426,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.1.101");
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -461,6 +465,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.1.101");
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -494,6 +499,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.1.101");
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -529,6 +535,7 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.1.101");
 
         var response = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -590,6 +597,70 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
         });
 
         loginResponse.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task UpsertProtocolAssignment_WhenLineDoesNotExist_ReturnsNotFound_AndDoesNotCreateLine()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var response = await client.PutAsJsonAsync("/api/admin/lines/40401/protocol-assignment", new
+        {
+            manufacturer = "AllenBradley",
+            presetName = "BasicStatus",
+            presetVersion = 1,
+            pollIntervalMs = 1500,
+            routePath = "1,0",
+            processorType = "ControlLogix",
+            connectionTimeoutMs = 3000,
+            readTimeoutMs = 3000,
+            retryCount = 1,
+            retryDelayMs = 250,
+        });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("line_config_not_found", payload!["code"]?.GetValue<string>());
+
+        var linesResponse = await client.GetAsync("/api/lines");
+        linesResponse.EnsureSuccessStatusCode();
+
+        var linesPayload = await linesResponse.Content.ReadFromJsonAsync<JsonArray>();
+        Assert.NotNull(linesPayload);
+        Assert.DoesNotContain(linesPayload!, line => line?["id"]?.GetValue<int>() == 40401);
+    }
+
+    private static async Task EnsureLineExistsAsync(HttpClient client, int lineId, string plcIp)
+    {
+        var linesResponse = await client.GetAsync("/api/lines");
+        linesResponse.EnsureSuccessStatusCode();
+
+        var lines = await linesResponse.Content.ReadFromJsonAsync<JsonArray>() ?? [];
+        var exists = lines.Any(line => line?["id"]?.GetValue<int>() == lineId);
+        if (exists)
+        {
+            return;
+        }
+
+        var createResponse = await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = lineId,
+            lineName = $"Line {lineId}",
+            productId = "123-456-78-9",
+            recipeId = "RCP-TEST",
+            machineId = "MX-TEST",
+            operatorName = "operator-test",
+            plcIp,
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 1500,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        createResponse.EnsureSuccessStatusCode();
     }
 }
 

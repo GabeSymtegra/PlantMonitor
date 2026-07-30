@@ -3,12 +3,10 @@ const API_BASE =
   "/api";
 
 // -----------------------------------------------------------------------------
-// Auth token state and exported API error type
+// Exported API error type and auth-expiry event contract
 // -----------------------------------------------------------------------------
 
 export const AUTH_EXPIRED_EVENT = "plantmonitor-auth-expired";
-
-let currentAccessToken: string | null = null;
 
 export class ApiRequestError extends Error {
   public readonly method: string;
@@ -57,10 +55,6 @@ function buildUrl(endpoint: string): string {
   return `${API_BASE}${resolvedEndpoint}`;
 }
 
-export function setApiAccessToken(token: string | null) {
-  currentAccessToken = token;
-}
-
 function buildRequestTrace(
   method: string,
   url: string,
@@ -76,26 +70,12 @@ function buildRequestTrace(
   return lines.join("\n");
 }
 
-function getAuthHeaders(): HeadersInit {
-  const token = currentAccessToken;
-
-  if (!token) {
-    return {};
-  }
-
-  return {
-    Authorization: `Bearer ${token}`,
-  };
-}
-
 // Unauthorized responses outside the login endpoint trigger a global auth
 // expiry event so the auth context can clear stale sessions.
 function dispatchAuthExpiredIfNeeded(url: string, status: number) {
   if (status !== 401 || url.endsWith("/auth/login")) {
     return;
   }
-
-  currentAccessToken = null;
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
@@ -162,7 +142,6 @@ async function request<T>(
       credentials: "include",
       headers: {
         ...(body ? { "Content-Type": "application/json" } : {}),
-        ...getAuthHeaders(),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -211,9 +190,6 @@ export async function apiDelete(endpoint: string): Promise<void> {
     const response = await fetch(url, {
       method,
       credentials: "include",
-      headers: {
-        ...getAuthHeaders(),
-      },
     });
 
     if (!response.ok) {

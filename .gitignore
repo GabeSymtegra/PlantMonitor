@@ -9,6 +9,8 @@ frontend/dist/
 bin/
 obj/
 artifacts/
+backend/wwwroot/
+backend/.locks/
 
 # Runtime data
 *.db

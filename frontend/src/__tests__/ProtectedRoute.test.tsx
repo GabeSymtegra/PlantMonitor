@@ -24,6 +24,7 @@ function renderWithAuth(
         isAdmin: options.user?.role === "Admin",
         canConfigure: options.user?.role === "Admin",
         login: async () => ({ authenticated: true, mustChangePassword: false }),
+        refreshSession: async () => undefined,
         logout: () => undefined,
       }}
     >

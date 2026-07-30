@@ -21,6 +21,7 @@ vi.mock("../context/useAuth", () => ({
       role: "Admin",
       mustChangePassword: true,
     },
+    refreshSession: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 

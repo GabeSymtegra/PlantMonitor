@@ -89,28 +89,15 @@ builder.Services
         {
             OnMessageReceived = context =>
             {
-                var authHeader = context.Request.Headers.Authorization.ToString();
-                var hasBearerHeader = !string.IsNullOrWhiteSpace(authHeader)
-                    && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
-
-                if (!hasBearerHeader)
+                var cookieToken = context.Request.Cookies["pm_auth"];
+                if (string.IsNullOrWhiteSpace(cookieToken))
                 {
-                    var cookieToken = context.Request.Cookies["pm_auth"];
-                    if (!string.IsNullOrWhiteSpace(cookieToken))
-                    {
-                        context.Token = cookieToken;
-                    }
+                    // Cookie-only authentication: do not fall back to header or query tokens.
+                    context.NoResult();
+                    return Task.CompletedTask;
                 }
 
-                var accessToken = context.Request.Query["access_token"];
-                var path = context.HttpContext.Request.Path;
-
-                if (string.IsNullOrWhiteSpace(context.Token)
-                    && !string.IsNullOrEmpty(accessToken)
-                    && path.StartsWithSegments("/hubs/lines"))
-                {
-                    context.Token = accessToken;
-                }
+                context.Token = cookieToken;
 
                 return Task.CompletedTask;
             }

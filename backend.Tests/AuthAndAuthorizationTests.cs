@@ -126,6 +126,7 @@ public class AuthAndAuthorizationTests : IClassFixture<TestWebApplicationFactory
     {
         var client = _factory.CreateClient();
         await LoginAsync(client, "test", "test");
+        await EnsureLineExistsAsync(client, 101, "192.168.20.101");
 
         var upsertResponse = await client.PutAsJsonAsync("/api/admin/lines/101/protocol-assignment", new
         {
@@ -218,5 +219,25 @@ public class AuthAndAuthorizationTests : IClassFixture<TestWebApplicationFactory
         });
 
         loginResponse.EnsureSuccessStatusCode();
+    }
+
+    private static async Task EnsureLineExistsAsync(HttpClient client, int lineId, string plcIp)
+    {
+        var createResponse = await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = lineId,
+            lineName = $"Line {lineId}",
+            productId = "123-456-78-9",
+            recipeId = "RCP-TEST",
+            machineId = "MX-TEST",
+            operatorName = "operator-test",
+            plcIp,
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 1500,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        createResponse.EnsureSuccessStatusCode();
     }
 }

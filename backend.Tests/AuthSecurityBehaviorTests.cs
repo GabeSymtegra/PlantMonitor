@@ -1,18 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
 using backend.Data;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace backend.Tests;
 
-public sealed class AuthSecurityBehaviorTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class AuthSecurityBehaviorTests : IClassFixture<TestWebApplicationFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestWebApplicationFactory _factory;
 
-    public AuthSecurityBehaviorTests(WebApplicationFactory<Program> factory)
+    public AuthSecurityBehaviorTests(TestWebApplicationFactory factory)
     {
         _factory = factory;
     }

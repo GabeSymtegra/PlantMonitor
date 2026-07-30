@@ -5,6 +5,10 @@ const backendPort = 5265;
 const isCi = Boolean(
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.CI
 );
+const e2eRunId =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.GITHUB_RUN_ID
+  ?? "local";
+const e2eDatabasePath = `../artifacts/e2e/plantmonitor-e2e-${e2eRunId}.db`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -34,6 +38,11 @@ export default defineConfig({
       url: `http://127.0.0.1:${backendPort}/api/status`,
       timeout: 120_000,
       reuseExistingServer: !isCi,
+      env: {
+        ASPNETCORE_ENVIRONMENT: "Testing",
+        App__DatabasePath: e2eDatabasePath,
+        App__DisableLoginRateLimiter: "true",
+      },
     },
     {
       command: `npm run dev -- --host 127.0.0.1 --port ${frontendPort}`,

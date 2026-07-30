@@ -5,23 +5,20 @@ import {
   ApiRequestError,
   apiGet,
   apiPost,
-  setApiAccessToken,
 } from "./client";
 
 describe("api client auth handling", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
-    setApiAccessToken(null);
     vi.restoreAllMocks();
   });
 
   afterEach(() => {
-    setApiAccessToken(null);
     vi.restoreAllMocks();
   });
 
-  it("uses the in-memory auth token when storage is empty", async () => {
+  it("sends cookie credentials without an Authorization header", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -30,7 +27,6 @@ describe("api client auth handling", () => {
     });
 
     vi.stubGlobal("fetch", fetchMock);
-    setApiAccessToken("live-token");
 
     await apiPost("/admin/plc/test-connection", {
       driver: "AllenBradley",
@@ -41,8 +37,8 @@ describe("api client auth handling", () => {
       "/api/admin/plc/test-connection",
       expect.objectContaining({
         credentials: "include",
-        headers: expect.objectContaining({
-          Authorization: "Bearer live-token",
+        headers: expect.not.objectContaining({
+          Authorization: expect.any(String),
         }),
       })
     );
@@ -60,7 +56,6 @@ describe("api client auth handling", () => {
 
     vi.stubGlobal("fetch", fetchMock);
     window.addEventListener(AUTH_EXPIRED_EVENT, eventHandler);
-    setApiAccessToken("expired-token");
 
     await expect(
       apiPost("/admin/plc/test-connection", {

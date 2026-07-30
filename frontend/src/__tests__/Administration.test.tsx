@@ -53,6 +53,20 @@ vi.mock("../services/plcTagBrowserService", () => ({
 
 import Administration from "../pages/Administration";
 
+const canonicalSlots = [
+  "line_id",
+  "product_id",
+  "control_mode",
+  "machine_state",
+  "production_length",
+  "bare_setpoint",
+  "bare_actual",
+  "hot_setpoint",
+  "hot_actual",
+  "cold_setpoint",
+  "cold_actual",
+];
+
 function buildLine(id: number) {
   return {
     id,
@@ -107,42 +121,38 @@ describe("Administration", () => {
       },
     ]);
 
-    mocks.getTagSlotsMock.mockResolvedValue([
-      {
-        logicalKey: "production_length",
-        displayName: "Production Length",
+    mocks.getTagSlotsMock.mockResolvedValue(
+      canonicalSlots.map((logicalKey) => ({
+        logicalKey,
+        displayName: logicalKey,
         isRequired: true,
-        description: "Length",
-      },
-    ]);
+        description: logicalKey,
+      }))
+    );
 
     mocks.autoMapTagCatalogMock.mockResolvedValue({
       driver: "AllenBradley",
-      scannedTagCount: 1,
-      suggestedMappings: [
-        {
-          logicalKey: "production_length",
-          displayName: "Production Length",
-          driver: "AllenBradley",
-          plcAddress: "Line.ProductionLength",
-          dataType: "real",
-          unit: "ft",
-          scale: 1,
-          description: "Length",
-          isEnabled: true,
-          sortOrder: 0,
-          readFrequencyMs: 1000,
-          isRequired: true,
-        },
-      ],
-      suggestionDetails: [
-        {
-          logicalKey: "production_length",
-          plcAddress: "Line.ProductionLength",
-          confidence: 90,
-          reason: "Exact key match",
-        },
-      ],
+      scannedTagCount: canonicalSlots.length,
+      suggestedMappings: canonicalSlots.map((logicalKey, index) => ({
+        logicalKey,
+        displayName: logicalKey,
+        driver: "AllenBradley",
+        plcAddress: `Line.${logicalKey}`,
+        dataType: logicalKey === "product_id" ? "string" : "real",
+        unit: null,
+        scale: 1,
+        description: logicalKey,
+        isEnabled: true,
+        sortOrder: index,
+        readFrequencyMs: 1000,
+        isRequired: true,
+      })),
+      suggestionDetails: canonicalSlots.map((logicalKey) => ({
+        logicalKey,
+        plcAddress: `Line.${logicalKey}`,
+        confidence: 90,
+        reason: "Exact key match",
+      })),
       missingLogicalKeys: [],
     });
 
@@ -168,8 +178,8 @@ describe("Administration", () => {
       presetName: "BasicStatus",
       presetVersion: 1,
       isReady: true,
-      requiredTagCount: 1,
-      mappedRequiredTagCount: 1,
+      requiredTagCount: canonicalSlots.length,
+      mappedRequiredTagCount: canonicalSlots.length,
       missingRequiredTagKeys: [],
       issues: [],
       checkedAtUtc: new Date().toISOString(),

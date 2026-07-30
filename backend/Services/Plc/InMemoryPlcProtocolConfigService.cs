@@ -15,33 +15,11 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
         "control_mode",
     ];
 
-    private static readonly HashSet<string> AllowedDataTypes =
-    [
-        "bool",
-        "int",
-        "dint",
-        "real",
-        "string",
-    ];
-
     private static readonly HashSet<string> AllowedProcessorTypes =
     [
         "controllogix",
         "compactlogix",
         "micro800",
-    ];
-
-    private static readonly IReadOnlyList<TagSlotDefinitionDto> RequiredTagSlots =
-    [
-        new() { LogicalKey = "control_mode", DisplayName = "Control Mode", IsRequired = true, Description = "Current control mode (Auto/Manual)." },
-        new() { LogicalKey = "machine_state", DisplayName = "Machine State", IsRequired = true, Description = "Current machine state/status code." },
-        new() { LogicalKey = "production_length", DisplayName = "Production Length", IsRequired = true, Description = "Current produced length." },
-        new() { LogicalKey = "bare_setpoint", DisplayName = "Bare Setpoint", IsRequired = true, Description = "Bare OD setpoint." },
-        new() { LogicalKey = "bare_actual", DisplayName = "Bare Actual", IsRequired = true, Description = "Bare OD actual." },
-        new() { LogicalKey = "hot_setpoint", DisplayName = "Hot Setpoint", IsRequired = true, Description = "Hot OD setpoint." },
-        new() { LogicalKey = "hot_actual", DisplayName = "Hot Actual", IsRequired = true, Description = "Hot OD actual." },
-        new() { LogicalKey = "cold_setpoint", DisplayName = "Cold Setpoint", IsRequired = true, Description = "Cold OD setpoint." },
-        new() { LogicalKey = "cold_actual", DisplayName = "Cold Actual", IsRequired = true, Description = "Cold OD actual." },
     ];
 
     private readonly IPlcTagAddressValidator _addressValidator;
@@ -73,7 +51,7 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
 
     public IReadOnlyCollection<TagSlotDefinitionDto> GetRequiredTagSlots()
     {
-        return RequiredTagSlots;
+        return PlcTagCatalogContract.RequiredTagSlots;
     }
 
     public LineProtocolAssignmentDto? GetAssignment(int lineId)
@@ -124,7 +102,7 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
         }
 
         var normalizedDriver = NormalizeManufacturer(request.Driver);
-        var requiredKeys = RequiredTagSlots
+        var requiredKeys = PlcTagCatalogContract.RequiredTagSlots
             .Where(x => x.IsRequired)
             .Select(x => x.LogicalKey)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -168,10 +146,9 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(entry.DataType)
-                || !AllowedDataTypes.Contains(entry.DataType.Trim(), StringComparer.OrdinalIgnoreCase))
+            if (!PlcTagCatalogContract.IsAllowedCatalogDataType(entry.DataType))
             {
-                error = $"Data type for logical key '{entry.LogicalKey}' must be one of: bool, int, dint, real, string.";
+                error = $"Data type for logical key '{entry.LogicalKey}' must be one of: {PlcTagCatalogContract.AllowedCatalogTypeListForMessages}.";
                 return false;
             }
 
@@ -401,13 +378,12 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
                 seenKeys.Add(tag.TagKey);
             }
 
-            if (string.IsNullOrWhiteSpace(tag.DataType)
-                || !AllowedDataTypes.Contains(tag.DataType.Trim(), StringComparer.OrdinalIgnoreCase))
+            if (!PlcTagCatalogContract.IsAllowedCatalogDataType(tag.DataType))
             {
                 issues.Add(new TagValidationIssueDto
                 {
                     Field = $"{prefix}.dataType",
-                    Message = "Data type must be one of: bool, int, dint, real, string.",
+                    Message = $"Data type must be one of: {PlcTagCatalogContract.AllowedCatalogTypeListForMessages}.",
                 });
             }
 

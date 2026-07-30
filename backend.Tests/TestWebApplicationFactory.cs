@@ -10,6 +10,9 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IDispos
     private readonly string _locksDirectory;
     private readonly bool _cleanOnStart;
     private readonly bool _cleanOnDispose;
+    private readonly string? _previousDatabasePathEnv;
+    private readonly string? _previousConnectionStringEnv;
+    private readonly string? _previousDisableRateLimiterEnv;
 
     public TestWebApplicationFactory()
         : this(databasePath: null, cleanOnStart: true, cleanOnDispose: true)
@@ -27,6 +30,14 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IDispos
         _cleanOnStart = cleanOnStart;
         _cleanOnDispose = cleanOnDispose;
 
+        _previousDatabasePathEnv = Environment.GetEnvironmentVariable("App__DatabasePath");
+        _previousConnectionStringEnv = Environment.GetEnvironmentVariable("ConnectionStrings__PlantMonitor");
+        _previousDisableRateLimiterEnv = Environment.GetEnvironmentVariable("App__DisableLoginRateLimiter");
+
+        Environment.SetEnvironmentVariable("App__DatabasePath", _databasePath);
+        Environment.SetEnvironmentVariable("ConnectionStrings__PlantMonitor", $"Data Source={_databasePath}");
+        Environment.SetEnvironmentVariable("App__DisableLoginRateLimiter", "true");
+
         if (_cleanOnStart)
         {
             CleanupDatabaseArtifacts();
@@ -41,6 +52,7 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IDispos
             {
                 ["App:DisableLoginRateLimiter"] = "true",
                 ["App:DatabasePath"] = _databasePath,
+                ["ConnectionStrings:PlantMonitor"] = $"Data Source={_databasePath}",
             };
 
             configBuilder.AddInMemoryCollection(overrides);
@@ -55,6 +67,10 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IDispos
         {
             return;
         }
+
+        Environment.SetEnvironmentVariable("App__DatabasePath", _previousDatabasePathEnv);
+        Environment.SetEnvironmentVariable("ConnectionStrings__PlantMonitor", _previousConnectionStringEnv);
+        Environment.SetEnvironmentVariable("App__DisableLoginRateLimiter", _previousDisableRateLimiterEnv);
 
         if (_cleanOnDispose)
         {

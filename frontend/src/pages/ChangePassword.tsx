@@ -14,7 +14,7 @@ import { useAuth } from "../context/useAuth";
 import { apiPost, ApiRequestError } from "../services/api/client";
 
 export default function ChangePassword() {
-  const { user } = useAuth();
+  const { user, refreshSession } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -52,6 +52,7 @@ export default function ChangePassword() {
         }
       );
 
+      await refreshSession();
       setSuccess("Password updated successfully.");
       navigate(from, { replace: true });
     } catch (requestError) {

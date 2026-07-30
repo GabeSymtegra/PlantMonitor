@@ -2,10 +2,10 @@ using backend.DTOs.Plc;
 using backend.Data;
 using backend.Interfaces.Plc;
 using backend.Models.Plc;
+using backend.Services.Plc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace backend.Controllers.Admin;
@@ -83,6 +83,12 @@ public sealed class PlcProtocolAdminController : ControllerBase
     [HttpPut("lines/{lineId:int}/protocol-assignment")]
     public IActionResult UpsertLineProtocolAssignment(int lineId, [FromBody] UpdateLineProtocolAssignmentRequestDto request)
     {
+        var line = _dbContext.LineProtocolAssignments.AsNoTracking().SingleOrDefault(x => x.LineId == lineId);
+        if (line is null)
+        {
+            return NotFoundProblem("Line configuration not found.", "line_config_not_found");
+        }
+
         if (!_protocolConfigService.TryUpsertAssignment(lineId, request, out var error))
         {
             return BadRequestProblem(error ?? "Protocol assignment update failed.", "invalid_protocol_assignment");
@@ -209,7 +215,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
                 DisplayName = slot.DisplayName,
                 Driver = driver.DriverName,
                 PlcAddress = match.Tag.Name,
-                DataType = NormalizeDataType(match.Tag.DataType),
+                DataType = PlcTagCatalogContract.NormalizeDataType(match.Tag.DataType),
                 IsRequired = slot.IsRequired,
                 IsEnabled = true,
                 SortOrder = suggestions.Count,
@@ -336,43 +342,6 @@ public sealed class PlcProtocolAdminController : ControllerBase
             lineLifecycleState = LineLifecycleState.Active,
         });
     }
-
-    private static readonly HashSet<string> NumericLogicalKeys =
-    [
-        "production_length",
-        "bare_setpoint",
-        "bare_actual",
-        "hot_setpoint",
-        "hot_actual",
-        "cold_setpoint",
-        "cold_actual",
-    ];
-
-    private static readonly HashSet<string> NumericDataTypes =
-    [
-        "int",
-        "dint",
-        "real",
-        "sint",
-        "lint",
-        "lreal",
-    ];
-
-    private static readonly HashSet<string> TextOrCodeDataTypes =
-    [
-        "int",
-        "dint",
-        "string",
-    ];
-
-    private static readonly HashSet<string> ProductIdDataTypes =
-    [
-        "string",
-        "int",
-        "dint",
-        "sint",
-        "lint",
-    ];
 
     private async Task<CommissioningReadinessDto> BuildCommissioningReadinessAsync(LineProtocolAssignmentEntity line, CancellationToken cancellationToken)
     {
@@ -520,7 +489,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
                     continue;
                 }
 
-                if (!TryConvertToExpectedRuntimeValue(logicalKey, read.Value, out var conversionError))
+                if (!PlcTagCatalogContract.TryConvertToExpectedRuntimeValue(logicalKey, read.Value, out var conversionError))
                 {
                     issues.Add($"Required logical key '{logicalKey}' returned unsupported value '{read.Value}' at '{address}': {conversionError}");
                 }
@@ -581,18 +550,18 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
     private static void ValidateLogicalKeyDataType(string logicalKey, string? dataType, ICollection<string> issues)
     {
-        var normalizedDataType = dataType?.Trim().ToLowerInvariant() ?? string.Empty;
+        var normalizedDataType = PlcTagCatalogContract.NormalizeDataType(dataType ?? string.Empty);
         if (string.IsNullOrWhiteSpace(normalizedDataType))
         {
             issues.Add($"Required logical key '{logicalKey}' has no configured data type.");
             return;
         }
 
-        if (NumericLogicalKeys.Contains(logicalKey))
+        if (PlcTagCatalogContract.IsNumericLogicalKey(logicalKey))
         {
-            if (!NumericDataTypes.Contains(normalizedDataType))
+            if (!PlcTagCatalogContract.IsNumericType(normalizedDataType))
             {
-                issues.Add($"Required logical key '{logicalKey}' must use a numeric data type (int, dint, real). Received '{normalizedDataType}'.");
+                issues.Add($"Required logical key '{logicalKey}' must use a numeric data type (int, dint, real, sint, lint, lreal). Received '{normalizedDataType}'.");
             }
 
             return;
@@ -601,9 +570,9 @@ public sealed class PlcProtocolAdminController : ControllerBase
         if (logicalKey.Equals("control_mode", StringComparison.OrdinalIgnoreCase)
             || logicalKey.Equals("machine_state", StringComparison.OrdinalIgnoreCase))
         {
-            if (!TextOrCodeDataTypes.Contains(normalizedDataType))
+            if (!PlcTagCatalogContract.IsTextOrCodeType(normalizedDataType))
             {
-                issues.Add($"Required logical key '{logicalKey}' must use int, dint, or string. Received '{normalizedDataType}'.");
+                issues.Add($"Required logical key '{logicalKey}' must use int, dint, sint, lint, or string. Received '{normalizedDataType}'.");
             }
 
             return;
@@ -611,136 +580,19 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (logicalKey.Equals("product_id", StringComparison.OrdinalIgnoreCase))
         {
-            if (!ProductIdDataTypes.Contains(normalizedDataType))
+            if (!PlcTagCatalogContract.IsProductIdType(normalizedDataType))
             {
-                issues.Add($"Required logical key '{logicalKey}' must use string, int, or dint. Received '{normalizedDataType}'.");
+                issues.Add($"Required logical key '{logicalKey}' must use string, int, dint, sint, or lint. Received '{normalizedDataType}'.");
             }
 
             return;
         }
 
         if (logicalKey.Equals("line_id", StringComparison.OrdinalIgnoreCase)
-            && !TextOrCodeDataTypes.Contains(normalizedDataType))
+            && !PlcTagCatalogContract.IsTextOrCodeType(normalizedDataType))
         {
-            issues.Add($"Required logical key '{logicalKey}' must use int, dint, or string. Received '{normalizedDataType}'.");
+            issues.Add($"Required logical key '{logicalKey}' must use int, dint, sint, lint, or string. Received '{normalizedDataType}'.");
         }
-    }
-
-    private static bool TryConvertToExpectedRuntimeValue(string logicalKey, string rawValue, out string error)
-    {
-        error = string.Empty;
-        var trimmed = rawValue.Trim();
-
-        if (NumericLogicalKeys.Contains(logicalKey))
-        {
-            if (!double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
-            {
-                error = "Expected a numeric value.";
-                return false;
-            }
-
-            return true;
-        }
-
-        if (logicalKey.Equals("control_mode", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!TryConvertControlMode(trimmed, out _))
-            {
-                error = "Control mode conversion is not supported. Expected Auto/Manual or 1/0.";
-                return false;
-            }
-
-            return true;
-        }
-
-        if (logicalKey.Equals("machine_state", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!TryConvertMachineState(trimmed, out _))
-            {
-                error = "Machine state conversion is not supported. Expected known state text or code (0-5).";
-                return false;
-            }
-
-            return true;
-        }
-
-        return !string.IsNullOrWhiteSpace(trimmed);
-    }
-
-    private static bool TryConvertControlMode(string rawValue, out string normalized)
-    {
-        normalized = string.Empty;
-        var value = rawValue.Trim().ToLowerInvariant();
-
-        if (value is "1" or "auto")
-        {
-            normalized = "Auto";
-            return true;
-        }
-
-        if (value is "0" or "manual")
-        {
-            normalized = "Manual";
-            return true;
-        }
-
-        if (value.Contains("auto", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Auto";
-            return true;
-        }
-
-        if (value.Contains("manual", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Manual";
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool TryConvertMachineState(string rawValue, out string normalized)
-    {
-        normalized = string.Empty;
-        var value = rawValue.Trim().ToLowerInvariant();
-
-        if (value == "0" || value.Contains("stop", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Stopped";
-            return true;
-        }
-
-        if (value == "1" || value.Contains("run", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Running";
-            return true;
-        }
-
-        if (value == "2" || value.Contains("bleedout", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Bleedout";
-            return true;
-        }
-
-        if (value == "3" || value.Contains("startup", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Startup";
-            return true;
-        }
-
-        if (value == "4" || value.Contains("fault", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Faulted";
-            return true;
-        }
-
-        if (value == "5" || value.Contains("maintenance", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "Maintenance";
-            return true;
-        }
-
-        return false;
     }
 
     private void ResetLineToDraftIfActive(int lineId)
@@ -818,8 +670,8 @@ public sealed class PlcProtocolAdminController : ControllerBase
         IReadOnlyCollection<string> aliases,
         PlcTagBrowseItemDto tag)
     {
-        var normalizedDataType = NormalizeDataType(tag.DataType);
-        if (!IsLogicalKeyCompatible(logicalKey, normalizedDataType))
+        var normalizedDataType = PlcTagCatalogContract.NormalizeDataType(tag.DataType);
+        if (!PlcTagCatalogContract.IsLogicalKeyCompatible(logicalKey, normalizedDataType))
         {
             return null;
         }
@@ -830,7 +682,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return null;
         }
 
-        if (NumericLogicalKeys.Contains(logicalKey) && normalizedDataType is "dint" or "real")
+        if (PlcTagCatalogContract.IsNumericLogicalKey(logicalKey) && normalizedDataType is "dint" or "real")
         {
             score += 10;
         }
@@ -865,45 +717,22 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
     private static bool IsAutoMappableDataType(string? dataType)
     {
-        var normalized = NormalizeDataType(dataType ?? string.Empty);
-        return normalized is "bool" or "int" or "dint" or "real" or "string" or "sint" or "lint" or "lreal";
+        return PlcTagCatalogContract.IsAutoMappableDataType(dataType);
     }
 
     private static bool IsLogicalKeyCompatible(string logicalKey, string normalizedDataType)
     {
-        if (string.IsNullOrWhiteSpace(normalizedDataType))
-        {
-            return false;
-        }
-
-        if (NumericLogicalKeys.Contains(logicalKey))
-        {
-            return NumericDataTypes.Contains(normalizedDataType);
-        }
-
-        if (logicalKey.Equals("control_mode", StringComparison.OrdinalIgnoreCase)
-            || logicalKey.Equals("machine_state", StringComparison.OrdinalIgnoreCase)
-            || logicalKey.Equals("line_id", StringComparison.OrdinalIgnoreCase))
-        {
-            return TextOrCodeDataTypes.Contains(normalizedDataType);
-        }
-
-        if (logicalKey.Equals("product_id", StringComparison.OrdinalIgnoreCase))
-        {
-            return ProductIdDataTypes.Contains(normalizedDataType);
-        }
-
-        return true;
+        return PlcTagCatalogContract.IsLogicalKeyCompatible(logicalKey, normalizedDataType);
     }
 
     private static int ComputeAliasScore(string tagName, IReadOnlyCollection<string> aliases)
     {
-        var normalizedName = NormalizeTagName(tagName);
+        var normalizedName = PlcTagCatalogContract.NormalizeTagName(tagName);
         var score = 0;
 
         foreach (var alias in aliases)
         {
-            var normalizedAlias = NormalizeTagName(alias);
+            var normalizedAlias = PlcTagCatalogContract.NormalizeTagName(alias);
             if (normalizedName == normalizedAlias)
             {
                 score = Math.Max(score, 200);
@@ -931,50 +760,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
     private static IReadOnlyCollection<string> GetAliases(string logicalKey)
     {
-        return logicalKey switch
-        {
-            "line_id" => ["line_id", "lineid"],
-            "product_id" => ["product_id", "productid"],
-            "control_mode" => ["control_status", "controlstatus", "control_mode", "controlmode"],
-            "machine_state" => ["machine_state", "machinestate"],
-            "production_length" => ["linespeed_sp", "line_speed_sp", "linespeedsetpoint", "line_speed_setpoint"],
-            "bare_setpoint" => ["bare_od_sp", "bareodsp", "bare_setpoint", "bareodsetpoint", "baretarget"],
-            "bare_actual" => ["bare_od_act", "bareodact", "bare_actual", "bareodactual", "baremeasured", "bareact"],
-            "hot_setpoint" => ["hot_od_sp", "hotodsp", "hot_setpoint", "hotodsetpoint", "hottarget"],
-            "hot_actual" => ["hot_od_act", "hotodact", "hot_actual", "hotodactual", "hotmeasured", "hotact"],
-            "cold_setpoint" => ["cold_od_sp", "coldodsp", "cold_setpoint", "coldodsetpoint", "coldtarget"],
-            "cold_actual" => ["cold_od_act", "coldodact", "cold_actual", "coldodactual", "coldmeasured", "coldact"],
-            _ => [logicalKey],
-        };
-    }
-
-    private static string NormalizeDataType(string rawDataType)
-    {
-        if (string.IsNullOrWhiteSpace(rawDataType))
-        {
-            return "unknown";
-        }
-
-        var normalized = rawDataType.Trim().ToLowerInvariant();
-        return normalized switch
-        {
-            "float" or "double" => "real",
-            "integer" => "int",
-            "int32" => "dint",
-            "type-193" => "bool",
-            "type-194" => "sint",
-            "type-195" => "int",
-            "type-196" => "dint",
-            "type-197" => "lint",
-            "type-202" => "real",
-            "type-203" => "lreal",
-            _ => normalized,
-        };
-    }
-
-    private static string NormalizeTagName(string tagName)
-    {
-        return Regex.Replace(tagName.ToLowerInvariant(), "[^a-z0-9]+", "_").Trim('_');
+        return PlcTagCatalogContract.GetAliases(logicalKey);
     }
 
     private ActionResult BadRequestProblem(string detail, string code)
