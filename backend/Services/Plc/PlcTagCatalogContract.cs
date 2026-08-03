@@ -109,6 +109,21 @@ public static class PlcTagCatalogContract
         return IsAllowedCatalogDataType(rawDataType);
     }
 
+    public static bool IsDirectlyReadablePrimitiveTag(PlcTagBrowseItemDto? tag)
+    {
+        if (tag is null)
+        {
+            return false;
+        }
+
+        if (tag.IsFolder || tag.CanRead != true)
+        {
+            return false;
+        }
+
+        return IsAutoMappableDataType(tag.DataType);
+    }
+
     public static bool IsNumericLogicalKey(string logicalKey)
     {
         return NumericLogicalKeys.Contains(logicalKey);

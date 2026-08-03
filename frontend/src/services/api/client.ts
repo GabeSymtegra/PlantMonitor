@@ -73,7 +73,12 @@ function buildRequestTrace(
 // Unauthorized responses outside the login endpoint trigger a global auth
 // expiry event so the auth context can clear stale sessions.
 function dispatchAuthExpiredIfNeeded(url: string, status: number) {
-  if (status !== 401 || url.endsWith("/auth/login")) {
+  if (status !== 401) {
+    return;
+  }
+
+  const isAuthEndpoint = /\/auth\/(login|session|logout)(\/|$)/i.test(url);
+  if (isAuthEndpoint) {
     return;
   }
 

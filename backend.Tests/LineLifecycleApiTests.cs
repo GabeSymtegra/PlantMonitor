@@ -46,6 +46,52 @@ public sealed class LineLifecycleApiTests : IClassFixture<TestWebApplicationFact
     }
 
     [Fact]
+    public async Task UpdateLine_WithCommissioningLifecycleState_HonorsRequestedState()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var createResponse = await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = 911,
+            lineName = "Lifecycle Commissioning Line",
+            productId = "123-456-78-3",
+            recipeId = "RCP-911",
+            machineId = "MX-911",
+            operatorName = "operator-911",
+            plcIp = "192.168.10.101",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        createResponse.EnsureSuccessStatusCode();
+
+        var updateResponse = await client.PutAsJsonAsync("/api/lines/911", new
+        {
+            lineNumber = 911,
+            lineName = "Lifecycle Commissioning Line",
+            productId = "123-456-78-3",
+            recipeId = "RCP-911",
+            machineId = "MX-911",
+            operatorName = "operator-911",
+            plcIp = "192.168.10.101",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Commissioning",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+
+        var payload = await updateResponse.Content.ReadFromJsonAsync<LineConfigResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal("Commissioning", payload!.LineLifecycleState);
+        Assert.False(payload.IsActive);
+    }
+
+    [Fact]
     public async Task UpdateLine_WithConnectionChange_OnActiveLine_ResetsToDraft()
     {
         var client = _factory.CreateClient();
@@ -233,7 +279,10 @@ public sealed class LineLifecycleApiTests : IClassFixture<TestWebApplicationFact
             lineLifecycleState = "Draft",
         });
 
-        createFirst.EnsureSuccessStatusCode();
+        if (createFirst.StatusCode != HttpStatusCode.Created)
+        {
+            Assert.Fail($"Expected first create to succeed but received {createFirst.StatusCode}.");
+        }
 
         var createDuplicate = await client.PostAsJsonAsync("/api/lines", new
         {

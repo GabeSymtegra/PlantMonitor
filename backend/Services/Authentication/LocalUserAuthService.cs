@@ -31,12 +31,14 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
 
     public async Task EnsureBootstrapUsersAsync(CancellationToken cancellationToken = default)
     {
+        var isDevelopmentLikeEnvironment = _environment.IsDevelopment() || string.Equals(_environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+
         var seedUsers = new List<(string Username, string Password, string Role, bool MustChangePassword)>();
         var existingAdmins = await _dbContext.LocalUsers
             .AsNoTracking()
             .AnyAsync(x => x.Role == "Admin", cancellationToken);
 
-        if (_environment.IsDevelopment())
+        if (isDevelopmentLikeEnvironment)
         {
             seedUsers.Add(("test", "test", "Admin", false));
             seedUsers.Add(("operator", "test", "Operator", false));
@@ -53,12 +55,12 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
             seedUsers.Add(("admin", bootstrapPassword, "Admin", true));
         }
 
-        if (_environment.IsDevelopment())
+        if (isDevelopmentLikeEnvironment)
         {
             existingAdmins = true;
         }
 
-        if (existingAdmins && !_environment.IsDevelopment())
+        if (existingAdmins && !isDevelopmentLikeEnvironment)
         {
             return;
         }

@@ -147,14 +147,15 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
     );
 
     useEffect(() => {
-        localStorage.setItem(buildScopedStorageKey(STORAGE_KEY_PREFIX), mode);
+        const scopedModeKey = buildScopedStorageKey(STORAGE_KEY_PREFIX);
+        localStorage.setItem(scopedModeKey, mode);
+        localStorage.setItem(STORAGE_KEY_PREFIX, mode);
     }, [mode]);
 
     useEffect(() => {
-        localStorage.setItem(
-            buildScopedStorageKey(APPEARANCE_STORAGE_KEY_PREFIX),
-            JSON.stringify(appearance)
-        );
+        const scopedAppearanceKey = buildScopedStorageKey(APPEARANCE_STORAGE_KEY_PREFIX);
+        localStorage.setItem(scopedAppearanceKey, JSON.stringify(appearance));
+        localStorage.setItem(APPEARANCE_STORAGE_KEY_PREFIX, JSON.stringify(appearance));
     }, [appearance]);
 
     useEffect(() => {

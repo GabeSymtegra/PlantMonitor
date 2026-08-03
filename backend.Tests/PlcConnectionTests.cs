@@ -358,6 +358,38 @@ public sealed class PlcConnectionApiTests : IClassFixture<PlcConnectionApiFactor
     }
 
     [Fact]
+    public void DirectlyReadablePrimitiveTag_FilteredForAutoMapGuardrail()
+    {
+        var readablePrimitive = new PlcTagBrowseItemDto
+        {
+            Name = "Machine.LineSpeed",
+            DataType = "real",
+            IsFolder = false,
+            CanRead = true,
+        };
+
+        var folderTag = new PlcTagBrowseItemDto
+        {
+            Name = "Machine",
+            DataType = "unknown",
+            IsFolder = true,
+            CanRead = true,
+        };
+
+        var nonReadableTag = new PlcTagBrowseItemDto
+        {
+            Name = "Machine.LineSpeed",
+            DataType = "real",
+            IsFolder = false,
+            CanRead = false,
+        };
+
+        Assert.True(PlcTagCatalogContract.IsDirectlyReadablePrimitiveTag(readablePrimitive));
+        Assert.False(PlcTagCatalogContract.IsDirectlyReadablePrimitiveTag(folderTag));
+        Assert.False(PlcTagCatalogContract.IsDirectlyReadablePrimitiveTag(nonReadableTag));
+    }
+
+    [Fact]
     public async Task CommissioningCheck_WithAdminToken_ReturnsReadinessPayload()
     {
         var client = _factory.CreateClient();

@@ -79,6 +79,12 @@ public sealed class LinesController : ControllerBase
         ApplyRequest(entity, request);
         entity.LineId = lineId;
 
+        var requestedLifecycleState = NormalizeLifecycleState(request.LineLifecycleState);
+        if (requestedLifecycleState is not null)
+        {
+            entity.LineLifecycleState = requestedLifecycleState;
+        }
+
         if (wasActive && connectionChanged)
         {
             entity.LineLifecycleState = LineLifecycleState.Draft;
@@ -131,12 +137,16 @@ public sealed class LinesController : ControllerBase
         entity.PlcIp = request.PlcIp.Trim();
         entity.Manufacturer = request.Manufacturer.Trim();
         entity.PollIntervalMs = request.PollIntervalMs;
-        if (!LineLifecycleState.IsKnown(entity.LineLifecycleState))
+    }
+
+    private static string? NormalizeLifecycleState(string? lifecycleState)
+    {
+        if (LineLifecycleState.IsKnown(lifecycleState))
         {
-            entity.LineLifecycleState = LineLifecycleState.Draft;
+            return lifecycleState;
         }
 
-        entity.IsActive = IsActiveState(entity.LineLifecycleState);
+        return null;
     }
 
     private static LineConfigDto MapLine(LineProtocolAssignmentEntity entity)

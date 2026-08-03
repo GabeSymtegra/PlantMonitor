@@ -37,6 +37,7 @@ Administration is for configuration work.
 
 - Add or update line definitions.
 - Maintain line runtime metadata (`Recipe ID`, `Machine ID`, and `Operator`) used by runtime details and completed-run records.
+- Track lifecycle state for each line, including Draft, Commissioning, Active, CommissioningFailed, and Disabled.
 - Test PLC connectivity.
 - Assign protocol presets.
 - Review effective tag mappings.
@@ -80,5 +81,6 @@ Settings control display preferences such as color mode, monitor name, and text 
 ## Troubleshooting
 
 - If the dashboard shows `Offline`, first test PLC connectivity in Administration.
+- If the dashboard has live runtime data but is missing recipe or operator metadata, the configured line metadata is used as a fallback until the runtime snapshot includes those values.
 - If the backend will not start after model changes, add and apply an EF migration.
 - If frontend requests fail with authorization errors, sign in again to refresh the token.

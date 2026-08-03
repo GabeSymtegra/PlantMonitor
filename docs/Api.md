@@ -110,14 +110,16 @@ Rules:
 {
 	"id": 1,
 	"lineNumber": 1,
-	"displayName": "Line 1",
-	"plcFamily": "AllenBradley",
+	"lineName": "Line 1",
+	"productId": "PVC-PIPE",
+	"recipeId": "RCP-100",
+	"machineId": "MX-100",
+	"operatorName": "operator-100",
 	"plcIp": "192.168.1.101",
+	"manufacturer": "AllenBradley",
 	"pollIntervalMs": 2000,
 	"isActive": false,
 	"lineLifecycleState": "Draft",
-	"defaultProduct": "PVC Pipe",
-	"createdAtUtc": "2026-07-01T14:00:00Z",
 	"updatedAtUtc": "2026-07-01T14:10:00Z"
 }
 
@@ -223,17 +225,22 @@ POST /api/lines
 
 - Creates a new line configuration.
 - Admin only.
+- Create requests default the lifecycle state to Draft and do not activate the line.
 
 Request:
 
 {
 	"lineNumber": 5,
-	"displayName": "Line 5",
-	"plcFamily": "Siemens",
+	"lineName": "Line 5",
+	"productId": "PEX-TUBING",
+	"recipeId": "RCP-200",
+	"machineId": "MX-200",
+	"operatorName": "operator-200",
 	"plcIp": "192.168.1.105",
+	"manufacturer": "AllenBradley",
 	"pollIntervalMs": 2000,
 	"isActive": true,
-	"defaultProduct": "PEX Tubing"
+	"lineLifecycleState": "Draft"
 }
 
 Response 201:
@@ -244,6 +251,8 @@ PUT /api/lines/{id}
 
 - Updates line configuration.
 - Admin only.
+- Explicit lifecycle state values such as Commissioning are honored on update.
+- If an active line's PLC connection settings change, the lifecycle is reset back to Draft.
 
 DELETE /api/lines/{id}
 
@@ -253,6 +262,14 @@ DELETE /api/lines/{id}
 Response codes for line config endpoints:
 
 - 200, 201, 204, 400, 401, 403, 404, 409, 500
+
+Lifecycle states:
+
+- Draft
+- Commissioning
+- Active
+- CommissioningFailed
+- Disabled
 
 ### 6.4 Tag Mappings
 

@@ -188,8 +188,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         var discovered = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Options, null, cancellationToken);
         var readableLeafTags = discovered
-            .Where(tag => !tag.IsFolder && tag.CanRead == true)
-            .Where(tag => IsAutoMappableDataType(tag.DataType))
+            .Where(PlcTagCatalogContract.IsDirectlyReadablePrimitiveTag)
             .ToList();
 
         var slotDefinitions = _protocolConfigService.GetRequiredTagSlots();

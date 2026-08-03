@@ -309,6 +309,34 @@ export async function deleteLine(id: number): Promise<void> {
   await apiDelete(API_ENDPOINTS.line(id));
 }
 
+function mergeConfiguredMetadata(
+  runtimeLine: ProductionLine,
+  configuredLine: ProductionLine
+): ProductionLine {
+  const hasRuntimeMetadata =
+    runtimeLine.recipeId !== "Unknown" &&
+    runtimeLine.machineId !== "Unknown" &&
+    runtimeLine.operatorName !== "Unknown";
+
+  return {
+    ...runtimeLine,
+    recipeId: hasRuntimeMetadata
+      ? runtimeLine.recipeId
+      : configuredLine.recipeId,
+    machineId: hasRuntimeMetadata
+      ? runtimeLine.machineId
+      : configuredLine.machineId,
+    operatorName: hasRuntimeMetadata
+      ? runtimeLine.operatorName
+      : configuredLine.operatorName,
+    product: runtimeLine.product || configuredLine.product,
+    plcIp: runtimeLine.plcIp || configuredLine.plcIp,
+    manufacturer: runtimeLine.manufacturer || configuredLine.manufacturer,
+    lineLifecycleState: runtimeLine.lineLifecycleState || configuredLine.lineLifecycleState,
+    isActive: runtimeLine.isActive || configuredLine.isActive,
+  };
+}
+
 export async function getDashboard(): Promise<DashboardModel> {
   const dto = await apiGet<RuntimeDashboardSnapshotDto>(API_ENDPOINTS.dashboard);
   const runtimeLines = dto.lines.map(toProductionLine);
@@ -319,9 +347,20 @@ export async function getDashboard(): Promise<DashboardModel> {
   const configuredActiveLines = (await getAllLines()).filter((line) => line.isActive);
 
   for (const configuredLine of configuredActiveLines) {
-    if (!runtimeById.has(configuredLine.id)) {
-      runtimeLines.push(toConfiguredFallbackLine(configuredLine));
+    const existingRuntimeLine = runtimeById.get(configuredLine.id);
+
+    if (existingRuntimeLine) {
+      const mergedLine = mergeConfiguredMetadata(existingRuntimeLine, configuredLine);
+      runtimeById.set(configuredLine.id, mergedLine);
+
+      const runtimeIndex = runtimeLines.findIndex((line) => line.id === configuredLine.id);
+      if (runtimeIndex >= 0) {
+        runtimeLines[runtimeIndex] = mergedLine;
+      }
+      continue;
     }
+
+    runtimeLines.push(toConfiguredFallbackLine(configuredLine));
   }
 
   runtimeLines.sort((left, right) => left.lineNumber - right.lineNumber);
