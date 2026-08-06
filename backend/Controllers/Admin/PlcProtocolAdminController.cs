@@ -150,7 +150,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         if (!result.IsConnected)
         {
-            if (string.Equals(result.Message, "Wrong driver selected. Choose AllenBradley.", StringComparison.OrdinalIgnoreCase)
+            if (string.Equals(result.Message, "Wrong driver selected. Choose AllenBradley or Siemens.", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(result.Message, "Invalid IP address. Enter a valid IPv4 address.", StringComparison.OrdinalIgnoreCase))
             {
                 return BadRequest(result);
@@ -186,7 +186,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return errorResult!;
         }
 
-        var discovered = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Options, null, cancellationToken);
+        var discovered = await driver!.BrowseTagsAsync(request.IpAddress.Trim(), request.Options, request.Search, cancellationToken);
         var readableLeafTags = discovered
             .Where(PlcTagCatalogContract.IsDirectlyReadablePrimitiveTag)
             .ToList();
@@ -367,11 +367,6 @@ public sealed class PlcProtocolAdminController : ControllerBase
         var issues = new List<string>();
         var requiredMappings = new Dictionary<string, LineTagCatalogEntryDto>(StringComparer.OrdinalIgnoreCase);
 
-        if (!IsAllenBradleyManufacturer(line.Manufacturer))
-        {
-            issues.Add("Line manufacturer must be AllenBradley for commissioning.");
-        }
-
         if (string.IsNullOrWhiteSpace(assignment.PresetName) || assignment.PresetVersion <= 0)
         {
             issues.Add("Protocol assignment is incomplete. Preset name and version are required.");
@@ -518,15 +513,46 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
     private static PlcConnectionOptionsDto BuildConnectionOptions(LineProtocolAssignmentDto assignment)
     {
+        var rack = assignment.Rack;
+        var slot = assignment.Slot;
+
+        if ((!rack.HasValue || !slot.HasValue)
+            && TryParseRackSlot(assignment.RoutePath, out var parsedRack, out var parsedSlot))
+        {
+            rack = parsedRack;
+            slot = parsedSlot;
+        }
+
         return new PlcConnectionOptionsDto
         {
             RoutePath = string.IsNullOrWhiteSpace(assignment.RoutePath) ? "1,0" : assignment.RoutePath,
             ProcessorType = string.IsNullOrWhiteSpace(assignment.ProcessorType) ? "ControlLogix" : assignment.ProcessorType,
+            Rack = rack,
+            Slot = slot,
             ConnectionTimeoutMs = assignment.ConnectionTimeoutMs <= 0 ? 3000 : assignment.ConnectionTimeoutMs,
             ReadTimeoutMs = assignment.ReadTimeoutMs <= 0 ? 3000 : assignment.ReadTimeoutMs,
             RetryCount = assignment.RetryCount < 0 ? 0 : assignment.RetryCount,
             RetryDelayMs = assignment.RetryDelayMs < 0 ? 0 : assignment.RetryDelayMs,
         };
+    }
+
+    private static bool TryParseRackSlot(string? routePath, out int rack, out int slot)
+    {
+        rack = 0;
+        slot = 1;
+
+        if (string.IsNullOrWhiteSpace(routePath))
+        {
+            return false;
+        }
+
+        var segments = routePath.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2)
+        {
+            return false;
+        }
+
+        return int.TryParse(segments[^2], out rack) && int.TryParse(segments[^1], out slot);
     }
 
     private static bool LooksLikeStructuredOrRawPayload(string? value)
@@ -675,7 +701,9 @@ public sealed class PlcProtocolAdminController : ControllerBase
             return null;
         }
 
-        var score = ComputeAliasScore(tag.Name, aliases);
+        var score = Math.Max(
+            ComputeAliasScore(tag.Name, aliases),
+            string.IsNullOrWhiteSpace(tag.DisplayName) ? 0 : ComputeAliasScore(tag.DisplayName, aliases));
         if (score <= 0)
         {
             return null;
@@ -698,7 +726,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
             tag,
             score,
             confidence,
-            BuildSuggestionReason(logicalKey, tag.Name, normalizedDataType, score));
+            BuildSuggestionReason(logicalKey, tag.DisplayName ?? tag.Name, normalizedDataType, score));
     }
 
     private static string BuildSuggestionReason(string logicalKey, string tagName, string normalizedDataType, int score)

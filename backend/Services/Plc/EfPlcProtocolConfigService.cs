@@ -18,11 +18,18 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         "control_mode",
     ];
 
-    private static readonly HashSet<string> AllowedProcessorTypes =
+    private static readonly HashSet<string> AllowedAllenBradleyProcessorTypes =
     [
         "controllogix",
         "compactlogix",
         "micro800",
+    ];
+
+    private static readonly HashSet<string> AllowedSiemensProcessorTypes =
+    [
+        "s7-1217c",
+        "s7-1200",
+        "s7-1500",
     ];
 
     private readonly PlantMonitorDbContext _dbContext;
@@ -283,29 +290,29 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(request.RoutePath))
+        var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
+        var isAllenBradley = IsAllenBradley(normalizedManufacturer);
+        var isSiemens = IsSiemens(normalizedManufacturer);
+
+        if (!isAllenBradley && !isSiemens)
         {
-            error = "Route path is required.";
+            error = "Manufacturer must be AllenBradley or Siemens.";
             return false;
         }
 
-        if (request.RoutePath.Length > 64)
+        var routePath = ResolveRoutePath(request, normalizedManufacturer, out var routePathError);
+        if (routePathError is not null)
         {
-            error = "Route path must be 64 characters or fewer.";
-            return false;
-        }
-
-        var routePath = request.RoutePath.Trim();
-        if (!Regex.IsMatch(routePath, "^\\d+(,\\d+)*$"))
-        {
-            error = "Route path must be a comma-separated list of integers (example: 1,0).";
+            error = routePathError;
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(request.ProcessorType)
-            || !AllowedProcessorTypes.Contains(request.ProcessorType.Trim().ToLowerInvariant()))
+            || !IsAllowedProcessorType(normalizedManufacturer, request.ProcessorType))
         {
-            error = "Processor type must be one of: ControlLogix, CompactLogix, Micro800.";
+            error = isAllenBradley
+                ? "Processor type must be one of: ControlLogix, CompactLogix, Micro800."
+                : "Processor type must be one of: S7-1217C, S7-1200, S7-1500.";
             return false;
         }
 
@@ -341,12 +348,12 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             return false;
         }
 
-        assignment.Manufacturer = request.Manufacturer.Trim();
+        assignment.Manufacturer = normalizedManufacturer;
         assignment.PresetName = request.PresetName.Trim();
         assignment.PresetVersion = request.PresetVersion;
         assignment.PollIntervalMs = request.PollIntervalMs;
-        assignment.RoutePath = routePath;
-        assignment.ProcessorType = NormalizeProcessorType(request.ProcessorType);
+        assignment.RoutePath = routePath!;
+        assignment.ProcessorType = NormalizeProcessorType(request.ProcessorType, normalizedManufacturer);
         assignment.ConnectionTimeoutMs = request.ConnectionTimeoutMs;
         assignment.ReadTimeoutMs = request.ReadTimeoutMs;
         assignment.RetryCount = request.RetryCount;
@@ -421,13 +428,12 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             });
         }
 
-        if (!request.Manufacturer.Equals("AB", StringComparison.OrdinalIgnoreCase)
-            && !request.Manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase))
+        if (!IsAllenBradley(request.Manufacturer) && !IsSiemens(request.Manufacturer))
         {
             issues.Add(new TagValidationIssueDto
             {
                 Field = "manufacturer",
-                Message = "Manufacturer must be AllenBradley.",
+                Message = "Manufacturer must be AllenBradley or Siemens.",
             });
         }
 
@@ -576,15 +582,20 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
 
     private static LineProtocolAssignmentDto MapAssignment(LineProtocolAssignmentEntity assignment)
     {
+        var manufacturer = NormalizeManufacturer(assignment.Manufacturer);
+        var hasRackSlot = TryParseRackSlot(assignment.RoutePath, out var rack, out var slot);
+
         return new LineProtocolAssignmentDto
         {
             LineId = assignment.LineId,
-            Manufacturer = NormalizeManufacturer(assignment.Manufacturer),
+            Manufacturer = manufacturer,
             PresetName = assignment.PresetName,
             PresetVersion = assignment.PresetVersion,
             PollIntervalMs = assignment.PollIntervalMs,
             RoutePath = string.IsNullOrWhiteSpace(assignment.RoutePath) ? "1,0" : assignment.RoutePath,
-            ProcessorType = NormalizeProcessorType(assignment.ProcessorType),
+            ProcessorType = NormalizeProcessorType(assignment.ProcessorType, manufacturer),
+            Rack = hasRackSlot ? rack : null,
+            Slot = hasRackSlot ? slot : null,
             ConnectionTimeoutMs = assignment.ConnectionTimeoutMs <= 0 ? 3000 : assignment.ConnectionTimeoutMs,
             ReadTimeoutMs = assignment.ReadTimeoutMs <= 0 ? 3000 : assignment.ReadTimeoutMs,
             RetryCount = assignment.RetryCount < 0 ? 0 : assignment.RetryCount,
@@ -593,9 +604,22 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         };
     }
 
-    private static string NormalizeProcessorType(string? processorType)
+    private static string NormalizeProcessorType(string? processorType, string manufacturer)
     {
-        var normalized = processorType?.Trim().ToLowerInvariant() ?? "controllogix";
+        var normalized = processorType?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (IsSiemens(manufacturer))
+        {
+            return normalized switch
+            {
+                "s7-1200" => "S7-1200",
+                "s7-1500" => "S7-1500",
+                "s71200" => "S7-1200",
+                "s71500" => "S7-1500",
+                _ => "S7-1217C",
+            };
+        }
+
         return normalized switch
         {
             "compactlogix" => "CompactLogix",
@@ -609,6 +633,111 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         return manufacturer.Trim().Equals("AB", StringComparison.OrdinalIgnoreCase)
             ? "AllenBradley"
             : manufacturer.Trim();
+    }
+
+    private static bool IsAllowedProcessorType(string manufacturer, string processorType)
+    {
+        var normalized = processorType.Trim().ToLowerInvariant();
+        return IsSiemens(manufacturer)
+            ? AllowedSiemensProcessorTypes.Contains(normalized)
+            : AllowedAllenBradleyProcessorTypes.Contains(normalized);
+    }
+
+    private static bool IsAllenBradley(string manufacturer)
+    {
+        return manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("AB", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSiemens(string manufacturer)
+    {
+        return manufacturer.Equals("Siemens", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7-1200", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7-1217C", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7-1500", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveRoutePath(
+        UpdateLineProtocolAssignmentRequestDto request,
+        string manufacturer,
+        out string? error)
+    {
+        error = null;
+
+        if (IsSiemens(manufacturer))
+        {
+            var rack = request.Rack;
+            var slot = request.Slot;
+
+            if (!rack.HasValue || !slot.HasValue)
+            {
+                if (TryParseRackSlot(request.RoutePath, out var parsedRack, out var parsedSlot))
+                {
+                    rack = parsedRack;
+                    slot = parsedSlot;
+                }
+            }
+
+            if (!rack.HasValue || !slot.HasValue)
+            {
+                error = "Rack and slot are required for Siemens assignments.";
+                return null;
+            }
+
+            if (rack.Value is < 0 or > 7 || slot.Value is < 0 or > 31)
+            {
+                error = "Rack must be between 0 and 7 and slot must be between 0 and 31.";
+                return null;
+            }
+
+            return $"{rack.Value},{slot.Value}";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.RoutePath))
+        {
+            error = "Route path is required.";
+            return null;
+        }
+
+        if (request.RoutePath.Length > 64)
+        {
+            error = "Route path must be 64 characters or fewer.";
+            return null;
+        }
+
+        var routePath = request.RoutePath.Trim();
+        if (!Regex.IsMatch(routePath, "^\\d+(,\\d+)*$"))
+        {
+            error = "Route path must be a comma-separated list of integers (example: 1,0).";
+            return null;
+        }
+
+        return routePath;
+    }
+
+    private static bool TryParseRackSlot(string? routePath, out int rack, out int slot)
+    {
+        rack = 0;
+        slot = 1;
+
+        if (string.IsNullOrWhiteSpace(routePath))
+        {
+            return false;
+        }
+
+        var segments = routePath.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(segments[^2], out rack) || !int.TryParse(segments[^1], out slot))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static EffectiveTagMappingDto MapTag(PlcProtocolPresetTagEntity tag)

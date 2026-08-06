@@ -40,7 +40,7 @@ public sealed class PlcConnectionServiceTests
         });
 
         Assert.False(result.IsConnected);
-        Assert.Equal("Wrong driver selected. Choose AllenBradley.", result.Message);
+        Assert.Equal("Wrong driver selected. Choose AllenBradley or Siemens.", result.Message);
     }
 
     [Fact]

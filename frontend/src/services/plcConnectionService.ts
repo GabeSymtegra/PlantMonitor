@@ -1,6 +1,13 @@
 import { apiPost } from "./api/client";
 
 export type PlcDriver = "AllenBradley" | "Siemens";
+export type PlcProcessorType =
+  | "ControlLogix"
+  | "CompactLogix"
+  | "Micro800"
+  | "S7-1217C"
+  | "S7-1200"
+  | "S7-1500";
 
 export interface PlcConnectionRequest {
   driver: PlcDriver;
@@ -10,7 +17,9 @@ export interface PlcConnectionRequest {
 
 export interface PlcConnectionOptions {
   routePath: string;
-  processorType: "ControlLogix" | "CompactLogix" | "Micro800";
+  processorType: PlcProcessorType;
+  rack?: number;
+  slot?: number;
   connectionTimeoutMs: number;
   readTimeoutMs: number;
   retryCount: number;

@@ -13,15 +13,19 @@ import {
   DialogContentText,
   DialogTitle,
   FormControl,
+  Chip,
   InputLabel,
   LinearProgress,
-  List,
-  ListItemButton,
-  ListItemText,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from "@mui/material";
@@ -37,6 +41,7 @@ import {
 import {
   testPlcConnection,
   type PlcConnectionOptions,
+  type PlcProcessorType,
   type PlcConnectionResult,
 } from "../services/plcConnectionService";
 import {
@@ -79,7 +84,9 @@ type LineConfigForm = {
 type LinePlcSettingsForm = {
   pollIntervalMs: number;
   routePath: string;
-  processorType: "ControlLogix" | "CompactLogix" | "Micro800";
+  processorType: PlcProcessorType;
+  rack: number;
+  slot: number;
   connectionTimeoutMs: number;
   readTimeoutMs: number;
   retryCount: number;
@@ -102,11 +109,17 @@ const defaultPlcSettings: LinePlcSettingsForm = {
   pollIntervalMs: 2000,
   routePath: "1,0",
   processorType: "ControlLogix",
+  rack: 0,
+  slot: 1,
   connectionTimeoutMs: 3000,
   readTimeoutMs: 3000,
   retryCount: 1,
   retryDelayMs: 250,
 };
+
+function isSiemensManufacturer(manufacturer: PlcManufacturer): boolean {
+  return manufacturer === "Siemens";
+}
 
 const productSerialPattern = /^\d{3}-\d{3}-\d{2}-\d{1}$/;
 
@@ -194,7 +207,10 @@ export default function Administration() {
   const [connectionResult, setConnectionResult] = useState<PlcConnectionResult | null>(null);
   const [browsingTags, setBrowsingTags] = useState(false);
   const [readingTagName, setReadingTagName] = useState<string | null>(null);
-  const [tagSearch, setTagSearch] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [browseScope, setBrowseScope] = useState("DB1");
+  const [siemensDbList, setSiemensDbList] = useState<string[]>([]);
+  const [selectedSiemensDb, setSelectedSiemensDb] = useState("DB1");
   const [tagBrowserError, setTagBrowserError] = useState("");
   const [tagBrowserStatus, setTagBrowserStatus] = useState("");
   const [discoveredTags, setDiscoveredTags] = useState<PlcTagBrowseItem[]>([]);
@@ -232,7 +248,7 @@ export default function Administration() {
   }, [lines, selectedLineId]);
 
   const filteredTags = useMemo(() => {
-    const search = tagSearch.trim().toLowerCase();
+    const search = tagFilter.trim().toLowerCase();
 
     if (!search) {
       return discoveredTags;
@@ -240,16 +256,55 @@ export default function Administration() {
 
     return discoveredTags.filter((tag) => {
       const parentPath = tag.parentPath?.toLowerCase() ?? "";
-      return tag.name.toLowerCase().includes(search) || parentPath.includes(search);
+      const displayName = tag.displayName?.toLowerCase() ?? "";
+      const description = tag.description?.toLowerCase() ?? "";
+      return tag.name.toLowerCase().includes(search)
+        || displayName.includes(search)
+        || description.includes(search)
+        || parentPath.includes(search);
     });
-  }, [discoveredTags, tagSearch]);
+  }, [discoveredTags, tagFilter]);
+
+  const sortedFilteredTags = useMemo(() => {
+    return [...filteredTags].sort((left, right) => {
+      const leftPath = (left.parentPath ?? "root").toUpperCase();
+      const rightPath = (right.parentPath ?? "root").toUpperCase();
+
+      if (leftPath !== rightPath) {
+        return leftPath.localeCompare(rightPath, undefined, { numeric: true });
+      }
+
+      const leftLabel = left.displayName ?? left.name;
+      const rightLabel = right.displayName ?? right.name;
+      return leftLabel.localeCompare(rightLabel, undefined, { numeric: true });
+    });
+  }, [filteredTags]);
+
+  const tagAreaSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const tag of discoveredTags) {
+      const key = tag.parentPath?.trim() || "root";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    return Array.from(counts.entries())
+      .sort((left, right) => left[0].localeCompare(right[0], undefined, { numeric: true }))
+      .map(([area, count]) => ({ area, count }));
+  }, [discoveredTags]);
 
   const hasDiscoveredTags = discoveredTags.length > 0;
 
   function toConnectionOptions(settings: LinePlcSettingsForm): PlcConnectionOptions {
+    const normalizedRoutePath = isSiemensManufacturer(form.manufacturer)
+      ? `${Math.max(0, settings.rack)},${Math.max(0, settings.slot)}`
+      : settings.routePath.trim() || "1,0";
+
     return {
-      routePath: settings.routePath.trim() || "1,0",
+      routePath: normalizedRoutePath,
       processorType: settings.processorType,
+      rack: Math.max(0, settings.rack),
+      slot: Math.max(0, settings.slot),
       connectionTimeoutMs: Math.max(500, settings.connectionTimeoutMs),
       readTimeoutMs: Math.max(500, settings.readTimeoutMs),
       retryCount: Math.max(0, settings.retryCount),
@@ -327,10 +382,16 @@ export default function Administration() {
   const loadProtocolAssignment = useCallback(async (lineId: number) => {
     try {
       const assignment = await getLineProtocolAssignment(lineId);
+      const routeSegments = assignment.routePath.split(",");
+      const fallbackRack = Number(routeSegments[0] ?? 0);
+      const fallbackSlot = Number(routeSegments[1] ?? 1);
+
       setPlcSettings({
         pollIntervalMs: assignment.pollIntervalMs,
         routePath: assignment.routePath,
         processorType: assignment.processorType,
+        rack: assignment.rack ?? (Number.isFinite(fallbackRack) ? fallbackRack : 0),
+        slot: assignment.slot ?? (Number.isFinite(fallbackSlot) ? fallbackSlot : 1),
         connectionTimeoutMs: assignment.connectionTimeoutMs,
         readTimeoutMs: assignment.readTimeoutMs,
         retryCount: assignment.retryCount,
@@ -355,7 +416,9 @@ export default function Administration() {
   function resetTagBrowser() {
     setBrowsingTags(false);
     setReadingTagName(null);
-    setTagSearch("");
+    setTagFilter("");
+    setSiemensDbList([]);
+    setSelectedSiemensDb("DB1");
     setTagBrowserError("");
     setTagBrowserStatus("");
     setDiscoveredTags([]);
@@ -417,12 +480,35 @@ export default function Administration() {
     }
 
     if (key === "manufacturer") {
+      const nextManufacturer = value as PlcManufacturer;
+
+      setPlcSettings((previous) => ({
+        ...previous,
+        processorType: isSiemensManufacturer(nextManufacturer)
+          ? "S7-1217C"
+          : "ControlLogix",
+        routePath: isSiemensManufacturer(nextManufacturer)
+          ? `${Math.max(0, previous.rack)},${Math.max(0, previous.slot)}`
+          : previous.routePath || "1,0",
+      }));
+
       setTagCatalog((previous) =>
         previous.map((entry) => ({
           ...entry,
           driver: String(value),
         }))
       );
+
+      setBrowseScope((previous) => {
+        if (isSiemensManufacturer(nextManufacturer)) {
+          return previous.trim().length > 0 ? previous : "DB1";
+        }
+
+        return "";
+      });
+
+      setSiemensDbList([]);
+      setSelectedSiemensDb("DB1");
     }
 
     setForm((previous) => ({
@@ -461,7 +547,7 @@ export default function Administration() {
         return false;
       }
 
-      return line.plcIp.trim() === trimmedIp;
+      return line.plcIp.trim() === trimmedIp && line.manufacturer === form.manufacturer;
     });
 
     if (duplicateIp) {
@@ -534,8 +620,12 @@ export default function Administration() {
         presetName: "BasicStatus",
         presetVersion: 1,
         pollIntervalMs: plcSettings.pollIntervalMs,
-        routePath: plcSettings.routePath.trim() || "1,0",
+        routePath: isSiemensManufacturer(form.manufacturer)
+          ? `${Math.max(0, plcSettings.rack)},${Math.max(0, plcSettings.slot)}`
+          : plcSettings.routePath.trim() || "1,0",
         processorType: plcSettings.processorType,
+        rack: Math.max(0, plcSettings.rack),
+        slot: Math.max(0, plcSettings.slot),
         connectionTimeoutMs: plcSettings.connectionTimeoutMs,
         readTimeoutMs: plcSettings.readTimeoutMs,
         retryCount: plcSettings.retryCount,
@@ -613,8 +703,12 @@ export default function Administration() {
         presetName: "BasicStatus",
         presetVersion: 1,
         pollIntervalMs: plcSettings.pollIntervalMs,
-        routePath: plcSettings.routePath.trim() || "1,0",
+        routePath: isSiemensManufacturer(form.manufacturer)
+          ? `${Math.max(0, plcSettings.rack)},${Math.max(0, plcSettings.slot)}`
+          : plcSettings.routePath.trim() || "1,0",
         processorType: plcSettings.processorType,
+        rack: Math.max(0, plcSettings.rack),
+        slot: Math.max(0, plcSettings.slot),
         connectionTimeoutMs: plcSettings.connectionTimeoutMs,
         readTimeoutMs: plcSettings.readTimeoutMs,
         retryCount: plcSettings.retryCount,
@@ -688,7 +782,7 @@ export default function Administration() {
       if (result.isConnected) {
         setTestConnectionCompleted(true);
         setSuccess("PLC connection verified successfully.");
-        await discoverTags(result.driver, form.plcIp.trim());
+        await discoverTags(result.driver, form.plcIp.trim(), browseScope);
       } else {
         setTestConnectionCompleted(false);
         resetTagBrowser();
@@ -716,30 +810,79 @@ export default function Administration() {
     }
   }
 
-  async function discoverTags(driver: PlcConnectionResult["driver"], ipAddress: string) {
-    resetTagBrowser();
+  async function discoverTags(
+    driver: PlcConnectionResult["driver"],
+    ipAddress: string,
+    searchScope?: string
+  ) {
+    setReadingTagName(null);
+    setTagFilter("");
+    setTagBrowserError("");
+    setTagBrowserStatus("");
+    setDiscoveredTags([]);
+    setSelectedTag(null);
+    setSelectedTagResult(null);
+    setAutoPopulateCompleted(false);
+    setNewLineTagAssignmentsSaved(false);
     setBrowsingTags(true);
+    const normalizedScope = searchScope?.trim() ?? "";
 
     try {
       const tags = await browsePlcTags({
         driver,
         ipAddress,
         options: toConnectionOptions(plcSettings),
+        search: normalizedScope.length > 0 ? normalizedScope : undefined,
       });
+
+      const folderOnlyDbList =
+        driver === "Siemens"
+        && tags.length > 0
+        && tags.every((tag) => tag.isFolder && tag.parentPath === "DB");
+
+      if (folderOnlyDbList) {
+        const dbNames = tags
+          .map((tag) => tag.name)
+          .filter((name) => /^DB\d+$/i.test(name))
+          .sort((left, right) => {
+            const leftNumber = Number(left.replace(/\D/g, ""));
+            const rightNumber = Number(right.replace(/\D/g, ""));
+            return leftNumber - rightNumber;
+          });
+
+        setSiemensDbList(dbNames);
+        if (dbNames.length > 0) {
+          setSelectedSiemensDb((previous) =>
+            dbNames.includes(previous) ? previous : dbNames[0]
+          );
+          setBrowseScope((previous) => previous.trim().length > 0 ? previous : dbNames[0]);
+        }
+
+        setTagBrowserStatus(
+          dbNames.length > 0
+            ? `Discovered ${dbNames.length} data block${dbNames.length === 1 ? "" : "s"}. Select a DB and load its addresses.`
+            : "Connected to Siemens PLC but no readable data blocks were discovered."
+        );
+
+        return;
+      }
 
       if (tags.length === 0) {
         setTagBrowserStatus(
           driver === "Siemens"
-            ? "Siemens connection succeeded, but no configured fallback tags are available yet. Live Siemens symbol browsing will require an external symbol source."
+            ? `Siemens connection succeeded, but no readable addresses were discovered${normalizedScope ? ` in scope "${normalizedScope}"` : " with the current browse scope"}. Try DB1, DB10, or a specific area like M/I/Q.`
             : "PLC connection succeeded, but no readable/discoverable tags were returned for this controller filter."
         );
         return;
       }
 
       setDiscoveredTags(tags);
+      if (driver === "Siemens" && /^DB\d+$/i.test(normalizedScope)) {
+        setSelectedSiemensDb(normalizedScope.toUpperCase());
+      }
       setTagBrowserStatus(
         driver === "Siemens"
-          ? "Showing available configured Siemens tags. Live Siemens symbol browsing is not available from the current driver alone."
+          ? `Discovered ${tags.length} readable Siemens address${tags.length === 1 ? "" : "es"}${normalizedScope ? ` from scope "${normalizedScope}"` : ""}.`
           : `Discovered ${tags.length} controller tag${tags.length === 1 ? "" : "s"}. Select a tag to read its current value.`
       );
     } catch (requestError) {
@@ -750,6 +893,67 @@ export default function Administration() {
             ? requestError.message
             : "Tag discovery failed.";
 
+      setTagBrowserError(message);
+    } finally {
+      setBrowsingTags(false);
+    }
+  }
+
+  async function runSiemensAreaSweep(source: PlcConnectionResult, ipAddress: string) {
+    setReadingTagName(null);
+    setTagFilter("");
+    setTagBrowserError("");
+    setTagBrowserStatus("");
+    setDiscoveredTags([]);
+    setSelectedTag(null);
+    setSelectedTagResult(null);
+    setAutoPopulateCompleted(false);
+    setNewLineTagAssignmentsSaved(false);
+    setBrowsingTags(true);
+
+    try {
+      const scopes = ["M", "I", "Q", "DB"] as const;
+      const responses = await Promise.all(
+        scopes.map((scope) =>
+          browsePlcTags({
+            driver: source.driver,
+            ipAddress,
+            options: toConnectionOptions(plcSettings),
+            search: scope,
+          })
+        )
+      );
+
+      const [mTags, iTags, qTags, dbFolders] = responses;
+      const allTags = [...mTags, ...iTags, ...qTags, ...dbFolders];
+      const uniqueTags = Array.from(new Map(allTags.map((tag) => [tag.name, tag])).values());
+
+      const dbNames = dbFolders
+        .filter((tag) => tag.isFolder && tag.parentPath === "DB")
+        .map((tag) => tag.name)
+        .filter((name) => /^DB\d+$/i.test(name))
+        .sort((left, right) => {
+          const leftNumber = Number(left.replace(/\D/g, ""));
+          const rightNumber = Number(right.replace(/\D/g, ""));
+          return leftNumber - rightNumber;
+        });
+
+      setSiemensDbList(dbNames);
+      if (dbNames.length > 0) {
+        setSelectedSiemensDb((previous) => (dbNames.includes(previous) ? previous : dbNames[0]));
+      }
+
+      setDiscoveredTags(uniqueTags);
+      setTagBrowserStatus(
+        `Sweep complete: M=${mTags.length}, I=${iTags.length}, Q=${qTags.length}, DB blocks=${dbNames.length}. Select a DB to enumerate full DB addresses.`
+      );
+    } catch (error) {
+      const message =
+        error instanceof ApiRequestError
+          ? error.responseBody || error.message || "Siemens area sweep failed."
+          : error instanceof Error
+            ? error.message
+            : "Siemens area sweep failed.";
       setTagBrowserError(message);
     } finally {
       setBrowsingTags(false);
@@ -830,6 +1034,9 @@ export default function Administration() {
         driver: source.driver,
         ipAddress: source.ipAddress,
         options: toConnectionOptions(plcSettings),
+        search: isSiemensManufacturer(form.manufacturer)
+          ? (selectedSiemensDb.trim() || browseScope.trim() || undefined)
+          : (browseScope.trim() || undefined),
       });
 
       const suggestedByKey = new Map(
@@ -1049,7 +1256,10 @@ export default function Administration() {
   }
 
   const hasValidRoutePath = /^\d+(,\d+)*$/.test(plcSettings.routePath.trim());
-  const canTestConnection = isValidIpv4Address(form.plcIp) && hasValidRoutePath && !testingConnection;
+  const hasValidRackSlot = plcSettings.rack >= 0 && plcSettings.slot >= 0;
+  const canTestConnection = isValidIpv4Address(form.plcIp)
+    && (isSiemensManufacturer(form.manufacturer) ? hasValidRackSlot : hasValidRoutePath)
+    && !testingConnection;
   const isNewLine = selectedLineId === "new";
   const canSaveLine = isNewLine
     ? testConnectionCompleted && autoPopulateCompleted && newLineTagAssignmentsSaved
@@ -1272,32 +1482,79 @@ export default function Administration() {
                     inputProps={{ min: 500, max: 60000 }}
                   />
 
-                  <TextField
-                    label="Route/Path"
-                    value={plcSettings.routePath}
-                    onChange={(event) => updatePlcSetting("routePath", event.target.value)}
-                    fullWidth
-                    placeholder="1,0"
-                  />
+                  {isSiemensManufacturer(form.manufacturer) ? (
+                    <>
+                      <TextField
+                        label="Rack"
+                        type="number"
+                        value={plcSettings.rack}
+                        onChange={(event) =>
+                          updatePlcSetting("rack", Number(event.target.value))
+                        }
+                        fullWidth
+                        inputProps={{ min: 0, max: 7 }}
+                      />
 
-                  <FormControl fullWidth>
-                    <InputLabel id="processor-type-label">Processor Type</InputLabel>
-                    <Select
-                      labelId="processor-type-label"
-                      label="Processor Type"
-                      value={plcSettings.processorType}
-                      onChange={(event) =>
-                        updatePlcSetting(
-                          "processorType",
-                          event.target.value as LinePlcSettingsForm["processorType"]
-                        )
-                      }
-                    >
-                      <MenuItem value="ControlLogix">ControlLogix</MenuItem>
-                      <MenuItem value="CompactLogix">CompactLogix</MenuItem>
-                      <MenuItem value="Micro800">Micro800</MenuItem>
-                    </Select>
-                  </FormControl>
+                      <TextField
+                        label="Slot"
+                        type="number"
+                        value={plcSettings.slot}
+                        onChange={(event) =>
+                          updatePlcSetting("slot", Number(event.target.value))
+                        }
+                        fullWidth
+                        inputProps={{ min: 0, max: 31 }}
+                      />
+
+                      <FormControl fullWidth>
+                        <InputLabel id="processor-type-label">CPU Family</InputLabel>
+                        <Select
+                          labelId="processor-type-label"
+                          label="CPU Family"
+                          value={plcSettings.processorType}
+                          onChange={(event) =>
+                            updatePlcSetting(
+                              "processorType",
+                              event.target.value as LinePlcSettingsForm["processorType"]
+                            )
+                          }
+                        >
+                          <MenuItem value="S7-1217C">S7-1217C</MenuItem>
+                          <MenuItem value="S7-1200">S7-1200</MenuItem>
+                          <MenuItem value="S7-1500">S7-1500</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </>
+                  ) : (
+                    <>
+                      <TextField
+                        label="Route/Path"
+                        value={plcSettings.routePath}
+                        onChange={(event) => updatePlcSetting("routePath", event.target.value)}
+                        fullWidth
+                        placeholder="1,0"
+                      />
+
+                      <FormControl fullWidth>
+                        <InputLabel id="processor-type-label">Processor Type</InputLabel>
+                        <Select
+                          labelId="processor-type-label"
+                          label="Processor Type"
+                          value={plcSettings.processorType}
+                          onChange={(event) =>
+                            updatePlcSetting(
+                              "processorType",
+                              event.target.value as LinePlcSettingsForm["processorType"]
+                            )
+                          }
+                        >
+                          <MenuItem value="ControlLogix">ControlLogix</MenuItem>
+                          <MenuItem value="CompactLogix">CompactLogix</MenuItem>
+                          <MenuItem value="Micro800">Micro800</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </>
+                  )}
                 </Stack>
 
                 <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -1447,6 +1704,177 @@ export default function Administration() {
             </Alert>
           ) : null}
 
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                PLC Tag Discovery Scope
+              </Typography>
+
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1.5}
+                alignItems={{ xs: "stretch", sm: "center" }}
+              >
+                <TextField
+                  label={isSiemensManufacturer(form.manufacturer) ? "Browse Scope" : "Controller Filter"}
+                  value={browseScope}
+                  onChange={(event) => setBrowseScope(event.target.value)}
+                  fullWidth
+                  placeholder={isSiemensManufacturer(form.manufacturer) ? "DB1" : "Machine"}
+                  helperText={
+                    isSiemensManufacturer(form.manufacturer)
+                      ? "Examples: DB310, DB310:all, DB310:bits, M, I, Q. Default DB browse is compact (DBW/DBD)."
+                      : "Optional filter used when the driver supports scoped browse."
+                  }
+                />
+
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    if (!connectionResult?.isConnected) {
+                      return;
+                    }
+
+                    void discoverTags(connectionResult.driver, form.plcIp.trim(), browseScope);
+                  }}
+                  disabled={browsingTags || !connectionResult?.isConnected}
+                >
+                  {browsingTags ? "Discovering..." : "Discover Tags"}
+                </Button>
+              </Stack>
+
+              {isSiemensManufacturer(form.manufacturer) ? (
+                <Stack spacing={1.25}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      onClick={() => {
+                        if (!connectionResult?.isConnected) {
+                          return;
+                        }
+
+                        void runSiemensAreaSweep(connectionResult, form.plcIp.trim());
+                      }}
+                      disabled={browsingTags || !connectionResult?.isConnected}
+                    >
+                      {browsingTags ? "Sweeping..." : "Run In-Depth Sweep"}
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        if (!connectionResult?.isConnected) {
+                          return;
+                        }
+
+                        void discoverTags(connectionResult.driver, form.plcIp.trim(), "DB");
+                      }}
+                      disabled={browsingTags || !connectionResult?.isConnected}
+                    >
+                      {browsingTags ? "Scanning DBs..." : "Load DB List"}
+                    </Button>
+
+                    <FormControl fullWidth disabled={siemensDbList.length === 0}>
+                      <InputLabel id="siemens-db-select-label">Data Block</InputLabel>
+                      <Select
+                        labelId="siemens-db-select-label"
+                        label="Data Block"
+                        value={selectedSiemensDb}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setSelectedSiemensDb(value);
+                          setBrowseScope(value);
+                        }}
+                      >
+                        {siemensDbList.map((dbName) => (
+                          <MenuItem key={dbName} value={dbName}>
+                            {dbName}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    <Button
+                      variant="contained"
+                      onClick={() => {
+                        if (!connectionResult?.isConnected || !selectedSiemensDb) {
+                          return;
+                        }
+
+                        void discoverTags(connectionResult.driver, form.plcIp.trim(), selectedSiemensDb);
+                      }}
+                      disabled={browsingTags || !connectionResult?.isConnected || !selectedSiemensDb}
+                    >
+                      {browsingTags ? "Loading DB..." : "Load Selected DB (Compact)"}
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        if (!connectionResult?.isConnected || !selectedSiemensDb) {
+                          return;
+                        }
+
+                        void discoverTags(connectionResult.driver, form.plcIp.trim(), `${selectedSiemensDb}:all`);
+                      }}
+                      disabled={browsingTags || !connectionResult?.isConnected || !selectedSiemensDb}
+                    >
+                      {browsingTags ? "Loading Types..." : "Load Selected DB (All Types)"}
+                    </Button>
+                  </Stack>
+
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        if (!connectionResult?.isConnected) {
+                          return;
+                        }
+
+                        void discoverTags(connectionResult.driver, form.plcIp.trim(), "M");
+                      }}
+                      disabled={browsingTags || !connectionResult?.isConnected}
+                    >
+                      Browse M (Markers)
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        if (!connectionResult?.isConnected) {
+                          return;
+                        }
+
+                        void discoverTags(connectionResult.driver, form.plcIp.trim(), "I");
+                      }}
+                      disabled={browsingTags || !connectionResult?.isConnected}
+                    >
+                      Browse I (Inputs)
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        if (!connectionResult?.isConnected) {
+                          return;
+                        }
+
+                        void discoverTags(connectionResult.driver, form.plcIp.trim(), "Q");
+                      }}
+                      disabled={browsingTags || !connectionResult?.isConnected}
+                    >
+                      Browse Q (Outputs)
+                    </Button>
+                  </Stack>
+
+                  <Typography variant="body2" color="text.secondary">
+                    Step A: Run In-Depth Sweep for all accessible non-DB areas plus DB inventory. Step B: Load DB List and choose a DB. Step C: Use compact DB view first, then All Types only when needed.
+                  </Typography>
+                </Stack>
+              ) : null}
+            </Stack>
+          </Paper>
+
           {hasDiscoveredTags ? (
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Stack spacing={2}>
@@ -1466,32 +1894,56 @@ export default function Administration() {
                   </Stack>
 
                   <TextField
-                    label="Search Tags"
-                    value={tagSearch}
-                    onChange={(event) => setTagSearch(event.target.value)}
+                    label="Filter Discovered Tags"
+                    value={tagFilter}
+                    onChange={(event) => setTagFilter(event.target.value)}
                     size="small"
                     sx={{ minWidth: { xs: "100%", md: 260 } }}
                   />
                 </Stack>
 
+                {tagAreaSummary.length > 0 ? (
+                  <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", rowGap: 1 }}>
+                    {tagAreaSummary.map((item) => (
+                      <Chip key={item.area} label={`${item.area}: ${item.count}`} variant="outlined" size="small" />
+                    ))}
+                  </Stack>
+                ) : null}
+
                 <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="stretch">
                   <Paper variant="outlined" sx={{ flex: 1, minHeight: 320 }}>
-                    <List sx={{ maxHeight: 320, overflowY: "auto", p: 0 }}>
-                      {filteredTags.map((tag) => (
-                        <ListItemButton
-                          key={tag.name}
-                          selected={selectedTag?.name === tag.name}
-                          onClick={() => void handleSelectTag(tag)}
-                        >
-                          <ListItemText
-                            primary={tag.name}
-                            secondary={`${tag.dataType} | ${tag.parentPath ?? "root"}`}
-                          />
-                        </ListItemButton>
-                      ))}
-                    </List>
+                    <TableContainer sx={{ maxHeight: 320 }}>
+                      <Table stickyHeader size="small" aria-label="discovered-plc-tags">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Tag</TableCell>
+                            <TableCell>Address</TableCell>
+                            <TableCell>Area</TableCell>
+                            <TableCell>Type</TableCell>
+                            <TableCell>Comment</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {sortedFilteredTags.map((tag) => (
+                            <TableRow
+                              key={tag.name}
+                              hover
+                              selected={selectedTag?.name === tag.name}
+                              onClick={() => void handleSelectTag(tag)}
+                              sx={{ cursor: "pointer" }}
+                            >
+                              <TableCell>{tag.displayName ?? tag.name}</TableCell>
+                              <TableCell>{tag.name}</TableCell>
+                              <TableCell>{tag.parentPath ?? "root"}</TableCell>
+                              <TableCell>{tag.dataType}</TableCell>
+                              <TableCell>{tag.description ?? (tag.isFolder ? "folder" : "")}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
 
-                    {!filteredTags.length ? (
+                    {!sortedFilteredTags.length ? (
                       <Box sx={{ p: 2 }}>
                         <Typography color="text.secondary">
                           No tags match the current search.
@@ -1516,18 +1968,30 @@ export default function Administration() {
                         <Stack direction="row" spacing={1} alignItems="center">
                           <CircularProgress size={16} />
                           <Typography color="text.secondary">
-                            Reading {selectedTag.name}...
+                            Reading {selectedTag.displayName ?? selectedTag.name}...
                           </Typography>
                         </Stack>
                       ) : null}
 
                       {selectedTagResult ? (
                         <>
-                          <TextField label="Tag Name" value={selectedTagResult.name} fullWidth disabled />
+                          <TextField
+                            label="Tag Name"
+                            value={selectedTag?.displayName ?? selectedTagResult.name}
+                            fullWidth
+                            disabled
+                          />
+                          <TextField label="PLC Address" value={selectedTagResult.name} fullWidth disabled />
                           <TextField label="Data Type" value={selectedTagResult.dataType} fullWidth disabled />
                           <TextField
                             label="Parent Path"
                             value={selectedTag?.parentPath ?? "root"}
+                            fullWidth
+                            disabled
+                          />
+                          <TextField
+                            label="Description"
+                            value={selectedTag?.description ?? ""}
                             fullWidth
                             disabled
                           />
@@ -1705,7 +2169,7 @@ export default function Administration() {
                       <MenuItem value="">Unassigned</MenuItem>
                       {discoveredTags.map((tag) => (
                         <MenuItem key={`${entry.logicalKey}:${tag.name}`} value={tag.name}>
-                          {`${tag.name} (${tag.dataType})`}
+                          {`${tag.displayName ?? tag.name} [${tag.name}] (${tag.dataType})`}
                         </MenuItem>
                       ))}
                     </TextField>

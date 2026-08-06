@@ -195,7 +195,7 @@ public sealed class LineLifecycleApiTests : IClassFixture<TestWebApplicationFact
             machineId = "MX-904",
             operatorName = "operator-904",
             plcIp = "192.168.10.94",
-            manufacturer = "Siemens",
+            manufacturer = "Mitsubishi",
             pollIntervalMs = 2000,
             isActive = false,
             lineLifecycleState = "Draft",

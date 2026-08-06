@@ -1,5 +1,9 @@
 import { apiGet, apiPost, apiPut } from "./api/client";
-import type { PlcConnectionOptions, PlcDriver } from "./plcConnectionService";
+import type {
+  PlcConnectionOptions,
+  PlcDriver,
+  PlcProcessorType,
+} from "./plcConnectionService";
 
 export interface PlcTagBrowseRequest {
   driver: PlcDriver;
@@ -10,9 +14,11 @@ export interface PlcTagBrowseRequest {
 
 export interface PlcTagBrowseItem {
   name: string;
+  displayName?: string | null;
   dataType: string;
   isFolder: boolean;
   parentPath?: string | null;
+  description?: string | null;
   canRead?: boolean | null;
   canWrite?: boolean | null;
 }
@@ -67,6 +73,7 @@ export interface AutoMapTagCatalogRequest {
   driver: PlcDriver;
   ipAddress: string;
   options?: PlcConnectionOptions;
+  search?: string;
 }
 
 export interface AutoMapTagSuggestion {
@@ -83,7 +90,9 @@ export interface LineProtocolAssignment {
   presetVersion: number;
   pollIntervalMs: number;
   routePath: string;
-  processorType: "ControlLogix" | "CompactLogix" | "Micro800";
+  processorType: PlcProcessorType;
+  rack?: number | null;
+  slot?: number | null;
   connectionTimeoutMs: number;
   readTimeoutMs: number;
   retryCount: number;
@@ -97,7 +106,9 @@ export interface UpdateLineProtocolAssignmentRequest {
   presetVersion: number;
   pollIntervalMs: number;
   routePath: string;
-  processorType: "ControlLogix" | "CompactLogix" | "Micro800";
+  processorType: PlcProcessorType;
+  rack?: number;
+  slot?: number;
   connectionTimeoutMs: number;
   readTimeoutMs: number;
   retryCount: number;

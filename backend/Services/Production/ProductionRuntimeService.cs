@@ -1216,15 +1216,45 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
 
     private static PlcConnectionOptionsDto BuildConnectionOptions(LineProtocolAssignmentEntity assignment)
     {
+        int? rack = null;
+        int? slot = null;
+
+        if (TryParseRackSlot(assignment.RoutePath, out var parsedRack, out var parsedSlot))
+        {
+            rack = parsedRack;
+            slot = parsedSlot;
+        }
+
         return new PlcConnectionOptionsDto
         {
             RoutePath = string.IsNullOrWhiteSpace(assignment.RoutePath) ? "1,0" : assignment.RoutePath,
             ProcessorType = string.IsNullOrWhiteSpace(assignment.ProcessorType) ? "ControlLogix" : assignment.ProcessorType,
+            Rack = rack,
+            Slot = slot,
             ConnectionTimeoutMs = assignment.ConnectionTimeoutMs <= 0 ? 3000 : assignment.ConnectionTimeoutMs,
             ReadTimeoutMs = assignment.ReadTimeoutMs <= 0 ? 3000 : assignment.ReadTimeoutMs,
             RetryCount = assignment.RetryCount < 0 ? 0 : assignment.RetryCount,
             RetryDelayMs = assignment.RetryDelayMs < 0 ? 0 : assignment.RetryDelayMs,
         };
+    }
+
+    private static bool TryParseRackSlot(string? routePath, out int rack, out int slot)
+    {
+        rack = 0;
+        slot = 1;
+
+        if (string.IsNullOrWhiteSpace(routePath))
+        {
+            return false;
+        }
+
+        var segments = routePath.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2)
+        {
+            return false;
+        }
+
+        return int.TryParse(segments[^2], out rack) && int.TryParse(segments[^1], out slot);
     }
 
     // Mutable in-memory state for a single configured line.

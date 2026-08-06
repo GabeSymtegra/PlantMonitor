@@ -24,6 +24,21 @@ public static class PlcPresetSeeder
                     new PlcProtocolPresetTagEntity { TagKey = "control_mode", PlcAddress = "Program:LineData.ControlMode", DataType = "int", Scale = 1.0m, IsRequired = true },
                 ],
             },
+            new()
+            {
+                Manufacturer = "Siemens",
+                PresetName = "BasicStatus",
+                PresetVersion = 1,
+                Description = "Siemens S7 baseline telemetry preset.",
+                Tags =
+                [
+                    new PlcProtocolPresetTagEntity { TagKey = "status", PlcAddress = "DB1.DBW0", DataType = "int", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "product", PlcAddress = "DB1.DBD4", DataType = "string", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "runtime_seconds", PlcAddress = "DB1.DBD8", DataType = "dint", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "total_length", PlcAddress = "DB1.DBD12", DataType = "real", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "control_mode", PlcAddress = "DB1.DBW16", DataType = "int", Scale = 1.0m, IsRequired = true },
+                ],
+            },
         };
 
         var existing = await dbContext.PlcProtocolPresets

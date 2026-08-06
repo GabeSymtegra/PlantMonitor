@@ -135,7 +135,7 @@ public sealed class LinesController : ControllerBase
         entity.MachineId = NormalizeOptional(request.MachineId);
         entity.OperatorName = NormalizeOptional(request.OperatorName);
         entity.PlcIp = request.PlcIp.Trim();
-        entity.Manufacturer = request.Manufacturer.Trim();
+        entity.Manufacturer = NormalizeManufacturer(request.Manufacturer);
         entity.PollIntervalMs = request.PollIntervalMs;
     }
 
@@ -191,9 +191,9 @@ public sealed class LinesController : ControllerBase
             return BadRequestProblem("PLC IP must be a valid IPv4 address.", "invalid_plc_ip");
         }
 
-        if (!string.Equals(request.Manufacturer?.Trim(), "AllenBradley", StringComparison.OrdinalIgnoreCase))
+        if (!IsSupportedManufacturer(request.Manufacturer))
         {
-            return BadRequestProblem("Only AllenBradley is currently supported.", "unsupported_manufacturer");
+            return BadRequestProblem("Manufacturer must be AllenBradley or Siemens.", "unsupported_manufacturer");
         }
 
         if (request.PollIntervalMs is < 500 or > 60000)
@@ -231,9 +231,10 @@ public sealed class LinesController : ControllerBase
         }
 
         var normalizedIp = request.PlcIp.Trim();
+        var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
         var duplicateConnectionConflict = _dbContext.LineProtocolAssignments.Any(x =>
             x.PlcIp == normalizedIp
-            && x.Manufacturer.ToLower() == "allenbradley"
+            && x.Manufacturer.ToLower() == normalizedManufacturer.ToLower()
             && (!currentLineId.HasValue || x.LineId != currentLineId.Value));
 
         if (duplicateConnectionConflict)
@@ -257,6 +258,32 @@ public sealed class LinesController : ControllerBase
         }
 
         return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
+    }
+
+    private static bool IsSupportedManufacturer(string? manufacturer)
+    {
+        var normalized = NormalizeManufacturer(manufacturer);
+        return string.Equals(normalized, "AllenBradley", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "Siemens", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeManufacturer(string? manufacturer)
+    {
+        var normalized = manufacturer?.Trim() ?? string.Empty;
+        if (string.Equals(normalized, "AB", StringComparison.OrdinalIgnoreCase))
+        {
+            return "AllenBradley";
+        }
+
+        if (string.Equals(normalized, "S7", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "S7-1200", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "S7-1217C", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "S7-1500", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Siemens";
+        }
+
+        return normalized;
     }
 
     private ActionResult BadRequestProblem(string detail, string code)

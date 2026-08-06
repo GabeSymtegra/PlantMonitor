@@ -6,7 +6,7 @@ namespace backend.Services.Plc;
 
 public sealed class PlcConnectionService : IPlcConnectionService
 {
-    private const string DriverErrorMessage = "Wrong driver selected. Choose AllenBradley.";
+    private const string DriverErrorMessage = "Wrong driver selected. Choose AllenBradley or Siemens.";
     private const string InvalidIpMessage = "Invalid IP address. Enter a valid IPv4 address.";
 
     private readonly IReadOnlyDictionary<string, IPlcDriver> _drivers;
