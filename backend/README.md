@@ -21,3 +21,28 @@ The backend is an ASP.NET Core application that owns authentication, live runtim
 - [Services/README.md](Services/README.md)
 - [Controllers/README.md](Controllers/README.md)
 - [Interfaces/README.md](Interfaces/README.md)
+
+## Running The Backend
+
+Default local development run:
+
+```powershell
+Set-Location backend
+dotnet run --launch-profile http
+```
+
+Default URL:
+
+- `http://localhost:5265`
+
+If `5265` is already in use or the shared SQLite database is locked by another
+PlantMonitor instance, use an isolated backend instance instead:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:ASPNETCORE_URLS='http://localhost:5266'
+$env:ConnectionStrings__PlantMonitor='Data Source=C:\Users\Gabe\Desktop\PlantMonitor\backend\plantmonitor.dev.db'
+dotnet run --no-launch-profile --project C:\Users\Gabe\Desktop\PlantMonitor\backend\backend.csproj
+```
+
+This isolated mode is the recommended path for Siemens integration testing.

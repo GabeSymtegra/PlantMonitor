@@ -106,6 +106,50 @@ Operational check after startup:
 - GET dashboard endpoint responds.
 - SignalR connection opens and receives updates.
 
+### 4.1 Clean Developer Startup Commands
+
+Default backend:
+
+```powershell
+Set-Location backend
+dotnet run --launch-profile http
+```
+
+Default frontend:
+
+```powershell
+Set-Location frontend
+npm run dev
+```
+
+### 4.2 Isolated Siemens Test Startup
+
+Use this when the default backend is already running, the Windows service is
+active, or the shared SQLite database is locked.
+
+Backend:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:ASPNETCORE_URLS='http://localhost:5266'
+$env:ConnectionStrings__PlantMonitor='Data Source=C:\Users\Gabe\Desktop\PlantMonitor\backend\plantmonitor.dev.db'
+dotnet run --no-launch-profile --project C:\Users\Gabe\Desktop\PlantMonitor\backend\backend.csproj
+```
+
+Frontend:
+
+```powershell
+Set-Location frontend
+$env:VITE_DEV_BACKEND_ORIGIN='http://127.0.0.1:5266'
+npm run dev
+```
+
+Why this mode exists:
+
+- avoids port `5265` collisions
+- avoids single-instance database lock conflicts
+- keeps Siemens integration tests isolated from the installed/service-backed instance
+
 ## 5. Production Deployment Topology
 
 Recommended topology:

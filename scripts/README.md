@@ -14,3 +14,31 @@ This folder contains local development scripts.
 - `package-release.ps1`: archive published release binaries into a timestamped zip package
 
 Use these scripts instead of manual port cleanup when possible.
+
+## Clean Local Startup
+
+Normal backend plus frontend:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+If the default backend port or database is already in use, use this manual
+isolated Siemens-testing flow:
+
+Backend:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:ASPNETCORE_URLS='http://localhost:5266'
+$env:ConnectionStrings__PlantMonitor='Data Source=C:\Users\Gabe\Desktop\PlantMonitor\backend\plantmonitor.dev.db'
+dotnet run --no-launch-profile --project C:\Users\Gabe\Desktop\PlantMonitor\backend\backend.csproj
+```
+
+Frontend:
+
+```powershell
+Set-Location frontend
+$env:VITE_DEV_BACKEND_ORIGIN='http://127.0.0.1:5266'
+npm run dev
+```

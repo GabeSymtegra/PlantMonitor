@@ -50,6 +50,22 @@ dotnet run --launch-profile http
 
 Default backend URL: `http://localhost:5265`
 
+If the default instance is blocked by an existing process, Windows service, or
+single-instance SQLite lock, start an isolated backend for Siemens testing:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:ASPNETCORE_URLS='http://localhost:5266'
+$env:ConnectionStrings__PlantMonitor='Data Source=C:\Users\Gabe\Desktop\PlantMonitor\backend\plantmonitor.dev.db'
+dotnet run --no-launch-profile --project C:\Users\Gabe\Desktop\PlantMonitor\backend\backend.csproj
+```
+
+This isolated mode uses:
+
+- port `5266` instead of `5265`
+- a separate local SQLite file `backend/plantmonitor.dev.db`
+- Development environment settings so localhost requests work normally
+
 ### Frontend
 
 ```powershell
@@ -62,6 +78,14 @@ Default frontend URL: `http://127.0.0.1:5173`
 
 In local development, Vite proxies `/api/*` and `/hubs/*` to `http://127.0.0.1:5265` by default.
 To override this backend target, set `VITE_DEV_BACKEND_ORIGIN` before `npm run dev`.
+
+Example for the isolated Siemens backend on `5266`:
+
+```powershell
+Set-Location frontend
+$env:VITE_DEV_BACKEND_ORIGIN='http://127.0.0.1:5266'
+npm run dev
+```
 
 ### Helper script
 
@@ -128,6 +152,7 @@ The Playwright smoke suite validates:
 ## Known Development Notes
 
 - If `dotnet run` fails on port `5265`, another backend process is usually already listening there.
+- If `dotnet run` fails with a PlantMonitor single-instance or SQLite lock error, use the isolated `5266` plus `plantmonitor.dev.db` flow above.
 - If local backend builds fail with `MSB3027` or `MSB3021`, a running backend process may still have the output assembly locked.
 - The frontend now expires stale sessions when protected APIs return `401`, so an outdated browser tab may redirect back to login after refresh.
 - `docker-compose.yml` currently exists but is empty.
