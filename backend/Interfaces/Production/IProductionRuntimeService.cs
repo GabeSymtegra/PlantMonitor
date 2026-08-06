@@ -8,4 +8,5 @@ public interface IProductionRuntimeService
     DashboardSnapshotDto GetDashboardSnapshot();
     LineDetailSnapshotDto? GetLineDetail(int lineId);
     bool IsKnownLine(int lineId);
+    void RefreshAssignmentsNow();
 }

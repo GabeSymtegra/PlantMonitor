@@ -1,6 +1,7 @@
 using backend.Data;
 using backend.DTOs.Plc;
 using backend.Models.Plc;
+using backend.Interfaces.Production;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,10 +15,12 @@ namespace backend.Controllers;
 public sealed class LinesController : ControllerBase
 {
     private readonly PlantMonitorDbContext _dbContext;
+    private readonly IProductionRuntimeService _runtimeService;
 
-    public LinesController(PlantMonitorDbContext dbContext)
+    public LinesController(PlantMonitorDbContext dbContext, IProductionRuntimeService runtimeService)
     {
         _dbContext = dbContext;
+        _runtimeService = runtimeService;
     }
 
     [HttpGet]
@@ -42,17 +45,33 @@ public sealed class LinesController : ControllerBase
             return validationResult;
         }
 
-        var entity = new LineProtocolAssignmentEntity();
+        var normalizedIp = request.PlcIp.Trim();
+        var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
+
+        var entity = _dbContext.LineProtocolAssignments.SingleOrDefault(x =>
+            x.LineLifecycleState == LineLifecycleState.Disabled
+            && (x.LineNumber == request.LineNumber
+                || (x.PlcIp == normalizedIp && x.Manufacturer.ToLower() == normalizedManufacturer.ToLower())));
+
+        var isReuse = entity is not null;
+        entity ??= new LineProtocolAssignmentEntity();
         ApplyRequest(entity, request);
         entity.LineId = request.LineNumber;
         entity.LineLifecycleState = LineLifecycleState.Draft;
         entity.IsActive = false;
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
-        _dbContext.LineProtocolAssignments.Add(entity);
-        _dbContext.SaveChanges();
+        if (!isReuse)
+        {
+            _dbContext.LineProtocolAssignments.Add(entity);
+        }
 
-        return CreatedAtAction(nameof(GetLines), MapLine(entity));
+        _dbContext.SaveChanges();
+        _runtimeService.RefreshAssignmentsNow();
+
+        return isReuse
+            ? Ok(MapLine(entity))
+            : CreatedAtAction(nameof(GetLines), MapLine(entity));
     }
 
     [HttpPut("{lineId:int}")]
@@ -100,6 +119,7 @@ public sealed class LinesController : ControllerBase
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
         _dbContext.SaveChanges();
+        _runtimeService.RefreshAssignmentsNow();
         return Ok(MapLine(entity));
     }
 
@@ -113,10 +133,9 @@ public sealed class LinesController : ControllerBase
             return NotFoundProblem("Line configuration not found.", "line_config_not_found");
         }
 
-        entity.LineLifecycleState = LineLifecycleState.Disabled;
-        entity.IsActive = false;
-        entity.UpdatedAtUtc = DateTime.UtcNow;
+        _dbContext.LineProtocolAssignments.Remove(entity);
         _dbContext.SaveChanges();
+        _runtimeService.RefreshAssignmentsNow();
 
         return NoContent();
     }
@@ -222,6 +241,8 @@ public sealed class LinesController : ControllerBase
         }
 
         var lineNumberConflict = _dbContext.LineProtocolAssignments.Any(x =>
+            x.LineLifecycleState != LineLifecycleState.Disabled
+            &&
             x.LineNumber == request.LineNumber
             && (!currentLineId.HasValue || x.LineId != currentLineId.Value));
 
@@ -233,6 +254,8 @@ public sealed class LinesController : ControllerBase
         var normalizedIp = request.PlcIp.Trim();
         var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
         var duplicateConnectionConflict = _dbContext.LineProtocolAssignments.Any(x =>
+            x.LineLifecycleState != LineLifecycleState.Disabled
+            &&
             x.PlcIp == normalizedIp
             && x.Manufacturer.ToLower() == normalizedManufacturer.ToLower()
             && (!currentLineId.HasValue || x.LineId != currentLineId.Value));

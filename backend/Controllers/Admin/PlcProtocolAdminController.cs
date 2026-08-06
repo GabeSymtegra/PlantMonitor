@@ -1,6 +1,7 @@
 using backend.DTOs.Plc;
 using backend.Data;
 using backend.Interfaces.Plc;
+using backend.Interfaces.Production;
 using backend.Models.Plc;
 using backend.Services.Plc;
 using Microsoft.EntityFrameworkCore;
@@ -20,15 +21,18 @@ public sealed class PlcProtocolAdminController : ControllerBase
     private readonly IPlcProtocolConfigService _protocolConfigService;
     private readonly IPlcConnectionService _connectionService;
     private readonly PlantMonitorDbContext _dbContext;
+    private readonly IProductionRuntimeService _runtimeService;
 
     public PlcProtocolAdminController(
         IPlcProtocolConfigService protocolConfigService,
         IPlcConnectionService connectionService,
-        PlantMonitorDbContext dbContext)
+        PlantMonitorDbContext dbContext,
+        IProductionRuntimeService runtimeService)
     {
         _protocolConfigService = protocolConfigService;
         _connectionService = connectionService;
         _dbContext = dbContext;
+        _runtimeService = runtimeService;
     }
 
     // -------------------------------------------------------------------------
@@ -334,6 +338,7 @@ public sealed class PlcProtocolAdminController : ControllerBase
         line.IsActive = true;
         line.UpdatedAtUtc = DateTime.UtcNow;
         _dbContext.SaveChanges();
+        _runtimeService.RefreshAssignmentsNow();
 
         return Ok(new
         {

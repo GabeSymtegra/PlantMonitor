@@ -252,7 +252,9 @@ function toGaugeDetail(sensor: RuntimeSensorDetailDto): GaugeDetail {
 
 export async function getAllLines(): Promise<ProductionLine[]> {
   const dto = await apiGet<LineConfigDto[]>(API_ENDPOINTS.lines);
-  return dto.map(toConfiguredLine);
+  return dto
+    .filter((line) => line.lineLifecycleState !== "Disabled")
+    .map(toConfiguredLine);
 }
 
 export async function addLine(

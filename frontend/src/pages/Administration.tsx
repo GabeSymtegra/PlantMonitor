@@ -19,6 +19,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -164,6 +165,19 @@ function formatRequestError(requestError: ApiRequestError): string {
   return lines.join("\n");
 }
 
+function tryGetProblemCode(requestError: ApiRequestError): string | null {
+  if (!requestError.responseBody) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(requestError.responseBody) as { code?: unknown };
+    return typeof parsed.code === "string" ? parsed.code : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatTagValueDisplay(value?: string | null): string {
   if (!value) {
     return "Unavailable";
@@ -233,6 +247,9 @@ export default function Administration() {
   const [autoPopulateCompleted, setAutoPopulateCompleted] = useState(false);
   const [newLineTagAssignmentsSaved, setNewLineTagAssignmentsSaved] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmOverwriteOpen, setConfirmOverwriteOpen] = useState(false);
+  const [duplicateLineTarget, setDuplicateLineTarget] = useState<ProductionLine | null>(null);
+  const [successToastOpen, setSuccessToastOpen] = useState(false);
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.lineLifecycleState === "Active"),
@@ -294,6 +311,27 @@ export default function Administration() {
   }, [discoveredTags]);
 
   const hasDiscoveredTags = discoveredTags.length > 0;
+
+  function findDuplicateLineByConnection(): ProductionLine | null {
+    const trimmedIp = form.plcIp.trim();
+
+    if (!trimmedIp) {
+      return null;
+    }
+
+    return lines.find((line) => {
+      if (selectedLineId !== "new" && line.id === selectedLineId) {
+        return false;
+      }
+
+      return line.plcIp.trim() === trimmedIp && line.manufacturer === form.manufacturer;
+    }) ?? null;
+  }
+
+  function showSuccessMessage(message: string) {
+    setSuccess(message);
+    setSuccessToastOpen(true);
+  }
 
   function toConnectionOptions(settings: LinePlcSettingsForm): PlcConnectionOptions {
     const normalizedRoutePath = isSiemensManufacturer(form.manufacturer)
@@ -542,16 +580,18 @@ export default function Administration() {
       return "PLC IP must be a valid IPv4 address (example: 192.168.1.105).";
     }
 
-    const duplicateIp = lines.some((line) => {
-      if (selectedLineId !== "new" && line.id === selectedLineId) {
-        return false;
+    if (selectedLineId !== "new") {
+      const duplicateIp = lines.some((line) => {
+        if (line.id === selectedLineId) {
+          return false;
+        }
+
+        return line.plcIp.trim() === trimmedIp && line.manufacturer === form.manufacturer;
+      });
+
+      if (duplicateIp) {
+        return `PLC IP ${trimmedIp} is already assigned to another line.`;
       }
-
-      return line.plcIp.trim() === trimmedIp && line.manufacturer === form.manufacturer;
-    });
-
-    if (duplicateIp) {
-      return `PLC IP ${trimmedIp} is already assigned to another line.`;
     }
 
     if (!trimmedProduct) {
@@ -565,119 +605,26 @@ export default function Administration() {
     setError("");
     setSuccess("");
 
-    const validationError = validateForm();
+    try {
+      const validationError = validateForm();
 
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    if (selectedLineId === "new") {
-      if (!testConnectionCompleted || connectionResult?.isConnected !== true) {
-        setError("Run a successful Test Connection before adding the line.");
+      if (validationError) {
+        setError(validationError);
         return;
       }
 
-      if (!autoPopulateCompleted) {
-        setError("Run Auto Populate before adding the line.");
+      if (selectedLineId === "new") {
+        const duplicateLine = findDuplicateLineByConnection();
+        if (duplicateLine) {
+          setDuplicateLineTarget(duplicateLine);
+          setConfirmOverwriteOpen(true);
+          return;
+        }
+
+        await createOrOverwriteLine();
         return;
       }
 
-      if (!newLineTagAssignmentsSaved) {
-        setError("Save Tag Assignments before adding the line.");
-        return;
-      }
-
-      const nextLineNumber = lines.length
-        ? Math.max(...lines.map((line) => line.lineNumber || 0)) + 1
-        : 1;
-
-      const createdLine = await addLine({
-        ...form,
-        lineNumber: nextLineNumber,
-        lineName: form.lineName.trim(),
-        recipeId: form.recipeId.trim() || "Unknown",
-        machineId: form.machineId.trim() || "Unknown",
-        operatorName: form.operatorName.trim() || "Unknown",
-        startDateTime: new Date().toISOString(),
-        status: LineStatus.Offline,
-        timeInStatus: "00:00:00",
-        controlMode: "Auto",
-        percentAutoMode: 100,
-        autoVariance: 0,
-        percentManualMode: 0,
-        manualVariance: 0,
-        totalVariance: 0,
-        totalLength: 0,
-        runtime: "00:00:00",
-        product: form.product.trim(),
-        plcIp: form.plcIp.trim(),
-        isActive: false,
-      });
-
-      await upsertLineProtocolAssignment(createdLine.id, {
-        manufacturer: form.manufacturer,
-        presetName: "BasicStatus",
-        presetVersion: 1,
-        pollIntervalMs: plcSettings.pollIntervalMs,
-        routePath: isSiemensManufacturer(form.manufacturer)
-          ? `${Math.max(0, plcSettings.rack)},${Math.max(0, plcSettings.slot)}`
-          : plcSettings.routePath.trim() || "1,0",
-        processorType: plcSettings.processorType,
-        rack: Math.max(0, plcSettings.rack),
-        slot: Math.max(0, plcSettings.slot),
-        connectionTimeoutMs: plcSettings.connectionTimeoutMs,
-        readTimeoutMs: plcSettings.readTimeoutMs,
-        retryCount: plcSettings.retryCount,
-        retryDelayMs: plcSettings.retryDelayMs,
-      });
-
-      await replaceLineTagCatalog(createdLine.id, form.manufacturer, tagCatalog);
-
-      const readiness = await getCommissioningReadiness(createdLine.id);
-      setCommissioningReady(readiness.isReady);
-
-      if (readiness.isReady) {
-        await activateCommissionedLine(createdLine.id);
-        setCommissioningStatus("Commissioning passed and line was activated automatically.");
-      } else {
-        const issues = readiness.issues.length > 0
-          ? readiness.issues.join("\n")
-          : "Commissioning requirements are not fully satisfied yet.";
-
-        setCommissioningStatus(
-          `Line saved in Draft state. Resolve these issues, then activate:\n${issues}`
-        );
-      }
-
-      const refreshed = await getAllLines();
-      setLines(refreshed);
-      const current = refreshed.find((line) => line.id === createdLine.id);
-      if (current) {
-        setSelectedLineId(current.id);
-        setForm({
-          lineNumber: current.lineNumber,
-          lineName: current.lineName,
-          product: current.product,
-          recipeId: current.recipeId || "Unknown",
-          machineId: current.machineId || "Unknown",
-          operatorName: current.operatorName || "Unknown",
-          plcIp: current.plcIp,
-          manufacturer: current.manufacturer,
-          lineLifecycleState: current.lineLifecycleState,
-        });
-      }
-
-      setSuccess("Line added successfully. Configuration and tag assignments were saved.");
-
-      try {
-        await refreshDashboard();
-      } catch {
-        // Keep admin flow successful even if dashboard refresh falls back to polling.
-      }
-
-      return;
-    } else {
       await updateLine(selectedLineId, {
         lineNumber: selectedLine?.lineNumber ?? form.lineNumber,
         lineName: form.lineName.trim(),
@@ -689,16 +636,12 @@ export default function Administration() {
         plcIp: form.plcIp.trim(),
         lineLifecycleState: form.lineLifecycleState,
       });
-      setSuccess("Line updated successfully.");
-    }
+      showSuccessMessage("Line updated successfully.");
 
-    const refreshed = await getAllLines();
-    setLines(refreshed);
+      const refreshed = await getAllLines();
+      setLines(refreshed);
 
-    const assignmentLineId = selectedLineId;
-
-    if (assignmentLineId) {
-      await upsertLineProtocolAssignment(assignmentLineId, {
+      await upsertLineProtocolAssignment(selectedLineId, {
         manufacturer: form.manufacturer,
         presetName: "BasicStatus",
         presetVersion: 1,
@@ -714,21 +657,170 @@ export default function Administration() {
         retryCount: plcSettings.retryCount,
         retryDelayMs: plcSettings.retryDelayMs,
       });
+
+      try {
+        await refreshDashboard();
+      } catch {
+        // Keep admin flow successful even if dashboard refresh falls back to polling.
+      }
+
+      const current = refreshed.find((line) => line.id === selectedLineId);
+      if (current) {
+        setForm((previous) => ({
+          ...previous,
+          lineLifecycleState: current.lineLifecycleState,
+        }));
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Saving the line failed.";
+      setError(message);
     }
+  }
+
+  async function createOrOverwriteLine(existingLine?: ProductionLine) {
+    if (!testConnectionCompleted || connectionResult?.isConnected !== true) {
+      setError("Run a successful Test Connection before adding the line.");
+      return;
+    }
+
+    if (!autoPopulateCompleted) {
+      setError("Run Auto Populate before adding the line.");
+      return;
+    }
+
+    if (!newLineTagAssignmentsSaved) {
+      setError("Save Tag Assignments before adding the line.");
+      return;
+    }
+
+    const nextLineNumber = lines.length
+      ? Math.max(...lines.map((line) => line.lineNumber || 0)) + 1
+      : 1;
+
+    const baseLinePayload = {
+      ...form,
+      lineNumber: existingLine?.lineNumber ?? nextLineNumber,
+      lineName: form.lineName.trim(),
+      recipeId: form.recipeId.trim() || "Unknown",
+      machineId: form.machineId.trim() || "Unknown",
+      operatorName: form.operatorName.trim() || "Unknown",
+      startDateTime: new Date().toISOString(),
+      status: LineStatus.Offline,
+      timeInStatus: "00:00:00",
+      controlMode: "Auto" as const,
+      percentAutoMode: 100,
+      autoVariance: 0,
+      percentManualMode: 0,
+      manualVariance: 0,
+      totalVariance: 0,
+      totalLength: 0,
+      runtime: "00:00:00",
+      product: form.product.trim(),
+      plcIp: form.plcIp.trim(),
+      isActive: false,
+    };
+
+    const savedLine = existingLine
+      ? await updateLine(existingLine.id, baseLinePayload)
+      : await createLineWithNextAvailableNumber(baseLinePayload, nextLineNumber);
+
+    await upsertLineProtocolAssignment(savedLine.id, {
+      manufacturer: form.manufacturer,
+      presetName: "BasicStatus",
+      presetVersion: 1,
+      pollIntervalMs: plcSettings.pollIntervalMs,
+      routePath: isSiemensManufacturer(form.manufacturer)
+        ? `${Math.max(0, plcSettings.rack)},${Math.max(0, plcSettings.slot)}`
+        : plcSettings.routePath.trim() || "1,0",
+      processorType: plcSettings.processorType,
+      rack: Math.max(0, plcSettings.rack),
+      slot: Math.max(0, plcSettings.slot),
+      connectionTimeoutMs: plcSettings.connectionTimeoutMs,
+      readTimeoutMs: plcSettings.readTimeoutMs,
+      retryCount: plcSettings.retryCount,
+      retryDelayMs: plcSettings.retryDelayMs,
+    });
+
+    await replaceLineTagCatalog(savedLine.id, form.manufacturer, tagCatalog);
+
+    const readiness = await getCommissioningReadiness(savedLine.id);
+    setCommissioningReady(readiness.isReady);
+
+    if (readiness.isReady) {
+      await activateCommissionedLine(savedLine.id);
+      setCommissioningStatus("Commissioning passed and line was activated automatically.");
+    } else {
+      const issues = readiness.issues.length > 0
+        ? readiness.issues.join("\n")
+        : "Commissioning requirements are not fully satisfied yet.";
+
+      setCommissioningStatus(
+        `Line saved in Draft state. Resolve these issues, then activate:\n${issues}`
+      );
+    }
+
+    const refreshed = await getAllLines();
+    setLines(refreshed);
+    const current = refreshed.find((line) => line.id === savedLine.id);
+    if (current) {
+      setSelectedLineId(current.id);
+      setForm({
+        lineNumber: current.lineNumber,
+        lineName: current.lineName,
+        product: current.product,
+        recipeId: current.recipeId || "Unknown",
+        machineId: current.machineId || "Unknown",
+        operatorName: current.operatorName || "Unknown",
+        plcIp: current.plcIp,
+        manufacturer: current.manufacturer,
+        lineLifecycleState: current.lineLifecycleState,
+      });
+    }
+
+    showSuccessMessage(
+      existingLine
+        ? `Line "${existingLine.lineName}" was overwritten successfully and all screens were refreshed.`
+        : "Line added successfully. Configuration and tag assignments were saved."
+    );
 
     try {
       await refreshDashboard();
     } catch {
       // Keep admin flow successful even if dashboard refresh falls back to polling.
     }
+  }
 
-    const current = refreshed.find((line) => line.id === selectedLineId);
-    if (current) {
-      setForm((previous) => ({
-        ...previous,
-        lineLifecycleState: current.lineLifecycleState,
-      }));
+  async function createLineWithNextAvailableNumber(
+    baseLinePayload: Omit<ProductionLine, "id">,
+    startingLineNumber: number
+  ) {
+    let candidateLineNumber = startingLineNumber;
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      try {
+        return await addLine({
+          ...baseLinePayload,
+          lineNumber: candidateLineNumber,
+        });
+      } catch (requestError) {
+        if (!(requestError instanceof ApiRequestError)) {
+          throw requestError;
+        }
+
+        if (tryGetProblemCode(requestError) !== "line_number_conflict") {
+          throw requestError;
+        }
+
+        candidateLineNumber += 1;
+      }
     }
+
+    throw new Error("Unable to assign a free line number after multiple attempts.");
   }
 
   async function handleDeleteLine() {
@@ -747,7 +839,6 @@ export default function Administration() {
 
     setError("");
     setSuccess("");
-
     setConfirmDeleteOpen(false);
 
     await deleteLine(selectedLineId);
@@ -755,12 +846,36 @@ export default function Administration() {
     setLines(refreshed);
     setSelectedLineId("new");
     setForm(emptyLineForm);
-    setSuccess("Line deleted successfully.");
+    showSuccessMessage("Line deleted successfully.");
 
     try {
       await refreshDashboard();
     } catch {
       // Keep admin flow successful even if dashboard refresh falls back to polling.
+    }
+  }
+
+  async function confirmOverwriteLine() {
+    if (!duplicateLineTarget) {
+      setConfirmOverwriteOpen(false);
+      return;
+    }
+
+    setConfirmOverwriteOpen(false);
+    setError("");
+    setSuccess("");
+
+    try {
+      await createOrOverwriteLine(duplicateLineTarget);
+      setDuplicateLineTarget(null);
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Overwriting the line failed.";
+      setError(message);
     }
   }
 
@@ -2284,6 +2399,47 @@ export default function Administration() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog
+        open={confirmOverwriteOpen}
+        onClose={() => {
+          setConfirmOverwriteOpen(false);
+          setDuplicateLineTarget(null);
+        }}
+      >
+        <DialogTitle>Overwrite existing line?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {duplicateLineTarget
+              ? `PLC IP ${form.plcIp.trim()} is already assigned to line "${duplicateLineTarget.lineName}". Continue to overwrite that existing line with the current configuration?`
+              : "This PLC IP is already assigned to another line. Continue to overwrite the existing line?"}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setConfirmOverwriteOpen(false);
+              setDuplicateLineTarget(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button variant="contained" color="warning" onClick={() => void confirmOverwriteLine()}>
+            Yes, Overwrite
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={successToastOpen}
+        autoHideDuration={4000}
+        onClose={() => setSuccessToastOpen(false)}
+        anchorOrigin={{ vertical: "top", horizontal: "right" }}
+      >
+        <Alert onClose={() => setSuccessToastOpen(false)} severity="success" variant="filled" sx={{ width: "100%" }}>
+          {success}
+        </Alert>
+      </Snackbar>
     </Stack>
   );
 }

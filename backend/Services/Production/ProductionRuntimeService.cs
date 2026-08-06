@@ -81,6 +81,11 @@ public sealed class ProductionRuntimeService : BackgroundService, IProductionRun
         }
     }
 
+    public void RefreshAssignmentsNow()
+    {
+        RefreshLineStatesFromAssignments(DateTime.UtcNow);
+    }
+
     // Line details expose the deeper runtime breakdown shown on the line page.
     public LineDetailSnapshotDto? GetLineDetail(int lineId)
     {
