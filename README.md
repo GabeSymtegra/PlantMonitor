@@ -43,6 +43,17 @@ worker/          Reserved background worker workspace
 
 ### Backend
 
+Preferred startup from repo root:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+This starts backend and frontend in separate terminals and runs terminal-based
+health/API verification checks.
+
+Manual backend startup:
+
 ```powershell
 Set-Location backend
 dotnet run --launch-profile http
@@ -52,6 +63,12 @@ Default backend URL: `http://localhost:5265`
 
 If the default instance is blocked by an existing process, Windows service, or
 single-instance SQLite lock, start an isolated backend for Siemens testing:
+
+```powershell
+.\scripts\dev.ps1 -Isolated
+```
+
+Manual isolated backend startup:
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT='Development'

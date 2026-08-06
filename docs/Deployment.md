@@ -108,7 +108,22 @@ Operational check after startup:
 
 ### 4.1 Clean Developer Startup Commands
 
-Default backend:
+Preferred one-command startup from repository root:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+This command starts backend and frontend in separate terminals and verifies:
+
+- GET /health/live
+- GET /health/ready
+- POST /api/auth/login
+- GET /api/lines
+- GET /api/dashboard
+- frontend root URL
+
+Manual default backend:
 
 ```powershell
 Set-Location backend
@@ -120,6 +135,34 @@ Default frontend:
 ```powershell
 Set-Location frontend
 npm run dev
+```
+
+### 4.1.1 Startup Failure Triage
+
+If default startup fails:
+
+1. Check whether port 5265 is already in use:
+
+```powershell
+Get-NetTCPConnection -LocalPort 5265 -State Listen
+```
+
+2. Stop conflicting local listeners:
+
+```powershell
+.\scripts\dev-stop.ps1
+```
+
+3. Retry default startup:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+4. If shared database/service contention remains, run isolated startup:
+
+```powershell
+.\scripts\dev.ps1 -Isolated
 ```
 
 ### 4.2 Isolated Siemens Test Startup

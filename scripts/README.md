@@ -23,6 +23,31 @@ Normal backend plus frontend:
 .\scripts\dev.ps1
 ```
 
+What this does:
+
+- starts backend and frontend in separate PowerShell terminals
+- aligns frontend proxy target to the same backend URL automatically
+- runs startup verification checks for:
+	- `GET /health/live`
+	- `GET /health/ready`
+	- `POST /api/auth/login`
+	- `GET /api/lines`
+	- `GET /api/dashboard`
+	- frontend root URL
+
+If default mode is blocked by a running service/process or a shared database lock,
+run isolated mode instead:
+
+```powershell
+.\scripts\dev.ps1 -Isolated
+```
+
+Optional isolated database override:
+
+```powershell
+.\scripts\dev.ps1 -Isolated -IsolatedDatabasePath 'C:\path\to\custom\plantmonitor.dev.db'
+```
+
 If the default backend port or database is already in use, use this manual
 isolated Siemens-testing flow:
 

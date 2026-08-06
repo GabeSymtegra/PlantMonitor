@@ -24,6 +24,18 @@ The backend is an ASP.NET Core application that owns authentication, live runtim
 
 ## Running The Backend
 
+Preferred startup from repository root:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+For isolated Siemens testing from repository root:
+
+```powershell
+.\scripts\dev.ps1 -Isolated
+```
+
 Default local development run:
 
 ```powershell
