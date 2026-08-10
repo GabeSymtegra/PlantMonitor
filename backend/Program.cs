@@ -370,7 +370,9 @@ app.MapPost("/api/auth/logout", (HttpContext httpContext) =>
 
 app.MapGet("/api/auth/session", async (
     ClaimsPrincipal user,
+    HttpContext httpContext,
     ILocalUserAuthService localUserAuthService,
+    IJwtTokenService jwtTokenService,
     CancellationToken cancellationToken) =>
 {
     var username = user.Identity?.Name;
@@ -385,11 +387,24 @@ app.MapGet("/api/auth/session", async (
         return Results.Unauthorized();
     }
 
+    var refreshedToken = jwtTokenService.CreateToken(account.Username, account.Role);
+    var refreshedExpiry = DateTime.UtcNow.AddMinutes(jwtOptions.ExpirationMinutes);
+
+    httpContext.Response.Cookies.Append("pm_auth", refreshedToken, new CookieOptions
+    {
+        HttpOnly = true,
+        Secure = !app.Environment.IsDevelopment(),
+        SameSite = SameSiteMode.Strict,
+        Expires = refreshedExpiry,
+        IsEssential = true,
+        Path = "/",
+    });
+
     return Results.Ok(new LoginResponseDto
     {
         Username = account.Username,
         Role = account.Role,
-        ExpiresAtUtc = DateTime.UtcNow.AddMinutes(jwtOptions.ExpirationMinutes),
+        ExpiresAtUtc = refreshedExpiry,
         MustChangePassword = account.MustChangePassword,
     });
 }).RequireAuthorization();

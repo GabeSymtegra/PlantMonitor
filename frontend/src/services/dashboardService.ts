@@ -258,7 +258,8 @@ export async function getAllLines(): Promise<ProductionLine[]> {
 }
 
 export async function addLine(
-  line: Omit<ProductionLine, "id">
+  line: Omit<ProductionLine, "id">,
+  options?: { overwriteExisting?: boolean }
 ): Promise<ProductionLine> {
   const request: UpsertLineConfigRequestDto = {
     lineNumber: line.lineNumber,
@@ -274,7 +275,12 @@ export async function addLine(
     lineLifecycleState: line.lineLifecycleState,
   };
 
-  const created = await apiPost<LineConfigDto, UpsertLineConfigRequestDto>(API_ENDPOINTS.lines, request);
+  const endpoint = options?.overwriteExisting
+    ? `${API_ENDPOINTS.lines}?overwriteExisting=true`
+    : API_ENDPOINTS.lines;
+
+  const created = await apiPost<LineConfigDto, UpsertLineConfigRequestDto>(endpoint, request);
+
   return toConfiguredLine(created);
 }
 

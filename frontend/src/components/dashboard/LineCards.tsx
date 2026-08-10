@@ -57,6 +57,11 @@ export default function LineCards({ lines }: LineCardsProps) {
   const visibleLines = lines ?? dashboard?.lines ?? [];
   const navigate = useNavigate();
 
+  function displayOrUnknown(value: string | null | undefined): string {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : "Unknown";
+  }
+
   function formatStartDateTime(value: string): string {
     const parsed = new Date(value);
 
@@ -111,6 +116,12 @@ export default function LineCards({ lines }: LineCardsProps) {
                 label="Start Date:Time"
                 value={formatStartDateTime(line.startDateTime)}
               />
+              <MetricRow label="Product" value={displayOrUnknown(line.product)} />
+              <MetricRow label="Recipe" value={displayOrUnknown(line.recipeId)} />
+              <MetricRow label="Machine" value={displayOrUnknown(line.machineId)} />
+              <MetricRow label="Operator" value={displayOrUnknown(line.operatorName)} />
+              <MetricRow label="PLC IP" value={displayOrUnknown(line.plcIp)} />
+              <MetricRow label="Manufacturer" value={displayOrUnknown(line.manufacturer)} />
             </Box>
 
             <Divider sx={{ my: 1.5 }} />

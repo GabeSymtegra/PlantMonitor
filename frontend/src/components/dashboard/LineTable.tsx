@@ -16,56 +16,160 @@ export default function LineTable({ lines }: LineTableProps) {
   const rows = lines ?? dashboard?.lines ?? [];
   const navigate = useNavigate();
 
+  function displayOrUnknown(value: string | null | undefined): string {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : "Unknown";
+  }
+
+  function formatPercent(value: unknown): string {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? `${numberValue.toFixed(1)}%` : "??";
+  }
+
+  function formatVariance(value: unknown): string {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue.toFixed(2) : "??";
+  }
+
+  function formatLength(value: unknown): string {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? `${numberValue.toLocaleString()} ft` : "??";
+  }
+
   const columns: GridColDef[] = [
     {
-      field: "lineNumber",
-      headerName: "Line #",
-      width: 110,
+      field: "line",
+      headerName: "Line",
+      minWidth: 220,
+      width: 260,
       sortable: false,
-    },
-    {
-      field: "lineName",
-      headerName: "Line Name",
-      flex: 1,
-      minWidth: 180,
-      sortable: false,
+      align: "center",
+      headerAlign: "center",
     },
     {
       field: "status",
       headerName: "Status",
       width: 140,
       sortable: false,
-      renderCell: (params) => <StatusChip status={params.value as "Running" | "Stopped" | "Bleedout" | "Startup" | "Faulted" | "Offline" | "Maintenance"} />,
+      align: "center",
+      headerAlign: "center",
+      renderCell: (params) => (
+        <Box
+          sx={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: 1,
+          }}
+        >
+          <StatusChip status={params.value as "Running" | "Stopped" | "Bleedout" | "Startup" | "Faulted" | "Offline" | "Maintenance"} />
+        </Box>
+      ),
+    },
+    {
+      field: "serial",
+      headerName: "Serial",
+      minWidth: 190,
+      width: 210,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "time",
+      headerName: "Time",
+      width: 130,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
     },
     {
       field: "controlMode",
-      headerName: "Mode",
+      headerName: "Control",
       width: 120,
       sortable: false,
-      renderCell: (params) => <Chip label={`Mode ${params.value}`} variant="outlined" size="small" />,
+      align: "center",
+      headerAlign: "center",
+      renderCell: (params) => (
+        <Box
+          sx={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: 1,
+          }}
+        >
+          <Chip label={String(params.value)} variant="outlined" size="small" />
+        </Box>
+      ),
     },
     {
-      field: "plcIp",
-      headerName: "PLC IP",
-      width: 160,
+      field: "length",
+      headerName: "Length",
+      width: 130,
       sortable: false,
+      align: "center",
+      headerAlign: "center",
     },
     {
-      field: "manufacturer",
-      headerName: "Manufacturer",
-      width: 180,
+      field: "percentAuto",
+      headerName: "% Auto",
+      width: 120,
       sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "autoVar",
+      headerName: "Auto Var",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "percentMan",
+      headerName: "% Man",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "manVar",
+      headerName: "Man Var",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "totalVar",
+      headerName: "Total Var",
+      width: 130,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
     },
   ];
 
   const gridRows = rows.map((line) => ({
     id: line.id,
-    lineNumber: line.lineNumber,
-    lineName: line.lineName,
+    line: `#${line.lineNumber} ${line.lineName}`,
     status: line.status,
+    serial: displayOrUnknown(line.product),
+    time: line.timeInStatus,
     controlMode: line.controlMode,
-    plcIp: line.plcIp,
-    manufacturer: line.manufacturer,
+    length: formatLength(line.totalLength),
+    percentAuto: formatPercent(line.percentAutoMode),
+    autoVar: formatVariance(line.autoVariance),
+    percentMan: formatPercent(line.percentManualMode),
+    manVar: formatVariance(line.manualVariance),
+    totalVar: formatVariance(line.totalVariance),
   }));
 
   return (
@@ -95,6 +199,15 @@ export default function LineTable({ lines }: LineTableProps) {
             borderRadius: 2,
             "& .MuiDataGrid-columnHeaders": {
               backgroundColor: (theme) => theme.palette.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+            },
+            "& .MuiDataGrid-columnHeaderTitleContainer": {
+              justifyContent: "center",
+            },
+            "& .MuiDataGrid-cell": {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
             },
           }}
         />

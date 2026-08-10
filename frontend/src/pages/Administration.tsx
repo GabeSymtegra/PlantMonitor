@@ -97,19 +97,19 @@ type LinePlcSettingsForm = {
 const emptyLineForm: LineConfigForm = {
   lineNumber: 1,
   lineName: "",
-  product: "000-000-00-0",
-  recipeId: "Unknown",
-  machineId: "Unknown",
-  operatorName: "Unknown",
+  product: "",
+  recipeId: "",
+  machineId: "",
+  operatorName: "",
   plcIp: "",
-  manufacturer: "AllenBradley",
+  manufacturer: "Siemens",
   lineLifecycleState: "Draft",
 };
 
 const defaultPlcSettings: LinePlcSettingsForm = {
   pollIntervalMs: 2000,
   routePath: "1,0",
-  processorType: "ControlLogix",
+  processorType: "S7-1217C",
   rack: 0,
   slot: 1,
   connectionTimeoutMs: 3000,
@@ -121,8 +121,6 @@ const defaultPlcSettings: LinePlcSettingsForm = {
 function isSiemensManufacturer(manufacturer: PlcManufacturer): boolean {
   return manufacturer === "Siemens";
 }
-
-const productSerialPattern = /^\d{3}-\d{3}-\d{2}-\d{1}$/;
 
 function isValidIpv4Address(value: string): boolean {
   const ipv4Pattern =
@@ -224,7 +222,7 @@ export default function Administration() {
   const [tagFilter, setTagFilter] = useState("");
   const [browseScope, setBrowseScope] = useState("DB1");
   const [siemensDbList, setSiemensDbList] = useState<string[]>([]);
-  const [selectedSiemensDb, setSelectedSiemensDb] = useState("DB1");
+  const [selectedSiemensDb, setSelectedSiemensDb] = useState("");
   const [tagBrowserError, setTagBrowserError] = useState("");
   const [tagBrowserStatus, setTagBrowserStatus] = useState("");
   const [discoveredTags, setDiscoveredTags] = useState<PlcTagBrowseItem[]>([]);
@@ -456,7 +454,7 @@ export default function Administration() {
     setReadingTagName(null);
     setTagFilter("");
     setSiemensDbList([]);
-    setSelectedSiemensDb("DB1");
+    setSelectedSiemensDb("");
     setTagBrowserError("");
     setTagBrowserStatus("");
     setDiscoveredTags([]);
@@ -546,7 +544,7 @@ export default function Administration() {
       });
 
       setSiemensDbList([]);
-      setSelectedSiemensDb("DB1");
+      setSelectedSiemensDb("");
     }
 
     setForm((previous) => ({
@@ -556,20 +554,11 @@ export default function Administration() {
   }
 
   function validateForm(): string | null {
-    const trimmedProduct = form.product.trim();
     const trimmedLineName = form.lineName.trim();
     const trimmedIp = form.plcIp.trim();
 
     if (!trimmedLineName) {
       return "Line name is required.";
-    }
-
-    if (!form.product.trim()) {
-      return "Product is required.";
-    }
-
-    if (!productSerialPattern.test(trimmedProduct)) {
-      return "Product serial must match xxx-xxx-xx-x using digits.";
     }
 
     if (!trimmedIp) {
@@ -594,11 +583,26 @@ export default function Administration() {
       }
     }
 
-    if (!trimmedProduct) {
-      return "Product is required.";
-    }
-
     return null;
+  }
+
+  function buildLineEditPayload(existingLine?: ProductionLine): Partial<ProductionLine> {
+    return {
+      lineNumber: existingLine?.lineNumber ?? form.lineNumber,
+      lineName: form.lineName.trim(),
+      product: existingLine?.product ?? form.product.trim(),
+      recipeId: existingLine?.recipeId ?? form.recipeId.trim(),
+      machineId: existingLine?.machineId ?? form.machineId.trim(),
+      operatorName: existingLine?.operatorName ?? form.operatorName.trim(),
+      plcIp: form.plcIp.trim(),
+      manufacturer: form.manufacturer,
+      lineLifecycleState: form.lineLifecycleState,
+    };
+  }
+
+  function openOverwritePrompt(existingLine?: ProductionLine | null) {
+    setDuplicateLineTarget(existingLine ?? findDuplicateLineByConnection());
+    setConfirmOverwriteOpen(true);
   }
 
   async function handleSave() {
@@ -616,8 +620,7 @@ export default function Administration() {
       if (selectedLineId === "new") {
         const duplicateLine = findDuplicateLineByConnection();
         if (duplicateLine) {
-          setDuplicateLineTarget(duplicateLine);
-          setConfirmOverwriteOpen(true);
+          openOverwritePrompt(duplicateLine);
           return;
         }
 
@@ -626,15 +629,7 @@ export default function Administration() {
       }
 
       await updateLine(selectedLineId, {
-        lineNumber: selectedLine?.lineNumber ?? form.lineNumber,
-        lineName: form.lineName.trim(),
-        product: form.product.trim(),
-        recipeId: form.recipeId.trim() || "Unknown",
-        machineId: form.machineId.trim() || "Unknown",
-        operatorName: form.operatorName.trim() || "Unknown",
-        manufacturer: form.manufacturer,
-        plcIp: form.plcIp.trim(),
-        lineLifecycleState: form.lineLifecycleState,
+        ...buildLineEditPayload(selectedLine ?? undefined),
       });
       showSuccessMessage("Line updated successfully.");
 
@@ -666,10 +661,29 @@ export default function Administration() {
 
       const current = refreshed.find((line) => line.id === selectedLineId);
       if (current) {
-        setForm((previous) => ({
-          ...previous,
+        setForm({
+          lineNumber: current.lineNumber,
+          lineName: current.lineName,
+          product: current.product,
+          recipeId: current.recipeId || "",
+          machineId: current.machineId || "",
+          operatorName: current.operatorName || "",
+          plcIp: current.plcIp,
+          manufacturer: current.manufacturer,
           lineLifecycleState: current.lineLifecycleState,
-        }));
+        });
+      }
+
+      try {
+        const readiness = await getCommissioningReadiness(selectedLineId);
+        setCommissioningReady(readiness.isReady);
+        setCommissioningStatus(
+          readiness.isReady
+            ? `Commissioning check passed. ${readiness.mappedRequiredTagCount}/${readiness.requiredTagCount} required slots are mapped.`
+            : `Commissioning check found gaps. ${readiness.mappedRequiredTagCount}/${readiness.requiredTagCount} required slots mapped.\n${readiness.issues.join("\n") || "Commissioning requirements are not fully satisfied yet."}`
+        );
+      } catch {
+        // Keep the save successful even if readiness cannot be re-read.
       }
     } catch (requestError) {
       const message =
@@ -703,12 +717,8 @@ export default function Administration() {
       : 1;
 
     const baseLinePayload = {
-      ...form,
+      ...buildLineEditPayload(existingLine),
       lineNumber: existingLine?.lineNumber ?? nextLineNumber,
-      lineName: form.lineName.trim(),
-      recipeId: form.recipeId.trim() || "Unknown",
-      machineId: form.machineId.trim() || "Unknown",
-      operatorName: form.operatorName.trim() || "Unknown",
       startDateTime: new Date().toISOString(),
       status: LineStatus.Offline,
       timeInStatus: "00:00:00",
@@ -720,14 +730,18 @@ export default function Administration() {
       totalVariance: 0,
       totalLength: 0,
       runtime: "00:00:00",
-      product: form.product.trim(),
+      product: existingLine?.product ?? form.product.trim(),
       plcIp: form.plcIp.trim(),
       isActive: false,
-    };
+    } as Omit<ProductionLine, "id">;
 
     const savedLine = existingLine
       ? await updateLine(existingLine.id, baseLinePayload)
       : await createLineWithNextAvailableNumber(baseLinePayload, nextLineNumber);
+
+    if (!savedLine) {
+      return;
+    }
 
     await upsertLineProtocolAssignment(savedLine.id, {
       manufacturer: form.manufacturer,
@@ -812,6 +826,11 @@ export default function Administration() {
           throw requestError;
         }
 
+        if (tryGetProblemCode(requestError) === "duplicate_plc_connection") {
+          openOverwritePrompt();
+          return null;
+        }
+
         if (tryGetProblemCode(requestError) !== "line_number_conflict") {
           throw requestError;
         }
@@ -866,7 +885,8 @@ export default function Administration() {
     setSuccess("");
 
     try {
-      await createOrOverwriteLine(duplicateLineTarget);
+      const targetLine = duplicateLineTarget ?? findDuplicateLineByConnection();
+      await createOrOverwriteLine(targetLine ?? undefined);
       setDuplicateLineTarget(null);
     } catch (requestError) {
       const message =
@@ -1008,67 +1028,6 @@ export default function Administration() {
             ? requestError.message
             : "Tag discovery failed.";
 
-      setTagBrowserError(message);
-    } finally {
-      setBrowsingTags(false);
-    }
-  }
-
-  async function runSiemensAreaSweep(source: PlcConnectionResult, ipAddress: string) {
-    setReadingTagName(null);
-    setTagFilter("");
-    setTagBrowserError("");
-    setTagBrowserStatus("");
-    setDiscoveredTags([]);
-    setSelectedTag(null);
-    setSelectedTagResult(null);
-    setAutoPopulateCompleted(false);
-    setNewLineTagAssignmentsSaved(false);
-    setBrowsingTags(true);
-
-    try {
-      const scopes = ["M", "I", "Q", "DB"] as const;
-      const responses = await Promise.all(
-        scopes.map((scope) =>
-          browsePlcTags({
-            driver: source.driver,
-            ipAddress,
-            options: toConnectionOptions(plcSettings),
-            search: scope,
-          })
-        )
-      );
-
-      const [mTags, iTags, qTags, dbFolders] = responses;
-      const allTags = [...mTags, ...iTags, ...qTags, ...dbFolders];
-      const uniqueTags = Array.from(new Map(allTags.map((tag) => [tag.name, tag])).values());
-
-      const dbNames = dbFolders
-        .filter((tag) => tag.isFolder && tag.parentPath === "DB")
-        .map((tag) => tag.name)
-        .filter((name) => /^DB\d+$/i.test(name))
-        .sort((left, right) => {
-          const leftNumber = Number(left.replace(/\D/g, ""));
-          const rightNumber = Number(right.replace(/\D/g, ""));
-          return leftNumber - rightNumber;
-        });
-
-      setSiemensDbList(dbNames);
-      if (dbNames.length > 0) {
-        setSelectedSiemensDb((previous) => (dbNames.includes(previous) ? previous : dbNames[0]));
-      }
-
-      setDiscoveredTags(uniqueTags);
-      setTagBrowserStatus(
-        `Sweep complete: M=${mTags.length}, I=${iTags.length}, Q=${qTags.length}, DB blocks=${dbNames.length}. Select a DB to enumerate full DB addresses.`
-      );
-    } catch (error) {
-      const message =
-        error instanceof ApiRequestError
-          ? error.responseBody || error.message || "Siemens area sweep failed."
-          : error instanceof Error
-            ? error.message
-            : "Siemens area sweep failed.";
       setTagBrowserError(message);
     } finally {
       setBrowsingTags(false);
@@ -1535,47 +1494,35 @@ export default function Administration() {
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
             <TextField
-              label="Product Serial"
-              value={form.product}
-              onChange={(event) => updateForm("product", event.target.value)}
-              fullWidth
-              placeholder="123-456-78-9"
-            />
-
-            <TextField
-              label="Recipe ID"
-              value={form.recipeId}
-              onChange={(event) => updateForm("recipeId", event.target.value)}
-              fullWidth
-              placeholder="RCP-101"
-            />
-          </Stack>
-
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField
-              label="Machine ID"
-              value={form.machineId}
-              onChange={(event) => updateForm("machineId", event.target.value)}
-              fullWidth
-              placeholder="MX-001"
-            />
-
-            <TextField
-              label="Operator"
-              value={form.operatorName}
-              onChange={(event) => updateForm("operatorName", event.target.value)}
-              fullWidth
-              placeholder="Unknown"
-            />
-
-            <TextField
               label="PLC IP Address"
               value={form.plcIp}
               onChange={(event) => updateForm("plcIp", event.target.value)}
               fullWidth
               placeholder="192.168.1.105"
             />
+
+            <FormControl fullWidth>
+              <InputLabel id="lifecycle-state-label">Lifecycle State</InputLabel>
+              <Select
+                labelId="lifecycle-state-label"
+                label="Lifecycle State"
+                value={form.lineLifecycleState}
+                onChange={(event) =>
+                  updateForm("lineLifecycleState", event.target.value as LineLifecycleState)
+                }
+              >
+                <MenuItem value="Draft">Draft</MenuItem>
+                <MenuItem value="Commissioning">Commissioning</MenuItem>
+                <MenuItem value="Active">Active</MenuItem>
+                <MenuItem value="CommissioningFailed">CommissioningFailed</MenuItem>
+                <MenuItem value="Disabled">Disabled</MenuItem>
+              </Select>
+            </FormControl>
           </Stack>
+
+          <Alert severity="info">
+            Line metadata fields are defaulted automatically. Save changes to update the selected line.
+          </Alert>
 
           <Accordion expanded={showAdvancedSettings} onChange={(_, expanded) => setShowAdvancedSettings(expanded)}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -1830,51 +1777,41 @@ export default function Administration() {
                 spacing={1.5}
                 alignItems={{ xs: "stretch", sm: "center" }}
               >
-                <TextField
-                  label={isSiemensManufacturer(form.manufacturer) ? "Browse Scope" : "Controller Filter"}
-                  value={browseScope}
-                  onChange={(event) => setBrowseScope(event.target.value)}
-                  fullWidth
-                  placeholder={isSiemensManufacturer(form.manufacturer) ? "DB1" : "Machine"}
-                  helperText={
-                    isSiemensManufacturer(form.manufacturer)
-                      ? "Examples: DB310, DB310:all, DB310:bits, M, I, Q. Default DB browse is compact (DBW/DBD)."
-                      : "Optional filter used when the driver supports scoped browse."
-                  }
-                />
+                {isSiemensManufacturer(form.manufacturer) ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Choose a DB from the list, then discover tags.
+                  </Typography>
+                ) : (
+                  <>
+                    <TextField
+                      label="Controller Filter"
+                      value={browseScope}
+                      onChange={(event) => setBrowseScope(event.target.value)}
+                      fullWidth
+                      placeholder="Machine"
+                      helperText="Optional filter used when the driver supports scoped browse."
+                    />
 
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    if (!connectionResult?.isConnected) {
-                      return;
-                    }
-
-                    void discoverTags(connectionResult.driver, form.plcIp.trim(), browseScope);
-                  }}
-                  disabled={browsingTags || !connectionResult?.isConnected}
-                >
-                  {browsingTags ? "Discovering..." : "Discover Tags"}
-                </Button>
-              </Stack>
-
-              {isSiemensManufacturer(form.manufacturer) ? (
-                <Stack spacing={1.25}>
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                     <Button
-                      variant="contained"
+                      variant="outlined"
                       onClick={() => {
                         if (!connectionResult?.isConnected) {
                           return;
                         }
 
-                        void runSiemensAreaSweep(connectionResult, form.plcIp.trim());
+                        void discoverTags(connectionResult.driver, form.plcIp.trim(), browseScope);
                       }}
                       disabled={browsingTags || !connectionResult?.isConnected}
                     >
-                      {browsingTags ? "Sweeping..." : "Run In-Depth Sweep"}
+                      {browsingTags ? "Discovering..." : "Discover Tags"}
                     </Button>
+                  </>
+                )}
+              </Stack>
 
+              {isSiemensManufacturer(form.manufacturer) ? (
+                <Stack spacing={1.25}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                     <Button
                       variant="outlined"
                       onClick={() => {
@@ -1908,7 +1845,9 @@ export default function Administration() {
                         ))}
                       </Select>
                     </FormControl>
+                  </Stack>
 
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }}>
                     <Button
                       variant="contained"
                       onClick={() => {
@@ -1920,70 +1859,12 @@ export default function Administration() {
                       }}
                       disabled={browsingTags || !connectionResult?.isConnected || !selectedSiemensDb}
                     >
-                      {browsingTags ? "Loading DB..." : "Load Selected DB (Compact)"}
-                    </Button>
-
-                    <Button
-                      variant="outlined"
-                      onClick={() => {
-                        if (!connectionResult?.isConnected || !selectedSiemensDb) {
-                          return;
-                        }
-
-                        void discoverTags(connectionResult.driver, form.plcIp.trim(), `${selectedSiemensDb}:all`);
-                      }}
-                      disabled={browsingTags || !connectionResult?.isConnected || !selectedSiemensDb}
-                    >
-                      {browsingTags ? "Loading Types..." : "Load Selected DB (All Types)"}
-                    </Button>
-                  </Stack>
-
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-                    <Button
-                      variant="outlined"
-                      onClick={() => {
-                        if (!connectionResult?.isConnected) {
-                          return;
-                        }
-
-                        void discoverTags(connectionResult.driver, form.plcIp.trim(), "M");
-                      }}
-                      disabled={browsingTags || !connectionResult?.isConnected}
-                    >
-                      Browse M (Markers)
-                    </Button>
-
-                    <Button
-                      variant="outlined"
-                      onClick={() => {
-                        if (!connectionResult?.isConnected) {
-                          return;
-                        }
-
-                        void discoverTags(connectionResult.driver, form.plcIp.trim(), "I");
-                      }}
-                      disabled={browsingTags || !connectionResult?.isConnected}
-                    >
-                      Browse I (Inputs)
-                    </Button>
-
-                    <Button
-                      variant="outlined"
-                      onClick={() => {
-                        if (!connectionResult?.isConnected) {
-                          return;
-                        }
-
-                        void discoverTags(connectionResult.driver, form.plcIp.trim(), "Q");
-                      }}
-                      disabled={browsingTags || !connectionResult?.isConnected}
-                    >
-                      Browse Q (Outputs)
+                      {browsingTags ? "Discovering..." : "Discover Tags"}
                     </Button>
                   </Stack>
 
                   <Typography variant="body2" color="text.secondary">
-                    Step A: Run In-Depth Sweep for all accessible non-DB areas plus DB inventory. Step B: Load DB List and choose a DB. Step C: Use compact DB view first, then All Types only when needed.
+                    Step A: Load DB List. Step B: choose a DB. Step C: Discover Tags.
                   </Typography>
                 </Stack>
               ) : null}
@@ -2025,9 +1906,9 @@ export default function Administration() {
                   </Stack>
                 ) : null}
 
-                <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="stretch">
-                  <Paper variant="outlined" sx={{ flex: 1, minHeight: 320 }}>
-                    <TableContainer sx={{ maxHeight: 320 }}>
+                <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="stretch" sx={{ minHeight: { lg: 420 } }}>
+                  <Paper variant="outlined" sx={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 420 }}>
+                    <TableContainer sx={{ flex: 1, overflow: "auto" }}>
                       <Table stickyHeader size="small" aria-label="discovered-plc-tags">
                         <TableHead>
                           <TableRow>
@@ -2067,8 +1948,8 @@ export default function Administration() {
                     ) : null}
                   </Paper>
 
-                  <Paper variant="outlined" sx={{ flex: 1, p: 2, minHeight: 320 }}>
-                    <Stack spacing={1.5}>
+                  <Paper variant="outlined" sx={{ flex: 1, p: 2, display: "flex", flexDirection: "column", minHeight: 420 }}>
+                    <Stack spacing={1.5} sx={{ flex: 1 }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                         Tag Details
                       </Typography>
@@ -2088,8 +1969,9 @@ export default function Administration() {
                         </Stack>
                       ) : null}
 
-                      {selectedTagResult ? (
-                        <>
+                      <Stack spacing={1.5} sx={{ flex: 1, justifyContent: selectedTagResult ? "flex-start" : "center" }}>
+                        {selectedTagResult ? (
+                          <>
                           <TextField
                             label="Tag Name"
                             value={selectedTag?.displayName ?? selectedTagResult.name}
@@ -2149,8 +2031,9 @@ export default function Administration() {
                               </Typography>
                             </Alert>
                           ) : null}
-                        </>
-                      ) : null}
+                          </>
+                        ) : null}
+                      </Stack>
                     </Stack>
                   </Paper>
                 </Stack>
@@ -2281,7 +2164,7 @@ export default function Administration() {
                         });
                       }}
                     >
-                      <MenuItem value="">Unassigned</MenuItem>
+                      <MenuItem value="">Not filled</MenuItem>
                       {discoveredTags.map((tag) => (
                         <MenuItem key={`${entry.logicalKey}:${tag.name}`} value={tag.name}>
                           {`${tag.displayName ?? tag.name} [${tag.name}] (${tag.dataType})`}
@@ -2409,11 +2292,16 @@ export default function Administration() {
       >
         <DialogTitle>Overwrite existing line?</DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            {duplicateLineTarget
-              ? `PLC IP ${form.plcIp.trim()} is already assigned to line "${duplicateLineTarget.lineName}". Continue to overwrite that existing line with the current configuration?`
-              : "This PLC IP is already assigned to another line. Continue to overwrite the existing line?"}
-          </DialogContentText>
+          <Stack spacing={1}>
+            <DialogContentText>
+              {duplicateLineTarget
+                ? `PLC IP ${form.plcIp.trim()} is already assigned to line ${duplicateLineTarget.lineNumber} "${duplicateLineTarget.lineName}".`
+                : `This PLC IP is already assigned to another line.`}
+            </DialogContentText>
+            <DialogContentText>
+              Saving now will update the existing line with the current configuration. All line settings, PLC assignment, and commissioning state will be refreshed.
+            </DialogContentText>
+          </Stack>
         </DialogContent>
         <DialogActions>
           <Button

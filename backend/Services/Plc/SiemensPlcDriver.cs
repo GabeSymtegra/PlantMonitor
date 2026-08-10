@@ -154,6 +154,45 @@ public sealed class SiemensPlcDriver : IPlcDriver
                 new("DB310.DBD786", "SPARE_REAL_4", "real", "DB310"),
                 new("DB310.DBD790", "SPARE_REAL_5", "real", "DB310"),
             ],
+            [350] =
+            [
+                new("DB350.DBX46.0", "SIM_MODE", "bool", "DB350", "0=OFF, 1=ON"),
+                new("DB350.STRING48.256", "SIM_LINE_ID", "string", "DB350"),
+                new("DB350.STRING304.256", "SIM_PRODUCT_ID", "string", "DB350"),
+                new("DB350.DBX560.0", "SIM_LENGTH_RST", "bool", "DB350"),
+                new("DB350.DBX560.1", "SIM_EXT_RUN", "bool", "DB350"),
+                new("DB350.DBX560.2", "SIM_LINE_RUN", "bool", "DB350", "SIMULATE LINE RUN"),
+                new("DB350.DBW562", "SIM_CONTROL_STATUS", "int", "DB350", "SIMULATE DIAMETER CONTROL STATUS"),
+                new("DB350.DBW768", "Machine_state", "int", "DB350", "Machine State 0=Down, 1=Bleedout, 2=Startup, 3=Running"),
+                new("DB350.DBD564", "SIM_BARE_OD_SP", "real", "DB350"),
+                new("DB350.DBD568", "SIM_BARE_OD", "real", "DB350", "SIMULATE CORE OD"),
+                new("DB350.DBD572", "SIM_HOT_OD_SP", "real", "DB350"),
+                new("DB350.DBD576", "SIM_HOT_OD", "real", "DB350", "SIMULATE HOT OD"),
+                new("DB350.DBD580", "SIM_COLD_OD_SP", "real", "DB350"),
+                new("DB350.DBD584", "SIM_COLD_OD", "real", "DB350", "SIMULATE COLD OD"),
+                new("DB350.DBD588", "SIM_HOT_WALL_SP", "real", "DB350"),
+                new("DB350.DBD592", "SIM_HOT_WALL_ACT", "real", "DB350"),
+                new("DB350.DBD596", "SIM_COLD_WALL_SP", "real", "DB350"),
+                new("DB350.DBD600", "SIM_COLD_WALL_ACT", "real", "DB350"),
+                new("DB350.DBD604", "SIM_EXTSPEED_SP", "real", "DB350"),
+                new("DB350.DBD608", "SIM_EXTSPEED", "real", "DB350"),
+                new("DB350.DBD612", "SIM_LINESPEED_SP", "real", "DB350", "SIMULATE LINESPEED"),
+                new("DB350.DBD616", "SIM_LINESPEED", "real", "DB350", "SIMULATE LINESPEED"),
+                new("DB350.DBD620", "SIM_BARE_OD_LIM", "real", "DB350"),
+                new("DB350.DBD624", "SIM_HOT_OD_LIM", "real", "DB350"),
+                new("DB350.DBD628", "SIM_COLD_OD_LIM", "real", "DB350"),
+                new("DB350.DBD632", "SIM_HOT_WALL_LIM", "real", "DB350"),
+                new("DB350.DBD636", "SIM_COLD_WALL_LIM", "real", "DB350"),
+                new("DB350.DBD640", "SIM_ECC_OD", "real", "DB350"),
+                new("DB350.DBD644", "SIM_ECC_OD_SP", "real", "DB350"),
+                new("DB350.DBD648", "SIM_ECC_WALL", "real", "DB350"),
+                new("DB350.DBD652", "SIM_ECC_WALL_SP", "real", "DB350"),
+                new("DB350.DBD656", "SIM_ECC_VALUE", "real", "DB350"),
+                new("DB350.DBD660", "SIM_ECC_SP", "real", "DB350"),
+                new("DB350.DBD664", "SIM_ECC_ANGLE", "real", "DB350"),
+                new("DB350.DBD668", "SIM_ECC_SPARE_1", "real", "DB350"),
+                new("DB350.DBD672", "SIM_ECC_SPARE_2", "real", "DB350"),
+            ],
         };
 
     private static readonly int[] DefaultDbNumbers = [1, 2];
@@ -561,17 +600,15 @@ public sealed class SiemensPlcDriver : IPlcDriver
 
     private static IReadOnlyCollection<PlcTagBrowseItemDto>? TryBuildSchemaBrowseItems(int dbNumber, DbBrowseMode browseMode)
     {
-        if (browseMode != DbBrowseMode.Compact)
-        {
-            return null;
-        }
-
         if (!KnownDbSchemas.TryGetValue(dbNumber, out var schema))
         {
             return null;
         }
 
-        return schema
+        var filtered = schema
+            .Where(definition => IncludesSchemaDataTypeForBrowseMode(definition.DataType, browseMode));
+
+        return filtered
             .Select(definition => new PlcTagBrowseItemDto
             {
                 Name = definition.Name,
@@ -584,6 +621,22 @@ public sealed class SiemensPlcDriver : IPlcDriver
                 CanWrite = false,
             })
             .ToList();
+    }
+
+    private static bool IncludesSchemaDataTypeForBrowseMode(string dataType, DbBrowseMode browseMode)
+    {
+        var normalized = dataType.Trim().ToLowerInvariant();
+
+        return browseMode switch
+        {
+            DbBrowseMode.Compact => true,
+            DbBrowseMode.All => true,
+            DbBrowseMode.Bits => normalized == "bool",
+            DbBrowseMode.Bytes => false,
+            DbBrowseMode.Words => normalized == "int",
+            DbBrowseMode.DWords => normalized is "dint" or "real",
+            _ => true,
+        };
     }
 
     private static IEnumerable<PlcTagBrowseItemDto> BuildDataBlockAddressCandidates(

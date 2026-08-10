@@ -190,12 +190,6 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(entry.PlcAddress))
-            {
-                error = $"PLC address is required for logical key '{entry.LogicalKey}'.";
-                return false;
-            }
-
             if (!string.IsNullOrWhiteSpace(entry.Driver)
                 && !entry.Driver.Trim().Equals(normalizedDriver, StringComparison.OrdinalIgnoreCase))
             {
@@ -221,7 +215,8 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
                 return false;
             }
 
-            if (!_addressValidator.IsValidAddress(normalizedDriver, entry.PlcAddress, out var addressMessage))
+            if (!string.IsNullOrWhiteSpace(entry.PlcAddress)
+                && !_addressValidator.IsValidAddress(normalizedDriver, entry.PlcAddress, out var addressMessage))
             {
                 error = $"Logical key '{entry.LogicalKey}' has invalid PLC address: {addressMessage}";
                 return false;
@@ -241,7 +236,7 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             LogicalKey = x.LogicalKey.Trim(),
             DisplayName = string.IsNullOrWhiteSpace(x.DisplayName) ? x.LogicalKey.Trim() : x.DisplayName.Trim(),
             Driver = normalizedDriver,
-            PlcAddress = x.PlcAddress.Trim(),
+            PlcAddress = x.PlcAddress?.Trim() ?? string.Empty,
             DataType = PlcTagCatalogContract.NormalizeDataType(x.DataType),
             Unit = x.Unit,
             Scale = x.Scale,

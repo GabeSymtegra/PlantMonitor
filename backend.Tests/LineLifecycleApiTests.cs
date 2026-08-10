@@ -302,6 +302,58 @@ public sealed class LineLifecycleApiTests : IClassFixture<TestWebApplicationFact
         Assert.Equal(HttpStatusCode.Conflict, createDuplicate.StatusCode);
     }
 
+    [Fact]
+    public async Task CreateLine_WithDuplicatePlcConnection_AndOverwriteExisting_ReusesExistingLine()
+    {
+        var client = _factory.CreateClient();
+        await LoginAsync(client, "test", "test");
+
+        var createFirst = await client.PostAsJsonAsync("/api/lines", new
+        {
+            lineNumber = 909,
+            lineName = "Overwrite Source Line",
+            productId = "123-456-78-1",
+            recipeId = "RCP-909",
+            machineId = "MX-909",
+            operatorName = "operator-909",
+            plcIp = "192.168.10.98",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        createFirst.EnsureSuccessStatusCode();
+
+        var overwriteResponse = await client.PostAsJsonAsync("/api/lines?overwriteExisting=true", new
+        {
+            lineNumber = 910,
+            lineName = "Overwrite Target Line",
+            productId = "123-456-78-0",
+            recipeId = "RCP-910",
+            machineId = "MX-910",
+            operatorName = "operator-910",
+            plcIp = "192.168.10.98",
+            manufacturer = "AllenBradley",
+            pollIntervalMs = 2000,
+            isActive = false,
+            lineLifecycleState = "Draft",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, overwriteResponse.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlantMonitorDbContext>();
+        var rows = db.LineProtocolAssignments
+            .Where(x => x.PlcIp == "192.168.10.98" && x.Manufacturer == "AllenBradley")
+            .ToList();
+
+        Assert.Single(rows);
+        Assert.Equal(909, rows[0].LineId);
+        Assert.Equal(910, rows[0].LineNumber);
+        Assert.Equal("Overwrite Target Line", rows[0].LineName);
+    }
+
     private static async Task LoginAsync(HttpClient client, string username, string password)
     {
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new

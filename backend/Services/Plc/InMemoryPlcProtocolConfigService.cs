@@ -147,19 +147,14 @@ public sealed class InMemoryPlcProtocolConfigService : IPlcProtocolConfigService
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(entry.PlcAddress))
-            {
-                error = $"PLC address is required for logical key '{entry.LogicalKey}'.";
-                return false;
-            }
-
             if (!PlcTagCatalogContract.IsAllowedCatalogDataType(entry.DataType))
             {
                 error = $"Data type for logical key '{entry.LogicalKey}' must be one of: {PlcTagCatalogContract.AllowedCatalogTypeListForMessages}.";
                 return false;
             }
 
-            if (!_addressValidator.IsValidAddress(normalizedDriver, entry.PlcAddress, out var addressMessage))
+            if (!string.IsNullOrWhiteSpace(entry.PlcAddress)
+                && !_addressValidator.IsValidAddress(normalizedDriver, entry.PlcAddress, out var addressMessage))
             {
                 error = $"Logical key '{entry.LogicalKey}' has invalid PLC address: {addressMessage}";
                 return false;

@@ -37,26 +37,35 @@ public sealed class LinesController : ControllerBase
 
     [HttpPost]
     [Authorize(Policy = "AdminOnly")]
-    public ActionResult<LineConfigDto> CreateLine([FromBody] UpsertLineConfigRequestDto request)
+    public ActionResult<LineConfigDto> CreateLine(
+        [FromBody] UpsertLineConfigRequestDto request,
+        [FromQuery] bool overwriteExisting = false)
     {
-        var validationResult = ValidateRequest(request, null);
+        var normalizedIp = request.PlcIp.Trim();
+        var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
+
+        var duplicateActiveConnection = FindActiveConnectionMatch(normalizedIp, normalizedManufacturer, null);
+        var validationLineId = overwriteExisting ? duplicateActiveConnection?.LineId : null;
+
+        var validationResult = ValidateRequest(request, validationLineId, allowDuplicateConnection: overwriteExisting);
         if (validationResult is not null)
         {
             return validationResult;
         }
 
-        var normalizedIp = request.PlcIp.Trim();
-        var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
-
-        var entity = _dbContext.LineProtocolAssignments.SingleOrDefault(x =>
-            x.LineLifecycleState == LineLifecycleState.Disabled
-            && (x.LineNumber == request.LineNumber
-                || (x.PlcIp == normalizedIp && x.Manufacturer.ToLower() == normalizedManufacturer.ToLower())));
+        var entity = overwriteExisting && duplicateActiveConnection is not null
+            ? duplicateActiveConnection
+            : _dbContext.LineProtocolAssignments.SingleOrDefault(x =>
+                x.LineLifecycleState == LineLifecycleState.Disabled
+                && (x.LineNumber == request.LineNumber
+                    || (x.PlcIp == normalizedIp && x.Manufacturer.ToLower() == normalizedManufacturer.ToLower())));
 
         var isReuse = entity is not null;
         entity ??= new LineProtocolAssignmentEntity();
         ApplyRequest(entity, request);
-        entity.LineId = request.LineNumber;
+        entity.LineId = overwriteExisting && duplicateActiveConnection is not null
+            ? duplicateActiveConnection.LineId
+            : request.LineNumber;
         entity.LineLifecycleState = LineLifecycleState.Draft;
         entity.IsActive = false;
         entity.UpdatedAtUtc = DateTime.UtcNow;
@@ -149,7 +158,7 @@ public sealed class LinesController : ControllerBase
 
         entity.LineNumber = request.LineNumber;
         entity.LineName = request.LineName.Trim();
-        entity.ProductId = request.ProductId.Trim();
+        entity.ProductId = NormalizeOptional(request.ProductId);
         entity.RecipeId = NormalizeOptional(request.RecipeId);
         entity.MachineId = NormalizeOptional(request.MachineId);
         entity.OperatorName = NormalizeOptional(request.OperatorName);
@@ -193,7 +202,7 @@ public sealed class LinesController : ControllerBase
         return string.Equals(lifecycleState, LineLifecycleState.Active, StringComparison.OrdinalIgnoreCase);
     }
 
-    private ActionResult? ValidateRequest(UpsertLineConfigRequestDto request, int? currentLineId)
+    private ActionResult? ValidateRequest(UpsertLineConfigRequestDto request, int? currentLineId, bool allowDuplicateConnection = false)
     {
         if (request.LineNumber <= 0)
         {
@@ -220,24 +229,24 @@ public sealed class LinesController : ControllerBase
             return BadRequestProblem("Poll interval must be between 500 and 60000 milliseconds.", "invalid_poll_interval");
         }
 
-        if (request.ProductId.Trim().Length is 0 or > 128)
+        if (request.ProductId.Trim().Length > 128)
         {
-            return BadRequestProblem("Product must be between 1 and 128 characters.", "invalid_product_length");
+            return BadRequestProblem("Product must be 128 characters or fewer.", "invalid_product_length");
         }
 
-        if (request.RecipeId.Trim().Length is 0 or > 128)
+        if (request.RecipeId.Trim().Length > 128)
         {
-            return BadRequestProblem("Recipe ID must be between 1 and 128 characters.", "invalid_recipe_length");
+            return BadRequestProblem("Recipe ID must be 128 characters or fewer.", "invalid_recipe_length");
         }
 
-        if (request.MachineId.Trim().Length is 0 or > 128)
+        if (request.MachineId.Trim().Length > 128)
         {
-            return BadRequestProblem("Machine ID must be between 1 and 128 characters.", "invalid_machine_length");
+            return BadRequestProblem("Machine ID must be 128 characters or fewer.", "invalid_machine_length");
         }
 
-        if (request.OperatorName.Trim().Length is 0 or > 128)
+        if (request.OperatorName.Trim().Length > 128)
         {
-            return BadRequestProblem("Operator must be between 1 and 128 characters.", "invalid_operator_length");
+            return BadRequestProblem("Operator must be 128 characters or fewer.", "invalid_operator_length");
         }
 
         var lineNumberConflict = _dbContext.LineProtocolAssignments.Any(x =>
@@ -253,19 +262,23 @@ public sealed class LinesController : ControllerBase
 
         var normalizedIp = request.PlcIp.Trim();
         var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
-        var duplicateConnectionConflict = _dbContext.LineProtocolAssignments.Any(x =>
-            x.LineLifecycleState != LineLifecycleState.Disabled
-            &&
-            x.PlcIp == normalizedIp
-            && x.Manufacturer.ToLower() == normalizedManufacturer.ToLower()
-            && (!currentLineId.HasValue || x.LineId != currentLineId.Value));
+        var duplicateConnectionConflict = FindActiveConnectionMatch(normalizedIp, normalizedManufacturer, currentLineId);
 
-        if (duplicateConnectionConflict)
+        if (!allowDuplicateConnection && duplicateConnectionConflict is not null)
         {
             return ConflictProblem("A line configuration with the same PLC connection already exists.", "duplicate_plc_connection");
         }
 
         return null;
+    }
+
+    private LineProtocolAssignmentEntity? FindActiveConnectionMatch(string plcIp, string manufacturer, int? excludeLineId)
+    {
+        return _dbContext.LineProtocolAssignments.SingleOrDefault(x =>
+            x.LineLifecycleState != LineLifecycleState.Disabled
+            && x.PlcIp == plcIp
+            && x.Manufacturer.ToLower() == manufacturer.ToLower()
+            && (!excludeLineId.HasValue || x.LineId != excludeLineId.Value));
     }
 
     private static bool IsValidIpv4(string value)

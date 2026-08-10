@@ -103,7 +103,7 @@ describe("Administration", () => {
 
     mocks.testPlcConnectionMock.mockResolvedValue({
       isConnected: true,
-      driver: "AllenBradley",
+      driver: "Siemens",
       ipAddress: "192.168.1.105",
       message: "Connected to test PLC.",
       controllerName: "Test Controller",
@@ -131,12 +131,12 @@ describe("Administration", () => {
     );
 
     mocks.autoMapTagCatalogMock.mockResolvedValue({
-      driver: "AllenBradley",
+      driver: "Siemens",
       scannedTagCount: canonicalSlots.length,
       suggestedMappings: canonicalSlots.map((logicalKey, index) => ({
         logicalKey,
         displayName: logicalKey,
-        driver: "AllenBradley",
+        driver: "Siemens",
         plcAddress: `Line.${logicalKey}`,
         dataType: logicalKey === "product_id" ? "string" : "real",
         unit: null,
@@ -209,10 +209,6 @@ describe("Administration", () => {
       target: { value: "Main Extruder" },
     });
 
-    fireEvent.change(screen.getByLabelText(/product serial/i), {
-      target: { value: "123-456-78-9" },
-    });
-
     fireEvent.change(screen.getByLabelText(/plc ip address/i), {
       target: { value: "192.168.1.105" },
     });
@@ -229,7 +225,7 @@ describe("Administration", () => {
     await waitFor(() => {
       expect(mocks.testPlcConnectionMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          driver: "AllenBradley",
+          driver: "Siemens",
           ipAddress: "192.168.1.105",
         })
       );
@@ -244,7 +240,7 @@ describe("Administration", () => {
     await waitFor(() => {
       expect(mocks.autoMapTagCatalogMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          driver: "AllenBradley",
+          driver: "Siemens",
           ipAddress: "192.168.1.105",
         })
       );
