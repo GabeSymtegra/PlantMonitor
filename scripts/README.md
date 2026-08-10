@@ -5,6 +5,7 @@ This folder contains local development scripts.
 ## Current Scripts
 
 - `dev.ps1`: start backend and frontend for local development
+- `dev_private.ps1`: start backend and frontend for private-network/LAN testing
 - `dev-stop.ps1`: stop local listeners and dev processes
 - `cleanup-ports.ps1`: clear blocked development ports
 - `pre-deploy-check.ps1`: run deployment readiness checks
@@ -67,3 +68,21 @@ Set-Location frontend
 $env:VITE_DEV_BACKEND_ORIGIN='http://127.0.0.1:5266'
 npm run dev
 ```
+
+## Private Host Startup
+
+Use this to make dev servers reachable from other devices on your private
+network while avoiding shared local database locks.
+
+```powershell
+.\scripts\dev_private.ps1
+```
+
+Defaults:
+
+- backend bind: `http://0.0.0.0:5267`
+- frontend bind: `http://0.0.0.0:5174`
+- isolated database: `backend/plantmonitor.private.dev.db`
+
+The script prints LAN-access URLs and runs the same startup verification checks
+as `dev.ps1`.
