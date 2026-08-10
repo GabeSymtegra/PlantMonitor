@@ -43,6 +43,43 @@ public class AuthBootstrapTests
         Assert.DoesNotContain("admin", usernames);
     }
 
+    [Fact]
+    public async Task EnsureBootstrapUsersAsync_SeedsConfiguredProductionAdminAndViewerAccounts()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+
+        var options = new DbContextOptionsBuilder<PlantMonitorDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var context = new PlantMonitorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+
+        var environment = new FakeWebHostEnvironment();
+        environment.EnvironmentName = Environments.Production;
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Auth:BootstrapAdminPassword"] = "AdminPassword123!",
+                ["Auth:BootstrapViewerPassword"] = "ViewerPassword123!",
+            })
+            .Build();
+        var passwordHasher = new PasswordHasher<LocalUserEntity>();
+        var service = new LocalUserAuthService(context, environment, configuration, passwordHasher);
+
+        await service.EnsureBootstrapUsersAsync();
+
+        var users = await context.LocalUsers
+            .AsNoTracking()
+            .OrderBy(x => x.Username)
+            .Select(x => new { x.Username, x.Role, x.MustChangePassword })
+            .ToListAsync();
+
+        Assert.Contains(users, x => x.Username == "admin" && x.Role == "Admin" && x.MustChangePassword);
+        Assert.Contains(users, x => x.Username == "viewer" && x.Role == "Viewer" && !x.MustChangePassword);
+    }
+
     private sealed class FakeWebHostEnvironment : IWebHostEnvironment
     {
         public string EnvironmentName { get; set; } = Environments.Production;

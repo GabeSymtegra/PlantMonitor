@@ -13,6 +13,11 @@ This folder contains local development scripts.
 - `db-restore.ps1`: restore SQLite database from a selected or latest backup
 - `build-installer.ps1`: build backend release and compile Windows installer using Inno Setup
 - `package-release.ps1`: archive published release binaries into a timestamped zip package
+- `publish-host-release.ps1`: publish the backend-hosted frontend release without building the installer
+- `test-host-release.ps1`: run smoke verification against the published backend-hosted release
+- `install-lan-service.ps1`: install the published backend-hosted app as a Windows service for same-network access
+- `test-lan-service.ps1`: validate the installed LAN Windows service and hosted SPA/API endpoints
+- `uninstall-lan-service.ps1`: remove the LAN Windows service and optionally its data directory
 
 Use these scripts instead of manual port cleanup when possible.
 
@@ -86,3 +91,78 @@ Defaults:
 
 The script prints LAN-access URLs and runs the same startup verification checks
 as `dev.ps1`.
+
+## Hosted LAN Service
+
+Use this for the first production-like same-network rollout on one host machine.
+Publish the backend-hosted release first, then install it as a Windows service.
+
+Example:
+
+```powershell
+dotnet publish backend/backend.csproj -c Release -o artifacts/release/backend
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+```
+
+Defaults:
+
+- service name: `PlantMonitor-LAN`
+- bind URL: `http://0.0.0.0:5050`
+- install directory: `C:\Program Files\PlantMonitor`
+- data directory: `C:\ProgramData\PlantMonitor`
+- LAN deployment mode enabled via `App__IsLanDeployment=true`
+
+For first production-style LAN installs, provide both:
+
+- `BootstrapAdminPassword` for the initial administrator account
+- `BootstrapViewerPassword` for the shared Viewer account used by status-board displays
+
+The script verifies `/health/live` and `/health/ready`, opens the firewall on the chosen port for private profiles, and prints example LAN URLs for other PCs on the same wired network.
+
+Validate the installed LAN service:
+
+```powershell
+.\scripts\test-lan-service.ps1
+```
+
+Remove the LAN service but preserve data by default:
+
+```powershell
+.\scripts\uninstall-lan-service.ps1
+```
+
+Remove the LAN service and all stored data:
+
+```powershell
+.\scripts\uninstall-lan-service.ps1 -RemoveData -ConfirmRemoveData REMOVE
+```
+
+## Hosted Release Publish And Smoke Test
+
+Use these when iterating on the backend-hosted LAN path without rebuilding the installer each time.
+
+Publish the release:
+
+```powershell
+.\scripts\publish-host-release.ps1
+```
+
+Defaults:
+
+- runtime identifier: `win-x64`
+- self-contained: `true`
+
+Smoke-test the published release locally in LAN mode:
+
+```powershell
+.\scripts\test-host-release.ps1
+```
+
+This verifies:
+
+- `GET /health/live`
+- `GET /health/ready`
+- `POST /api/auth/login`
+- `GET /api/lines`
+- `GET /api/dashboard`
+- frontend root `/`

@@ -29,6 +29,9 @@ using System.Threading.RateLimiting;
 // -----------------------------------------------------------------------------
 
 var builder = WebApplication.CreateBuilder(args);
+var isLanDeployment = builder.Configuration.GetValue<bool>("App:IsLanDeployment");
+
+builder.Host.UseWindowsService();
 
 // Core configuration and persistence
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
@@ -130,14 +133,7 @@ builder.Services.AddCors(options =>
         policy
             .SetIsOriginAllowed(origin =>
             {
-                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
-                {
-                    return false;
-                }
-
-                return uri.Scheme is "http" or "https"
-                    && (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
-                        || uri.Host == "127.0.0.1");
+                return IsAllowedDevelopmentOrigin(origin, allowLanOrigins: isLanDeployment);
             })
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -161,6 +157,14 @@ builder.Services.AddCors(options =>
         {
             policy
                 .WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+        else if (isLanDeployment)
+        {
+            policy
+                .SetIsOriginAllowed(origin => IsAllowedDevelopmentOrigin(origin, allowLanOrigins: true))
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials();
@@ -248,13 +252,13 @@ app.Use(async (context, next) =>
         startedAt);
 });
 
-if (!app.Environment.IsDevelopment())
+if (!app.Environment.IsDevelopment() && !isLanDeployment)
 {
     app.UseHsts();
     app.UseHttpsRedirection();
 }
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || isLanDeployment)
 {
     app.UseCors("FrontendDev");
 }
@@ -340,7 +344,7 @@ var loginEndpoint = app.MapPost("/api/auth/login", async (
     httpContext.Response.Cookies.Append("pm_auth", accessToken, new CookieOptions
     {
         HttpOnly = true,
-        Secure = !app.Environment.IsDevelopment(),
+        Secure = !app.Environment.IsDevelopment() && !isLanDeployment,
         SameSite = SameSiteMode.Strict,
         Expires = request.RememberMe ? expiresAt : null,
         IsEssential = true,
@@ -393,7 +397,7 @@ app.MapGet("/api/auth/session", async (
     httpContext.Response.Cookies.Append("pm_auth", refreshedToken, new CookieOptions
     {
         HttpOnly = true,
-        Secure = !app.Environment.IsDevelopment(),
+        Secure = !app.Environment.IsDevelopment() && !isLanDeployment,
         SameSite = SameSiteMode.Strict,
         Expires = refreshedExpiry,
         IsEssential = true,
@@ -1132,6 +1136,41 @@ static IResult ServiceUnavailableProblem(string detail, string code)
         {
             ["code"] = code,
         });
+}
+
+static bool IsAllowedDevelopmentOrigin(string origin, bool allowLanOrigins)
+{
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+    {
+        return false;
+    }
+
+    if (uri.Scheme is not ("http" or "https"))
+    {
+        return false;
+    }
+
+    if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+        || uri.Host == "127.0.0.1")
+    {
+        return true;
+    }
+
+    return allowLanOrigins && IsPrivateLanIp(uri.Host);
+}
+
+static bool IsPrivateLanIp(string host)
+{
+    if (!System.Net.IPAddress.TryParse(host, out var address)
+        || address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+    {
+        return false;
+    }
+
+    var bytes = address.GetAddressBytes();
+    return bytes[0] == 10
+        || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+        || (bytes[0] == 192 && bytes[1] == 168);
 }
 
 public partial class Program;

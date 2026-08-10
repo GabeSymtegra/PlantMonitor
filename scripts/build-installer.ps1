@@ -5,12 +5,30 @@ param(
     [string]$ReleaseDirectory = "artifacts/release/backend",
     [string]$InstallerScriptPath = "installer/PlantMonitor.iss",
     [string]$InstallerOutputDirectory = "artifacts/installer",
+    [string]$RuntimeIdentifier = "win-x64",
+    [bool]$SelfContained = $true,
     [switch]$SkipFrontendBuild,
     [switch]$SkipBackendPublish
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function Invoke-External {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [string[]]$Arguments = @(),
+
+        [string]$FailureMessage = "External command failed."
+    )
+
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FailureMessage Exit code: $LASTEXITCODE"
+    }
+}
 
 function Resolve-IsccPath {
     $fromCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
@@ -36,7 +54,7 @@ function Resolve-IsccPath {
 if (-not $SkipFrontendBuild) {
     Push-Location "frontend"
     try {
-        npm run build
+        Invoke-External -FilePath "npm" -Arguments @("run", "build") -FailureMessage "Frontend production build failed."
     }
     finally {
         Pop-Location
@@ -44,7 +62,14 @@ if (-not $SkipFrontendBuild) {
 }
 
 if (-not $SkipBackendPublish) {
-    dotnet publish $BackendProjectPath -c $Configuration -o $ReleaseDirectory
+    Invoke-External -FilePath "dotnet" -Arguments @(
+        "publish",
+        $BackendProjectPath,
+        "-c", $Configuration,
+        "-o", $ReleaseDirectory,
+        "-r", $RuntimeIdentifier,
+        "--self-contained", $SelfContained.ToString().ToLowerInvariant()
+    ) -FailureMessage "Backend publish for installer failed."
 }
 
 $resolvedReleaseDir = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $ReleaseDirectory))
@@ -68,7 +93,7 @@ $env:PM_SOURCE_DIR = $resolvedReleaseDir
 $env:PM_OUTPUT_DIR = $resolvedOutputDir
 
 try {
-    & $isccPath $resolvedInstallerScript
+    Invoke-External -FilePath $isccPath -Arguments @($resolvedInstallerScript) -FailureMessage "Installer compilation failed."
 }
 finally {
     Remove-Item Env:PM_SOURCE_DIR -ErrorAction SilentlyContinue

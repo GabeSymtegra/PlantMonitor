@@ -110,6 +110,38 @@ npm run dev
 .\scripts\dev.ps1
 ```
 
+## Hosted LAN Deployment
+
+Use the backend-hosted SPA plus Windows service path for same-wired-network
+access from multiple PCs.
+
+Publish the hosted release:
+
+```powershell
+.\scripts\publish-host-release.ps1
+```
+
+Smoke-test the published release:
+
+```powershell
+.\scripts\test-host-release.ps1
+```
+
+Install the LAN Windows service:
+
+```powershell
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+```
+
+Validate the installed service:
+
+```powershell
+.\scripts\test-lan-service.ps1
+```
+
+This is the canonical path for multiple simultaneous Status Board displays and
+manager/reporting access from other computers on the same wired network.
+
 ## Default Development Accounts
 
 - Admin: `test` / `test`
@@ -129,6 +161,8 @@ npm run dev
 - Disconnected PLC lines are reported as `Offline`.
 - Adding new EF entities requires a migration before app startup will succeed.
 - The runtime service is the source of truth for dashboard status, control mode, and report events.
+
+## Quality Checks
 
 ### Frontend unit tests
 
@@ -184,88 +218,3 @@ Additional project docs live under `docs/`:
 - `docs/Deployment.md`
 - `docs/QA-Matrix.md`
 - `docs/Release.md`
-
-## Near-Term Gaps
-
-- Replace frontend mock dashboard data with backend-driven snapshots.
-- Replace filler PLC tag browsing with the real tag database.
-- Add logical tag mapping UI and persistence beyond the current filler/browser contract.
-- Add runtime polling and logical machine snapshot aggregation.
-- Finalize production deployment and container orchestration assets.
-
-- /
-- /lines
-- /lines/:id
-- /products
-- /reports
-- /status-board
-- /forbidden
-
-### Admin Only
-
-- /administration
-- /settings
-
-## API Summary (Current)
-
-- POST /api/auth/login
-- GET /api/status (authorized)
-- GET /api/configuration/access-check (admin policy)
-- SignalR hub: /hubs/lines (authorized)
-
-## Local Development
-
-### Prerequisites
-
-- .NET SDK 10
-- Node.js 20+
-- npm
-
-### Run Frontend
-
-1. Open terminal in frontend
-2. Run npm install
-3. Run npm run dev
-
-### Run Backend
-
-1. Open terminal in backend
-2. Run dotnet restore
-3. Run dotnet run
-
-If build/run fails due file locks on backend.exe or backend.dll, stop the running backend process and retry.
-
-## Build Commands
-
-- Frontend: npm run build
-- Backend: dotnet build
-
-## Environment Configuration
-
-### Frontend
-
-- VITE_API_BASE_URL controls API base URL for frontend requests.
-- VITE_DEV_BACKEND_ORIGIN controls Vite dev proxy target for `/api` and `/hubs`.
-
-### Backend
-
-- JWT settings are read from appsettings via Jwt configuration section.
-
-## Security Notes
-
-- Current credentials are development-only and should be replaced before production.
-- CORS is currently configured permissively for development.
-- A dependency warning may appear for Microsoft.OpenApi package vulnerability advisory; track and update package versions as part of hardening.
-
-## Documentation
-
-Additional docs are available in docs:
-
-- docs/Api.md
-- docs/Architecture.md
-- docs/Database.md
-- docs/Deployment.md
-
-## Author
-
-Gabriel Carswell

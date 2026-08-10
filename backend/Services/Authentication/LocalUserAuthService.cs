@@ -34,9 +34,13 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
         var isDevelopmentLikeEnvironment = _environment.IsDevelopment() || string.Equals(_environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
 
         var seedUsers = new List<(string Username, string Password, string Role, bool MustChangePassword)>();
-        var existingAdmins = await _dbContext.LocalUsers
+        var existingUsers = await _dbContext.LocalUsers
             .AsNoTracking()
-            .AnyAsync(x => x.Role == "Admin", cancellationToken);
+            .Select(x => new { x.Username, x.Role })
+            .ToListAsync(cancellationToken);
+
+        var existingAdmins = existingUsers.Any(x => x.Role == "Admin");
+        var existingUsernames = new HashSet<string>(existingUsers.Select(x => x.Username), StringComparer.OrdinalIgnoreCase);
 
         if (isDevelopmentLikeEnvironment)
         {
@@ -44,15 +48,21 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
             seedUsers.Add(("operator", "test", "Operator", false));
             seedUsers.Add(("viewer", "test", "Viewer", false));
         }
-        else if (!existingAdmins)
+        else
         {
-            var bootstrapPassword = _configuration["Auth:BootstrapAdminPassword"];
-            if (string.IsNullOrWhiteSpace(bootstrapPassword))
+            if (!existingAdmins)
             {
-                throw new InvalidOperationException("Auth:BootstrapAdminPassword must be provided for first production startup.");
+                var bootstrapPassword = _configuration["Auth:BootstrapAdminPassword"];
+                if (string.IsNullOrWhiteSpace(bootstrapPassword))
+                {
+                    throw new InvalidOperationException("Auth:BootstrapAdminPassword must be provided for first production startup.");
+                }
+
+                seedUsers.Add(("admin", bootstrapPassword, "Admin", true));
             }
 
-            seedUsers.Add(("admin", bootstrapPassword, "Admin", true));
+            AddConfiguredBootstrapUser(seedUsers, existingUsernames, "Auth:BootstrapViewerUsername", "viewer", "Auth:BootstrapViewerPassword", "Viewer");
+            AddConfiguredBootstrapUser(seedUsers, existingUsernames, "Auth:BootstrapOperatorUsername", "operator", "Auth:BootstrapOperatorPassword", "Operator");
         }
 
         if (isDevelopmentLikeEnvironment)
@@ -60,19 +70,14 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
             existingAdmins = true;
         }
 
-        if (existingAdmins && !isDevelopmentLikeEnvironment)
+        if (seedUsers.Count == 0)
         {
             return;
         }
 
-        var existing = await _dbContext.LocalUsers
-            .Select(x => x.Username)
-            .ToListAsync(cancellationToken);
-
-        var existingSet = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
         foreach (var seed in seedUsers)
         {
-            if (existingSet.Contains(seed.Username))
+            if (existingUsernames.Contains(seed.Username))
             {
                 continue;
             }
@@ -105,6 +110,34 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
             // Parallel startup races may attempt to seed the same bootstrap users.
             // If another host inserted first, uniqueness violations are safe to ignore.
         }
+    }
+
+    private void AddConfiguredBootstrapUser(
+        ICollection<(string Username, string Password, string Role, bool MustChangePassword)> seedUsers,
+        ISet<string> existingUsernames,
+        string usernameConfigKey,
+        string defaultUsername,
+        string passwordConfigKey,
+        string role)
+    {
+        var password = _configuration[passwordConfigKey]?.Trim();
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            return;
+        }
+
+        var username = _configuration[usernameConfigKey]?.Trim();
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            username = defaultUsername;
+        }
+
+        if (existingUsernames.Contains(username) || seedUsers.Any(x => x.Username.Equals(username, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        seedUsers.Add((username, password, role, false));
     }
 
     public async Task<LocalAuthResult> AuthenticateAsync(string username, string password, CancellationToken cancellationToken = default)

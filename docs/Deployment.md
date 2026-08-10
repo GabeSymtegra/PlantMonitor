@@ -209,6 +209,43 @@ Security controls:
 - Rotate JWT signing key by policy.
 - Restrict access to backend host and local sqlite storage path.
 
+## 5.1 Same-Wired-Network Hosted Mode
+
+For the first hosted LAN rollout, use one backend-hosted origin on the host
+machine so browser clients on other wired-network PCs load the SPA, API, and
+SignalR hub from the same IP address and port.
+
+Recommended operator flow:
+
+1. Publish the backend-hosted release:
+
+```powershell
+.\scripts\publish-host-release.ps1
+```
+
+2. Smoke-test the release locally before service install:
+
+```powershell
+.\scripts\test-host-release.ps1
+```
+
+3. Install the published release as the LAN host Windows service:
+
+```powershell
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+```
+
+4. Open the printed `http://<host-ip>:5050` URL from other PCs on the same
+wired network.
+
+Recommended first-install account plan:
+
+- use the bootstrap admin account for management and configuration
+- use the shared Viewer account for status-board screens on other PCs
+
+This hosted mode uses backend configuration overrides that enable LAN delivery
+without relying on the Vite development server path.
+
 ## 6. Build And Release Process
 
 ### 6.1 Backend Release
