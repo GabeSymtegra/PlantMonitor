@@ -32,7 +32,7 @@ const statusColors: Record<LineStatus, string> = {
   [LineStatus.Startup]: "#7C3AED",
   [LineStatus.Faulted]: "#D32F2F",
   [LineStatus.Offline]: "#616161",
-  [LineStatus.Maintenance]: "#1565C0",
+  [LineStatus.Maintenance]: "#1e344d",
 };
 
 const statusOrder: LineStatus[] = [

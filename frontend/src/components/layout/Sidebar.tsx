@@ -57,7 +57,7 @@ export default function Sidebar() {
           borderRight: (theme) => `1px solid ${theme.palette.divider}`,
           backgroundColor: (theme) =>
             theme.palette.mode === "dark"
-              ? "rgba(23, 28, 34, 0.92)"
+              ? "rgba(32, 23, 34, 0.92)"
               : "rgba(255, 255, 255, 0.92)",
         },
       }}
