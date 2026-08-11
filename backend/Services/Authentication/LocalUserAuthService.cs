@@ -215,6 +215,32 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
         return true;
     }
 
+    public async Task<bool> VerifyPasswordAsync(string username, string password, CancellationToken cancellationToken = default)
+    {
+        var normalized = username.Trim().ToLowerInvariant();
+        var user = await _dbContext.LocalUsers.SingleOrDefaultAsync(x => x.Username.ToLower() == normalized, cancellationToken);
+
+        if (user is null || user.IsDisabled)
+        {
+            return false;
+        }
+
+        var verify = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
+        if (verify == PasswordVerificationResult.Failed)
+        {
+            return false;
+        }
+
+        if (verify == PasswordVerificationResult.SuccessRehashNeeded)
+        {
+            user.PasswordHash = _passwordHasher.HashPassword(user, password);
+            user.UpdatedAtUtc = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return true;
+    }
+
     public Task<LocalUserEntity?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default)
     {
         var normalized = username.Trim().ToLowerInvariant();

@@ -77,7 +77,7 @@ test.describe("PlantMonitor smoke", () => {
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("grid")).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Line #" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Line Name" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Line" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Status" })).toBeVisible();
   });
 });

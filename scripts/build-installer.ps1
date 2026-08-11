@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$BackendProjectPath = "backend/backend.csproj",
+    [string]$AgentProjectPath = "plc-service/plc-service.csproj",
     [string]$Configuration = "Release",
     [string]$ReleaseDirectory = "artifacts/release/backend",
+    [string]$AgentReleaseSubdirectory = "privileged-agent",
     [string]$InstallerScriptPath = "installer/PlantMonitor.iss",
     [string]$InstallerOutputDirectory = "artifacts/installer",
     [string]$RuntimeIdentifier = "win-x64",
@@ -62,14 +64,26 @@ if (-not $SkipFrontendBuild) {
 }
 
 if (-not $SkipBackendPublish) {
+    $resolvedReleaseDirectory = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $ReleaseDirectory))
+    $resolvedAgentReleaseDirectory = Join-Path $resolvedReleaseDirectory $AgentReleaseSubdirectory
+
     Invoke-External -FilePath "dotnet" -Arguments @(
         "publish",
         $BackendProjectPath,
         "-c", $Configuration,
-        "-o", $ReleaseDirectory,
+        "-o", $resolvedReleaseDirectory,
         "-r", $RuntimeIdentifier,
         "--self-contained", $SelfContained.ToString().ToLowerInvariant()
     ) -FailureMessage "Backend publish for installer failed."
+
+    Invoke-External -FilePath "dotnet" -Arguments @(
+        "publish",
+        $AgentProjectPath,
+        "-c", $Configuration,
+        "-o", $resolvedAgentReleaseDirectory,
+        "-r", $RuntimeIdentifier,
+        "--self-contained", $SelfContained.ToString().ToLowerInvariant()
+    ) -FailureMessage "Privileged agent publish for installer failed."
 }
 
 $resolvedReleaseDir = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $ReleaseDirectory))

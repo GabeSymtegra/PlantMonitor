@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$ServiceName = "PlantMonitor-LAN",
+    [string]$PrivilegedAgentServiceName = "PlantMonitor-PrivilegedAgent",
     [string]$HostNameOrIp = "localhost",
     [int]$Port = 5050,
+    [int]$PrivilegedAgentPort = 5075,
     [string]$ExpectedDatabasePath = "C:\ProgramData\PlantMonitor\Data\plantmonitor.db",
     [string]$Username,
     [string]$Password
@@ -106,9 +108,16 @@ $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 $serviceExistsDetail = if ($service) { "Found" } else { "Missing" }
 Add-Result -Name "Service exists" -Pass ([bool]$service) -Detail $serviceExistsDetail
 
+$privilegedAgentService = Get-Service -Name $PrivilegedAgentServiceName -ErrorAction SilentlyContinue
+$agentExistsDetail = if ($privilegedAgentService) { "Found" } else { "Missing" }
+Add-Result -Name "Privileged agent service exists" -Pass ([bool]$privilegedAgentService) -Detail $agentExistsDetail
+
 if ($isLocalHost) {
     $serviceStateDetail = if ($service) { $service.Status.ToString() } else { "Service missing" }
     Add-Result -Name "Service status is Running" -Pass ($service -and $service.Status -eq "Running") -Detail $serviceStateDetail
+
+    $agentStateDetail = if ($privilegedAgentService) { $privilegedAgentService.Status.ToString() } else { "Service missing" }
+    Add-Result -Name "Privileged agent status is Running" -Pass ($privilegedAgentService -and $privilegedAgentService.Status -eq "Running") -Detail $agentStateDetail
 
     $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
     $listenerDetail = if ($listener) { "Listening" } else { "No listener" }
@@ -116,7 +125,16 @@ if ($isLocalHost) {
 }
 else {
     Add-Result -Name "Service status is Running" -Pass $true -Detail "Skipped for remote host" -Required $false
+    Add-Result -Name "Privileged agent status is Running" -Pass $true -Detail "Skipped for remote host" -Required $false
     Add-Result -Name "TCP port is listening" -Pass $true -Detail "Skipped for remote host" -Required $false
+}
+
+if ($isLocalHost) {
+    $agentLive = Invoke-Http -Url "http://127.0.0.1:$PrivilegedAgentPort/health/live" -Method "GET"
+    Add-Result -Name "Privileged agent /health/live returns success" -Pass ($agentLive.StatusCode -ge 200 -and $agentLive.StatusCode -lt 300) -Detail "HTTP $($agentLive.StatusCode)"
+}
+else {
+    Add-Result -Name "Privileged agent /health/live returns success" -Pass $true -Detail "Skipped for remote host" -Required $false
 }
 
 $live = Invoke-Http -Url "$baseUrl/health/live" -Method "GET"
@@ -186,6 +204,10 @@ if ($hasAnyCredentialInput) {
             $sessionAfterLogin = Invoke-Http -Url "$baseUrl/api/auth/session" -Method "GET" -CookieContainer $cookieContainer
             $sessionHealthy = $sessionAfterLogin.StatusCode -eq 200
             Add-Result -Name "Credential check session endpoint works with pm_auth cookie" -Pass $sessionHealthy -Detail "HTTP $($sessionAfterLogin.StatusCode)"
+
+            $wifiStatus = Invoke-Http -Url "$baseUrl/api/admin/system/wifi/status" -Method "GET" -CookieContainer $cookieContainer
+            $wifiStatusReachable = $wifiStatus.StatusCode -ne 404 -and $wifiStatus.StatusCode -lt 500
+            Add-Result -Name "Credential check Wi-Fi status endpoint is reachable" -Pass $wifiStatusReachable -Detail "HTTP $($wifiStatus.StatusCode)"
         }
     }
 }

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$ServiceName = "PlantMonitor-LAN",
+    [string]$PrivilegedAgentServiceName = "PlantMonitor-PrivilegedAgent",
     [string]$InstallDirectory = "C:\Program Files\PlantMonitor",
     [string]$DataDirectory = "C:\ProgramData\PlantMonitor",
     [switch]$RemoveData,
@@ -41,6 +42,25 @@ if ($service) {
 }
 else {
     $preserved.Add("Service '$ServiceName' was not present.") | Out-Null
+}
+
+$privilegedAgentService = Get-Service -Name $PrivilegedAgentServiceName -ErrorAction SilentlyContinue
+if ($privilegedAgentService) {
+    if ($privilegedAgentService.Status -ne "Stopped") {
+        try {
+            Stop-Service -Name $PrivilegedAgentServiceName -Force -ErrorAction Stop
+            $removed.Add("Stopped service '$PrivilegedAgentServiceName'.") | Out-Null
+        }
+        catch {
+            throw "Failed to stop service '$PrivilegedAgentServiceName'. $_"
+        }
+    }
+
+    & sc.exe delete $PrivilegedAgentServiceName | Out-Null
+    $removed.Add("Deleted service '$PrivilegedAgentServiceName'.") | Out-Null
+}
+else {
+    $preserved.Add("Service '$PrivilegedAgentServiceName' was not present.") | Out-Null
 }
 
 $firewallRule = Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue

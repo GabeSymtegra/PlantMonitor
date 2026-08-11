@@ -12,7 +12,9 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  FormControlLabel,
   FormControl,
+  Checkbox,
   Chip,
   InputLabel,
   LinearProgress,
@@ -65,6 +67,29 @@ import { ApiRequestError } from "../services/api/client";
 import { useDashboard } from "../context/useDashboard";
 import { LineStatus } from "../types/LineStatus";
 import type { LineLifecycleState, PlcManufacturer, ProductionLine } from "../types/ProductionLine";
+import {
+  connectWifi,
+  disconnectWifi,
+  getConnectivitySnapshot,
+  getWifiStatus,
+  scanWifiNetworks,
+  type HostConnectivitySnapshot,
+  type WifiActionResult,
+  type WifiScanResult,
+  type WifiStatus,
+} from "../services/connectivityService";
+import {
+  applyOtaPackage,
+  checkOtaRelease,
+  getOtaApplyStatus,
+  getOtaStageStatus,
+  prepareOtaApply,
+  reauthenticateAdmin,
+  stageOtaPackage,
+  type OtaApplyOperationStatus,
+  type OtaReleaseCheck,
+  type OtaStageOperationStatus,
+} from "../services/otaService";
 
 // -----------------------------------------------------------------------------
 // Form model and local utilities
@@ -248,6 +273,34 @@ export default function Administration() {
   const [confirmOverwriteOpen, setConfirmOverwriteOpen] = useState(false);
   const [duplicateLineTarget, setDuplicateLineTarget] = useState<ProductionLine | null>(null);
   const [successToastOpen, setSuccessToastOpen] = useState(false);
+  const [connectivityLoading, setConnectivityLoading] = useState(false);
+  const [connectivityError, setConnectivityError] = useState("");
+  const [connectivitySnapshot, setConnectivitySnapshot] = useState<HostConnectivitySnapshot | null>(null);
+  const [wifiStatus, setWifiStatus] = useState<WifiStatus | null>(null);
+  const [wifiScanResult, setWifiScanResult] = useState<WifiScanResult | null>(null);
+  const [wifiActionResult, setWifiActionResult] = useState<WifiActionResult | null>(null);
+  const [wifiSsidInput, setWifiSsidInput] = useState("");
+  const [wifiPassphraseInput, setWifiPassphraseInput] = useState("");
+  const [wifiLoading, setWifiLoading] = useState(false);
+  const [wifiStatusMessage, setWifiStatusMessage] = useState("");
+  const [otaCheckLoading, setOtaCheckLoading] = useState(false);
+  const [otaCheckError, setOtaCheckError] = useState("");
+  const [otaCheckResult, setOtaCheckResult] = useState<OtaReleaseCheck | null>(null);
+  const [otaPrepareStatus, setOtaPrepareStatus] = useState("");
+  const [otaStagePackageUrl, setOtaStagePackageUrl] = useState("");
+  const [otaStageExpectedSha256, setOtaStageExpectedSha256] = useState("");
+  const [otaStageStatus, setOtaStageStatus] = useState("");
+  const [otaStageOperation, setOtaStageOperation] = useState<OtaStageOperationStatus | null>(null);
+  const [otaStageLoading, setOtaStageLoading] = useState(false);
+  const [otaApplyStatus, setOtaApplyStatus] = useState("");
+  const [otaApplyOperation, setOtaApplyOperation] = useState<OtaApplyOperationStatus | null>(null);
+  const [otaApplyLoading, setOtaApplyLoading] = useState(false);
+  const [otaForceHealthFailure, setOtaForceHealthFailure] = useState(false);
+  const [reauthScope, setReauthScope] = useState<"ota-apply" | "ota-stage" | "wifi-manage">("ota-apply");
+  const [reauthAction, setReauthAction] = useState<"prepare" | "stage" | "apply" | "wifi-connect" | "wifi-disconnect">("prepare");
+  const [reauthDialogOpen, setReauthDialogOpen] = useState(false);
+  const [reauthPassword, setReauthPassword] = useState("");
+  const [reauthSubmitting, setReauthSubmitting] = useState(false);
 
   const activeLines = useMemo(
     () => lines.filter((line) => line.lineLifecycleState === "Active"),
@@ -362,6 +415,10 @@ export default function Administration() {
   useEffect(() => {
     void loadLines();
     void loadTagSlots();
+    void loadConnectivitySnapshot();
+    void loadWifiStatus();
+    void loadWifiScan();
+    void loadOtaReleaseCheck();
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -379,6 +436,335 @@ export default function Administration() {
       setTagSlots(slots);
     } catch {
       setTagSlots([]);
+    }
+  }
+
+  async function loadConnectivitySnapshot() {
+    setConnectivityLoading(true);
+    setConnectivityError("");
+
+    try {
+      const snapshot = await getConnectivitySnapshot();
+      setConnectivitySnapshot(snapshot);
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Connectivity diagnostics request failed.";
+      setConnectivityError(message);
+      setConnectivitySnapshot(null);
+    } finally {
+      setConnectivityLoading(false);
+    }
+  }
+
+  async function copyConnectivityUrl(url: string) {
+    if (!navigator?.clipboard) {
+      setConnectivityError("Clipboard access is not available in this browser.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(url);
+      showSuccessMessage(`Copied URL: ${url}`);
+    } catch {
+      setConnectivityError("Unable to copy URL to clipboard.");
+    }
+  }
+
+  async function loadWifiStatus() {
+    setWifiLoading(true);
+    setWifiStatusMessage("");
+
+    try {
+      const status = await getWifiStatus();
+      setWifiStatus(status);
+      if (status.message) {
+        setWifiStatusMessage(status.message);
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Wi-Fi status request failed.";
+      setWifiStatusMessage(message);
+      setWifiStatus(null);
+    } finally {
+      setWifiLoading(false);
+    }
+  }
+
+  async function loadWifiScan() {
+    setWifiLoading(true);
+    setWifiStatusMessage("");
+
+    try {
+      const result = await scanWifiNetworks();
+      setWifiScanResult(result);
+      if (result.networks.length > 0 && !wifiSsidInput.trim()) {
+        const connected = result.networks.find((network) => network.isConnected);
+        setWifiSsidInput((connected ?? result.networks[0]).ssid);
+      }
+      if (result.message) {
+        setWifiStatusMessage(result.message);
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Wi-Fi scan request failed.";
+      setWifiStatusMessage(message);
+      setWifiScanResult(null);
+    } finally {
+      setWifiLoading(false);
+    }
+  }
+
+  async function handleConnectWifi() {
+    setWifiStatusMessage("");
+    if (!wifiSsidInput.trim()) {
+      setWifiStatusMessage("Wi-Fi SSID is required.");
+      return;
+    }
+
+    setReauthScope("wifi-manage");
+    setReauthAction("wifi-connect");
+    setReauthDialogOpen(true);
+  }
+
+  async function handleDisconnectWifi() {
+    setWifiStatusMessage("");
+    setReauthScope("wifi-manage");
+    setReauthAction("wifi-disconnect");
+    setReauthDialogOpen(true);
+  }
+
+  async function loadOtaReleaseCheck() {
+    setOtaCheckLoading(true);
+    setOtaCheckError("");
+
+    try {
+      const result = await checkOtaRelease();
+      setOtaCheckResult(result);
+      if (!otaStagePackageUrl && result.releaseUrl) {
+        setOtaStagePackageUrl(result.releaseUrl);
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "OTA release check failed.";
+      setOtaCheckError(message);
+      setOtaCheckResult(null);
+    } finally {
+      setOtaCheckLoading(false);
+    }
+  }
+
+  async function handlePrepareOtaApply() {
+    setOtaPrepareStatus("");
+
+    if (!otaCheckResult?.latestVersion) {
+      setOtaPrepareStatus("No target release version is available yet.");
+      return;
+    }
+
+    setReauthScope("ota-apply");
+    setReauthAction("prepare");
+    setReauthDialogOpen(true);
+  }
+
+  async function handleStageOtaPackage() {
+    setOtaStageStatus("");
+
+    if (!otaCheckResult?.latestVersion) {
+      setOtaStageStatus("No target release version is available yet.");
+      return;
+    }
+
+    if (!otaStagePackageUrl.trim()) {
+      setOtaStageStatus("Package URL is required for staging.");
+      return;
+    }
+
+    setReauthScope("ota-stage");
+    setReauthAction("stage");
+    setReauthDialogOpen(true);
+  }
+
+  async function handleApplyStagedPackage() {
+    setOtaApplyStatus("");
+
+    if (!otaStageOperation?.operationId) {
+      setOtaApplyStatus("Stage a package first before applying.");
+      return;
+    }
+
+    if (otaStageOperation.status !== "staged") {
+      setOtaApplyStatus("The selected stage operation is not in staged state.");
+      return;
+    }
+
+    setReauthScope("ota-apply");
+    setReauthAction("apply");
+    setReauthDialogOpen(true);
+  }
+
+  async function confirmAdminReauthForOta() {
+    setReauthSubmitting(true);
+    setOtaPrepareStatus("");
+    setOtaStageStatus("");
+    setWifiStatusMessage("");
+
+    try {
+      const reauth = await reauthenticateAdmin({
+        password: reauthPassword,
+        scope: reauthScope,
+      });
+
+      if (reauthAction === "stage") {
+        const targetVersion = otaCheckResult?.latestVersion ?? "";
+        setOtaStageLoading(true);
+        const staged = await stageOtaPackage({
+          targetVersion,
+          packageUrl: otaStagePackageUrl.trim(),
+          expectedSha256: otaStageExpectedSha256.trim() || null,
+          reauthToken: reauth.token,
+        });
+        setOtaStageOperation(staged);
+        setOtaStageStatus(
+          `${staged.message ?? "Staging completed."} Operation: ${staged.operationId}. Status: ${staged.status}.`
+        );
+      } else if (reauthAction === "apply") {
+        if (!otaStageOperation?.operationId) {
+          setOtaApplyStatus("No staged operation is available to apply.");
+        } else {
+          setOtaApplyLoading(true);
+          const applied = await applyOtaPackage({
+            stageOperationId: otaStageOperation.operationId,
+            reauthToken: reauth.token,
+            forceHealthFailure: otaForceHealthFailure,
+          });
+          setOtaApplyOperation(applied);
+          setOtaApplyStatus(
+            `${applied.message ?? "Apply flow completed."} Operation: ${applied.operationId}. Status: ${applied.status}.`
+          );
+        }
+      } else if (reauthAction === "wifi-connect") {
+        setWifiLoading(true);
+        const result = await connectWifi({
+          ssid: wifiSsidInput.trim(),
+          passphrase: wifiPassphraseInput,
+          reauthToken: reauth.token,
+        });
+        setWifiActionResult(result);
+        setWifiStatusMessage(result.message);
+        await loadWifiStatus();
+        await loadWifiScan();
+      } else if (reauthAction === "wifi-disconnect") {
+        setWifiLoading(true);
+        const result = await disconnectWifi({
+          reauthToken: reauth.token,
+        });
+        setWifiActionResult(result);
+        setWifiStatusMessage(result.message);
+        await loadWifiStatus();
+        await loadWifiScan();
+      } else {
+        const targetVersion = otaCheckResult?.latestVersion ?? "";
+        const prepared = await prepareOtaApply({
+          targetVersion,
+          reauthToken: reauth.token,
+        });
+
+        setOtaPrepareStatus(
+          `${prepared.message} Target: ${prepared.targetVersion}. Status: ${prepared.status}.`
+        );
+      }
+
+      setSuccess(`Admin re-auth confirmed at ${new Date(reauth.verifiedAtUtc).toLocaleString()}.`);
+      setSuccessToastOpen(true);
+      setReauthPassword("");
+      setReauthDialogOpen(false);
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Admin re-authentication failed.";
+      if (reauthAction === "stage") {
+        setOtaStageStatus(message);
+      } else if (reauthAction === "apply") {
+        setOtaApplyStatus(message);
+      } else if (reauthAction === "wifi-connect" || reauthAction === "wifi-disconnect") {
+        setWifiStatusMessage(message);
+      } else {
+        setOtaPrepareStatus(message);
+      }
+    } finally {
+      setOtaStageLoading(false);
+      setOtaApplyLoading(false);
+      setWifiLoading(false);
+      setReauthSubmitting(false);
+    }
+  }
+
+  async function refreshOtaStageStatus() {
+    if (!otaStageOperation?.operationId) {
+      return;
+    }
+
+    setOtaStageLoading(true);
+    try {
+      const status = await getOtaStageStatus(otaStageOperation.operationId);
+      setOtaStageOperation(status);
+      setOtaStageStatus(
+        `${status.message ?? "Staging status loaded."} Operation: ${status.operationId}. Status: ${status.status}.`
+      );
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Unable to read OTA stage status.";
+      setOtaStageStatus(message);
+    } finally {
+      setOtaStageLoading(false);
+    }
+  }
+
+  async function refreshOtaApplyStatus() {
+    if (!otaApplyOperation?.operationId) {
+      return;
+    }
+
+    setOtaApplyLoading(true);
+    try {
+      const status = await getOtaApplyStatus(otaApplyOperation.operationId);
+      setOtaApplyOperation(status);
+      setOtaApplyStatus(
+        `${status.message ?? "Apply status loaded."} Operation: ${status.operationId}. Status: ${status.status}.`
+      );
+    } catch (requestError) {
+      const message =
+        requestError instanceof ApiRequestError
+          ? formatRequestError(requestError)
+          : requestError instanceof Error
+            ? requestError.message
+            : "Unable to read OTA apply status.";
+      setOtaApplyStatus(message);
+    } finally {
+      setOtaApplyLoading(false);
     }
   }
 
@@ -1397,6 +1783,459 @@ export default function Administration() {
       </Paper>
 
       <Paper sx={{ p: 3 }}>
+        <Stack spacing={2}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            spacing={1}
+          >
+            <Box>
+              <Typography variant="h6">Factory Wi-Fi Dashboard Access</Typography>
+              <Typography color="text.secondary">
+                PLC traffic stays on wired LAN. Use these URLs for tablets, phones, and laptops on factory Wi-Fi.
+              </Typography>
+            </Box>
+
+            <Button
+              variant="outlined"
+              onClick={() => {
+                void loadConnectivitySnapshot();
+              }}
+              disabled={connectivityLoading}
+            >
+              {connectivityLoading ? "Refreshing..." : "Refresh"}
+            </Button>
+          </Stack>
+
+          {connectivityError ? (
+            <Alert severity="warning">
+              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                {connectivityError}
+              </Typography>
+            </Alert>
+          ) : null}
+
+          {connectivitySnapshot ? (
+            <Stack spacing={1.5}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
+                <Alert severity={connectivitySnapshot.accessMode === "LanCompatible" ? "success" : "error"} sx={{ flex: 1 }}>
+                  <Typography variant="body2">
+                    Access Mode: {connectivitySnapshot.accessMode}
+                  </Typography>
+                  <Typography variant="body2">
+                    Hostname: {connectivitySnapshot.hostname}
+                  </Typography>
+                </Alert>
+
+                <Alert severity="info" sx={{ flex: 1 }}>
+                  <Typography variant="body2">Service Bind: {connectivitySnapshot.serviceBind}</Typography>
+                  <Typography variant="body2">Allowed Hosts: {connectivitySnapshot.allowedHosts}</Typography>
+                </Alert>
+              </Stack>
+
+              {connectivitySnapshot.warnings.length > 0 ? (
+                <Alert severity="warning">
+                  <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 700 }}>
+                    Connectivity Warnings
+                  </Typography>
+                  {connectivitySnapshot.warnings.map((warning) => (
+                    <Typography key={warning} variant="body2">
+                      - {warning}
+                    </Typography>
+                  ))}
+                </Alert>
+              ) : null}
+
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Recommended Dashboard URLs
+                  </Typography>
+                  {connectivitySnapshot.recommendedUrls.map((url) => (
+                    <Stack key={url} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }}>
+                      <TextField
+                        value={url}
+                        size="small"
+                        fullWidth
+                        InputProps={{ readOnly: true }}
+                      />
+                      <Button variant="outlined" onClick={() => { void copyConnectivityUrl(url); }}>
+                        Copy
+                      </Button>
+                    </Stack>
+                  ))}
+                </Stack>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Active Host Interfaces
+                  </Typography>
+                  {connectivitySnapshot.activeInterfaces.length === 0 ? (
+                    <Typography color="text.secondary">
+                      No active non-loopback IPv4 interfaces were found.
+                    </Typography>
+                  ) : (
+                    connectivitySnapshot.activeInterfaces.map((networkRow) => (
+                      <Typography key={`${networkRow.name}-${networkRow.ipAddress}`} variant="body2">
+                        {networkRow.name} ({networkRow.type}) - {networkRow.ipAddress}{networkRow.isWireless ? " [wireless]" : ""}
+                      </Typography>
+                    ))
+                  )}
+                </Stack>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Stack spacing={1.5}>
+                  <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} spacing={1}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                      Wi-Fi Network Management (Privileged Agent)
+                    </Typography>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => {
+                          void loadWifiStatus();
+                        }}
+                        disabled={wifiLoading}
+                      >
+                        Refresh Status
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={() => {
+                          void loadWifiScan();
+                        }}
+                        disabled={wifiLoading}
+                      >
+                        Scan SSIDs
+                      </Button>
+                    </Stack>
+                  </Stack>
+
+                  {wifiStatus ? (
+                    <Alert severity={wifiStatus.isConnected ? "success" : "info"}>
+                      <Typography variant="body2">
+                        Connected: {String(wifiStatus.isConnected)}
+                      </Typography>
+                      <Typography variant="body2">
+                        SSID: {wifiStatus.ssid ?? "(none)"}
+                      </Typography>
+                      <Typography variant="body2">
+                        Signal: {typeof wifiStatus.signalQualityPercent === "number" ? `${wifiStatus.signalQualityPercent}%` : "n/a"}
+                      </Typography>
+                    </Alert>
+                  ) : null}
+
+                  <TextField
+                    label="Wi-Fi SSID"
+                    value={wifiSsidInput}
+                    onChange={(event) => setWifiSsidInput(event.target.value)}
+                    fullWidth
+                    placeholder="Factory-Wifi-A"
+                  />
+
+                  <TextField
+                    label="Wi-Fi Passphrase"
+                    type="password"
+                    value={wifiPassphraseInput}
+                    onChange={(event) => setWifiPassphraseInput(event.target.value)}
+                    fullWidth
+                    placeholder="Optional for open/test networks"
+                  />
+
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      color="warning"
+                      onClick={() => {
+                        void handleConnectWifi();
+                      }}
+                      disabled={wifiLoading || reauthSubmitting || wifiSsidInput.trim().length === 0}
+                    >
+                      Connect Wi-Fi (Re-auth Required)
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        void handleDisconnectWifi();
+                      }}
+                      disabled={wifiLoading || reauthSubmitting}
+                    >
+                      Disconnect Wi-Fi (Re-auth Required)
+                    </Button>
+                  </Stack>
+
+                  {wifiScanResult ? (
+                    <Paper variant="outlined" sx={{ p: 1.5 }}>
+                      <Stack spacing={0.5}>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>Available SSIDs</Typography>
+                        {wifiScanResult.networks.length === 0 ? (
+                          <Typography variant="body2" color="text.secondary">No networks returned by privileged agent.</Typography>
+                        ) : (
+                          wifiScanResult.networks.map((network) => (
+                            <Typography key={network.ssid} variant="body2">
+                              {network.ssid} - {network.signalQualityPercent}% - {network.security}{network.isConnected ? " [connected]" : ""}
+                            </Typography>
+                          ))
+                        )}
+                      </Stack>
+                    </Paper>
+                  ) : null}
+
+                  {wifiActionResult ? (
+                    <Typography variant="body2" color="text.secondary">
+                      Last action: {wifiActionResult.status} at {new Date(wifiActionResult.changedAtUtc).toLocaleString()}
+                    </Typography>
+                  ) : null}
+
+                  {wifiStatusMessage ? (
+                    <Alert severity="info">
+                      <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>{wifiStatusMessage}</Typography>
+                    </Alert>
+                  ) : null}
+                </Stack>
+              </Paper>
+            </Stack>
+          ) : null}
+        </Stack>
+      </Paper>
+
+      <Paper sx={{ p: 3 }}>
+        <Stack spacing={2}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", sm: "center" }}
+            spacing={1}
+          >
+            <Box>
+              <Typography variant="h6">Over-The-Air Updates</Typography>
+              <Typography color="text.secondary">
+                Release checks, package staging with checksum verification, and controlled OTA apply with health-check rollback.
+              </Typography>
+            </Box>
+
+            <Button
+              variant="outlined"
+              onClick={() => {
+                void loadOtaReleaseCheck();
+              }}
+              disabled={otaCheckLoading}
+            >
+              {otaCheckLoading ? "Checking..." : "Check Updates"}
+            </Button>
+          </Stack>
+
+          {otaCheckError ? (
+            <Alert severity="warning">
+              <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                {otaCheckError}
+              </Typography>
+            </Alert>
+          ) : null}
+
+          {otaCheckResult ? (
+            <Stack spacing={1.5}>
+              <Alert severity={otaCheckResult.hasUpdate ? "info" : "success"}>
+                <Typography variant="body2">{otaCheckResult.message}</Typography>
+                <Typography variant="body2">Current Version: {otaCheckResult.currentVersion}</Typography>
+                <Typography variant="body2">Latest Version: {otaCheckResult.latestVersion ?? "Unavailable"}</Typography>
+                <Typography variant="body2">Status: {otaCheckResult.status}</Typography>
+              </Alert>
+
+              {otaCheckResult.publishedAtUtc ? (
+                <Typography variant="body2" color="text.secondary">
+                  Published: {new Date(otaCheckResult.publishedAtUtc).toLocaleString()}
+                </Typography>
+              ) : null}
+
+              {otaCheckResult.summary ? (
+                <Typography variant="body2" color="text.secondary">
+                  Release Summary: {otaCheckResult.summary}
+                </Typography>
+              ) : null}
+
+              {otaCheckResult.releaseUrl ? (
+                <Button
+                  variant="text"
+                  onClick={() => {
+                    window.open(otaCheckResult.releaseUrl ?? "", "_blank", "noopener,noreferrer");
+                  }}
+                  sx={{ width: "fit-content", px: 0 }}
+                >
+                  Open Release Notes
+                </Button>
+              ) : null}
+
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  onClick={() => {
+                    void handlePrepareOtaApply();
+                  }}
+                  disabled={!otaCheckResult.latestVersion || otaCheckLoading || reauthSubmitting}
+                >
+                  Prepare OTA Apply (Re-auth Required)
+                </Button>
+                <Typography variant="body2" color="text.secondary" sx={{ alignSelf: "center" }}>
+                  Re-auth tokens are required for both stage and apply operations.
+                </Typography>
+              </Stack>
+
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    OTA Package Staging
+                  </Typography>
+
+                  <TextField
+                    label="Package URL"
+                    value={otaStagePackageUrl}
+                    onChange={(event) => setOtaStagePackageUrl(event.target.value)}
+                    fullWidth
+                    placeholder="https://github.com/.../releases/download/vX.Y.Z/PlantMonitor.zip"
+                    helperText="Use a direct downloadable artifact URL or a local file path on the host."
+                  />
+
+                  <TextField
+                    label="Expected SHA-256 (optional)"
+                    value={otaStageExpectedSha256}
+                    onChange={(event) => setOtaStageExpectedSha256(event.target.value)}
+                    fullWidth
+                    placeholder="Hex digest used to verify integrity after download"
+                  />
+
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      onClick={() => {
+                        void handleStageOtaPackage();
+                      }}
+                      disabled={!otaCheckResult?.latestVersion || reauthSubmitting || otaStageLoading}
+                    >
+                      Stage Package (Re-auth Required)
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        void refreshOtaStageStatus();
+                      }}
+                      disabled={!otaStageOperation?.operationId || otaStageLoading}
+                    >
+                      Refresh Stage Status
+                    </Button>
+                  </Stack>
+
+                  {otaStageStatus ? (
+                    <Alert severity={otaStageOperation?.status === "staged" ? "success" : otaStageOperation?.status === "failed" ? "error" : "info"}>
+                      <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                        {otaStageStatus}
+                      </Typography>
+                    </Alert>
+                  ) : null}
+
+                  {otaStageOperation ? (
+                    <Stack spacing={0.5}>
+                      <Typography variant="body2">Operation ID: {otaStageOperation.operationId}</Typography>
+                      <Typography variant="body2">Target Version: {otaStageOperation.targetVersion}</Typography>
+                      <Typography variant="body2">Status: {otaStageOperation.status}</Typography>
+                      {typeof otaStageOperation.packageSizeBytes === "number" ? (
+                        <Typography variant="body2">Package Size: {otaStageOperation.packageSizeBytes.toLocaleString()} bytes</Typography>
+                      ) : null}
+                      {otaStageOperation.sha256 ? (
+                        <Typography variant="body2">SHA-256: {otaStageOperation.sha256}</Typography>
+                      ) : null}
+                      {typeof otaStageOperation.isChecksumMatch === "boolean" ? (
+                        <Typography variant="body2">Checksum Match: {String(otaStageOperation.isChecksumMatch)}</Typography>
+                      ) : null}
+                      {otaStageOperation.packagePath ? (
+                        <Typography variant="body2">Staged Path: {otaStageOperation.packagePath}</Typography>
+                      ) : null}
+                    </Stack>
+                  ) : null}
+
+                  <Divider />
+
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    OTA Apply and Rollback Health Check
+                  </Typography>
+
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={otaForceHealthFailure}
+                        onChange={(event) => setOtaForceHealthFailure(event.target.checked)}
+                      />
+                    }
+                    label="Force health check failure (simulate automatic rollback)"
+                  />
+
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      color="warning"
+                      onClick={() => {
+                        void handleApplyStagedPackage();
+                      }}
+                      disabled={!otaStageOperation?.operationId || otaStageOperation?.status !== "staged" || reauthSubmitting || otaApplyLoading}
+                    >
+                      Apply Staged Package (Re-auth Required)
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      onClick={() => {
+                        void refreshOtaApplyStatus();
+                      }}
+                      disabled={!otaApplyOperation?.operationId || otaApplyLoading}
+                    >
+                      Refresh Apply Status
+                    </Button>
+                  </Stack>
+
+                  {otaApplyStatus ? (
+                    <Alert severity={otaApplyOperation?.rolledBack ? "warning" : otaApplyOperation?.status === "applied" ? "success" : "info"}>
+                      <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                        {otaApplyStatus}
+                      </Typography>
+                    </Alert>
+                  ) : null}
+
+                  {otaApplyOperation ? (
+                    <Stack spacing={0.5}>
+                      <Typography variant="body2">Operation ID: {otaApplyOperation.operationId}</Typography>
+                      <Typography variant="body2">Target Version: {otaApplyOperation.targetVersion}</Typography>
+                      <Typography variant="body2">Previous Version: {otaApplyOperation.previousVersion}</Typography>
+                      <Typography variant="body2">Current Version: {otaApplyOperation.currentVersion}</Typography>
+                      <Typography variant="body2">Status: {otaApplyOperation.status}</Typography>
+                      <Typography variant="body2">Health Check: {otaApplyOperation.healthCheckStatus ?? "unknown"}</Typography>
+                      <Typography variant="body2">Rolled Back: {String(otaApplyOperation.rolledBack)}</Typography>
+                      {otaApplyOperation.appliedPackagePath ? (
+                        <Typography variant="body2">Applied Package Path: {otaApplyOperation.appliedPackagePath}</Typography>
+                      ) : null}
+                    </Stack>
+                  ) : null}
+                </Stack>
+              </Paper>
+
+              {otaPrepareStatus ? (
+                <Alert severity="info">
+                  <Typography variant="body2" sx={{ whiteSpace: "pre-line" }}>
+                    {otaPrepareStatus}
+                  </Typography>
+                </Alert>
+              ) : null}
+            </Stack>
+          ) : null}
+        </Stack>
+      </Paper>
+
+      <Paper sx={{ p: 3 }}>
         <Stack spacing={2.5}>
           <Stack
             direction={{ xs: "column", sm: "row" }}
@@ -2314,6 +3153,61 @@ export default function Administration() {
           </Button>
           <Button variant="contained" color="warning" onClick={() => void confirmOverwriteLine()}>
             Yes, Overwrite
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={reauthDialogOpen}
+        onClose={() => {
+          if (reauthSubmitting || otaStageLoading || otaApplyLoading || wifiLoading) {
+            return;
+          }
+
+          setReauthDialogOpen(false);
+          setReauthPassword("");
+        }}
+      >
+        <DialogTitle>Confirm Admin Password</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ pt: 0.5, minWidth: { xs: 260, sm: 420 } }}>
+            <DialogContentText>
+              {reauthAction === "stage"
+                ? "Re-enter your admin password to authorize OTA package staging and checksum verification."
+                : reauthAction === "apply"
+                  ? "Re-enter your admin password to authorize OTA apply and automatic rollback checks."
+                  : reauthAction === "wifi-connect" || reauthAction === "wifi-disconnect"
+                    ? "Re-enter your admin password to authorize Wi-Fi network changes through the privileged host agent."
+                  : "Re-enter your admin password to authorize sensitive OTA actions."}
+            </DialogContentText>
+            <TextField
+              label="Admin Password"
+              type="password"
+              value={reauthPassword}
+              onChange={(event) => setReauthPassword(event.target.value)}
+              autoFocus
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setReauthDialogOpen(false);
+              setReauthPassword("");
+            }}
+            disabled={reauthSubmitting || otaStageLoading || otaApplyLoading || wifiLoading}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              void confirmAdminReauthForOta();
+            }}
+            disabled={reauthSubmitting || otaStageLoading || otaApplyLoading || wifiLoading || reauthPassword.trim().length === 0}
+          >
+            {reauthSubmitting || otaStageLoading || otaApplyLoading || wifiLoading ? "Authorizing..." : "Authorize"}
           </Button>
         </DialogActions>
       </Dialog>

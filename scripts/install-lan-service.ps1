@@ -1,10 +1,13 @@
 [CmdletBinding()]
 param(
     [string]$ServiceName = "PlantMonitor-LAN",
+    [string]$PrivilegedAgentServiceName = "PlantMonitor-PrivilegedAgent",
     [string]$InstallDirectory = "C:\Program Files\PlantMonitor",
     [string]$DataDirectory = "C:\ProgramData\PlantMonitor",
     [int]$Port = 5050,
+    [int]$PrivilegedAgentPort = 5075,
     [string]$ReleaseDirectory = "artifacts\release\backend",
+    [string]$PrivilegedAgentSubdirectory = "privileged-agent",
     [switch]$UseInstalledFiles,
     [string]$ExistingDatabasePath,
     [string]$EnvironmentName = "Production",
@@ -169,8 +172,10 @@ function Resolve-TestAccountBootstrap {
 
 Assert-Administrator
 Assert-PortValid -Candidate $Port
+Assert-PortValid -Candidate $PrivilegedAgentPort
 Assert-PrivateNetworkProfile
 Assert-PortAvailable -Candidate $Port
+Assert-PortAvailable -Candidate $PrivilegedAgentPort
 
 $resolvedInstallDirectory = [System.IO.Path]::GetFullPath($InstallDirectory)
 $resolvedDataDirectory = [System.IO.Path]::GetFullPath($DataDirectory)
@@ -189,6 +194,11 @@ if (-not (Test-Path -LiteralPath $resolvedReleaseDirectory)) {
 $sourceExe = Join-Path $resolvedReleaseDirectory "backend.exe"
 if (-not (Test-Path -LiteralPath $sourceExe)) {
     throw "Published executable missing: $sourceExe"
+}
+
+$sourceAgentExe = Join-Path (Join-Path $resolvedReleaseDirectory $PrivilegedAgentSubdirectory) "plc-service.exe"
+if (-not (Test-Path -LiteralPath $sourceAgentExe)) {
+    throw "Published privileged agent executable missing: $sourceAgentExe"
 }
 
 if ([string]::IsNullOrWhiteSpace($JwtSigningKey)) {
@@ -211,6 +221,7 @@ foreach ($directory in $dataSubdirectories) {
 $targetDatabasePath = Join-Path $resolvedDataDirectory "Data\plantmonitor.db"
 $backupDirectory = Join-Path $resolvedDataDirectory "Backups"
 $existingService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
+$existingPrivilegedAgentService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$PrivilegedAgentServiceName'" -ErrorAction SilentlyContinue
 
 if ($existingService) {
     try {
@@ -250,11 +261,17 @@ if (-not $UseInstalledFiles) {
 }
 
 $installedExe = Join-Path $resolvedInstallDirectory "backend.exe"
+$installedAgentExe = Join-Path (Join-Path $resolvedInstallDirectory $PrivilegedAgentSubdirectory) "plc-service.exe"
+if (-not (Test-Path -LiteralPath $installedAgentExe)) {
+    throw "Installed privileged agent executable missing: $installedAgentExe"
+}
 $serviceScriptsDirectory = Join-Path $resolvedInstallDirectory "scripts"
 $installedTestScript = Join-Path $serviceScriptsDirectory "test-lan-service.ps1"
 $installedUninstallScript = Join-Path $serviceScriptsDirectory "uninstall-lan-service.ps1"
 $serviceDisplayName = "PlantMonitor LAN Host"
 $serviceAccount = "NT AUTHORITY\LocalService"
+$privilegedAgentDisplayName = "PlantMonitor Privileged Host Agent"
+$privilegedAgentAccount = "LocalSystem"
 $firewallRuleName = "$ServiceName HTTP"
 
 & icacls $resolvedDataDirectory /grant "NT AUTHORITY\LOCAL SERVICE:(OI)(CI)M" /T | Out-Null
@@ -267,9 +284,22 @@ else {
     & sc.exe create $ServiceName binPath= $binaryPath obj= "$serviceAccount" start= auto DisplayName= "$serviceDisplayName" | Out-Null
 }
 
+& sc.exe config $ServiceName depend= $PrivilegedAgentServiceName | Out-Null
+
 Set-Service -Name $ServiceName -StartupType Automatic
 & sc.exe config $ServiceName start= delayed-auto | Out-Null
 Configure-Recovery -Name $ServiceName
+
+$agentBinaryPath = '"' + $installedAgentExe + '"'
+if ($existingPrivilegedAgentService) {
+    & sc.exe config $PrivilegedAgentServiceName binPath= $agentBinaryPath obj= "$privilegedAgentAccount" start= auto DisplayName= "$privilegedAgentDisplayName" | Out-Null
+}
+else {
+    & sc.exe create $PrivilegedAgentServiceName binPath= $agentBinaryPath obj= "$privilegedAgentAccount" start= auto DisplayName= "$privilegedAgentDisplayName" | Out-Null
+}
+
+Set-Service -Name $PrivilegedAgentServiceName -StartupType Automatic
+Configure-Recovery -Name $PrivilegedAgentServiceName
 
 $connectionString = "Data Source=$targetDatabasePath;Cache=Shared"
 $serviceEnvironment = @(
@@ -278,7 +308,8 @@ $serviceEnvironment = @(
     "AllowedHosts=$AllowedHosts",
     "ConnectionStrings__PlantMonitor=$connectionString",
     "App__DatabasePath=$targetDatabasePath",
-    "App__IsLanDeployment=true"
+    "App__IsLanDeployment=true",
+    "App__PrivilegedAgentBaseUrl=http://127.0.0.1:$PrivilegedAgentPort"
 )
 
 if (-not [string]::IsNullOrWhiteSpace($JwtSigningKey)) {
@@ -301,6 +332,13 @@ if ($testAccountBootstrap) {
 
 Set-ServiceEnvironment -Name $ServiceName -EnvironmentRows $serviceEnvironment
 
+$privilegedAgentEnvironment = @(
+    "ASPNETCORE_ENVIRONMENT=$EnvironmentName",
+    "ASPNETCORE_URLS=http://127.0.0.1:$PrivilegedAgentPort",
+    "AllowedHosts=localhost;127.0.0.1"
+)
+Set-ServiceEnvironment -Name $PrivilegedAgentServiceName -EnvironmentRows $privilegedAgentEnvironment
+
 $existingRule = Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue
 if ($existingRule) {
     Remove-NetFirewallRule -DisplayName $firewallRuleName
@@ -308,24 +346,33 @@ if ($existingRule) {
 
 New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Private | Out-Null
 
+Start-Service -Name $PrivilegedAgentServiceName
 Start-Service -Name $ServiceName
 
 $liveUrl = "http://localhost:$Port/health/live"
 $readyUrl = "http://localhost:$Port/health/ready"
+$agentLiveUrl = "http://127.0.0.1:$PrivilegedAgentPort/health/live"
+$agentHealthy = Wait-HealthEndpoint -Url $agentLiveUrl
 $liveHealthy = Wait-HealthEndpoint -Url $liveUrl
 $readyHealthy = Wait-HealthEndpoint -Url $readyUrl
 
-if (-not $liveHealthy -or -not $readyHealthy) {
+if (-not $agentHealthy -or -not $liveHealthy -or -not $readyHealthy) {
     Write-Error "Service startup validation failed."
     $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($service) {
         Write-Host "Service status: $($service.Status)"
     }
 
+    $agentService = Get-Service -Name $PrivilegedAgentServiceName -ErrorAction SilentlyContinue
+    if ($agentService) {
+        Write-Host "Privileged agent status: $($agentService.Status)"
+    }
+
     throw "Service did not report healthy within timeout."
 }
 
 $serviceState = Get-Service -Name $ServiceName
+$agentServiceState = Get-Service -Name $PrivilegedAgentServiceName
 $ipv4Addresses = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object {
         $_.IPAddress -ne "127.0.0.1" -and
@@ -336,7 +383,9 @@ $ipv4Addresses = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyConti
 Write-Host ""
 Write-Host "Installation successful."
 Write-Host "Service status: $($serviceState.Status)"
+Write-Host "Privileged agent status: $($agentServiceState.Status)"
 Write-Host "Local URL: http://localhost:$Port"
+Write-Host "Privileged agent URL (local only): http://127.0.0.1:$PrivilegedAgentPort"
 foreach ($ip in $ipv4Addresses) {
     Write-Host "LAN URL example: http://$ip`:$Port"
 }
@@ -355,8 +404,17 @@ if ($testAccountBootstrap) {
 Write-Host "Note: bootstrap users are only created when missing in the existing database."
 Write-Host "Database path: $targetDatabasePath"
 if (Test-Path -LiteralPath $installedTestScript) {
-    Write-Host "Validate service: powershell -ExecutionPolicy Bypass -File `"$installedTestScript`" -ServiceName `"$ServiceName`" -Port $Port"
+    Write-Host "Validate service: powershell -ExecutionPolicy Bypass -File `"$installedTestScript`" -ServiceName `"$ServiceName`" -PrivilegedAgentServiceName `"$PrivilegedAgentServiceName`" -Port $Port -PrivilegedAgentPort $PrivilegedAgentPort"
 }
 if (Test-Path -LiteralPath $installedUninstallScript) {
-    Write-Host "Uninstall service: powershell -ExecutionPolicy Bypass -File `"$installedUninstallScript`" -ServiceName `"$ServiceName`" -InstallDirectory `"$resolvedInstallDirectory`" -DataDirectory `"$resolvedDataDirectory`""
+    Write-Host "Uninstall service: powershell -ExecutionPolicy Bypass -File `"$installedUninstallScript`" -ServiceName `"$ServiceName`" -PrivilegedAgentServiceName `"$PrivilegedAgentServiceName`" -InstallDirectory `"$resolvedInstallDirectory`" -DataDirectory `"$resolvedDataDirectory`""
+}
+
+if ($existingPrivilegedAgentService) {
+    try {
+        Stop-Service -Name $PrivilegedAgentServiceName -Force -ErrorAction Stop
+    }
+    catch {
+        throw "Service '$PrivilegedAgentServiceName' already exists and could not be stopped for upgrade. $_"
+    }
 }

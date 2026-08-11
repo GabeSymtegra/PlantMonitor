@@ -14,6 +14,7 @@ using backend.Services.Line;
 using backend.Services.Authentication;
 using backend.Services.Plc;
 using backend.Services.Production;
+using backend.Services.Host;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
@@ -55,6 +56,20 @@ builder.Services.AddDbContext<PlantMonitorDbContext>(options =>
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<ILocalUserAuthService, LocalUserAuthService>();
 builder.Services.AddScoped<IPasswordHasher<LocalUserEntity>, PasswordHasher<LocalUserEntity>>();
+builder.Services.AddSingleton<IAdminReauthService, AdminReauthService>();
+builder.Services.AddSingleton<IConnectivityDiagnosticsService, ConnectivityDiagnosticsService>();
+builder.Services.AddSingleton<IOtaReleaseService, OtaReleaseService>();
+builder.Services.AddSingleton<IOtaPackageStagingService, OtaPackageStagingService>();
+builder.Services.AddSingleton<IOtaApplyOrchestrationService, OtaApplyOrchestrationService>();
+builder.Services.AddHttpClient<IPrivilegedHostAgentClient, PrivilegedHostAgentClient>((serviceProvider, client) =>
+{
+    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
+    var baseUrl = configuration["App:PrivilegedAgentBaseUrl"]?.Trim();
+    client.BaseAddress = new Uri(string.IsNullOrWhiteSpace(baseUrl)
+        ? "http://127.0.0.1:5075"
+        : baseUrl);
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 builder.Services.AddSingleton<IPlcTagAddressValidator, PlcTagAddressValidator>();
 builder.Services.AddScoped<IPlcProtocolConfigService, EfPlcProtocolConfigService>();
 builder.Services.AddSingleton<IPlcDriver, AllenBradleyPlcDriver>();
@@ -68,6 +83,13 @@ builder.Services.AddSingleton<IProductionReportsService, ProductionReportsServic
 builder.Services.AddScoped<IRecipeToleranceService, RecipeToleranceService>();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
+builder.Services.AddHttpClient("GitHubReleases", client =>
+{
+    client.BaseAddress = new Uri("https://api.github.com");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("PlantMonitor-OTA-Check/1.0");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

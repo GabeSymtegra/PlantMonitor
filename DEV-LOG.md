@@ -21,6 +21,37 @@ Primary operating model:
 - Verified hosted LAN service and credential path with passing script executions after install.
 - Updated deployment and script runbooks to align with publish -> install -> test LAN workflow and current credential behavior.
 - Set frontend default theme mode to light unless a user-saved preference exists.
+- Added admin connectivity diagnostics endpoint (`GET /api/admin/system/connectivity`) and Administration UI panel for factory Wi-Fi client onboarding (recommended URLs, interface visibility, and warnings).
+- Added read-only OTA release check endpoint (`GET /api/admin/system/ota/check`) backed by GitHub Releases probe, plus Administration OTA status card showing current version, latest version, and release link/summary when available.
+- Added backend authorization coverage for connectivity and OTA endpoints (operator forbidden, admin allowed) and validated with targeted backend test run plus frontend production build.
+- Added admin re-authentication endpoint (`POST /api/admin/system/reauth`) issuing short-lived scoped tokens for sensitive OTA operations.
+- Added server-enforced OTA prepare gate (`POST /api/admin/system/ota/prepare-apply`) that requires a valid unexpired `ota-apply` re-auth token.
+- Added Administration OTA re-auth dialog and prepare-apply flow to validate sensitive-action authorization wiring before binary apply/rollback implementation.
+- Updated API docs and release tracking docs, including implementation slice checklist progress in `docs/QA-Matrix.md`.
+- Added OTA package staging endpoint (`POST /api/admin/system/ota/stage`) with SHA-256 computation and optional checksum verification, plus operation status lookup endpoint (`GET /api/admin/system/ota/stage/{operationId}`).
+- Added Administration OTA staging controls (package URL, optional expected SHA-256, re-auth gated stage action, and operation status/details refresh).
+- Added backend tests for OTA stage token enforcement and local-file staging success path with hash verification.
+- Marked Slice 4 complete in implementation checklist and updated API docs for staging contracts.
+- Added OTA apply orchestration endpoint (`POST /api/admin/system/ota/apply`) with staged-package apply simulation, post-apply health check, and automatic rollback behavior when health validation fails.
+- Added OTA apply operation status endpoint (`GET /api/admin/system/ota/apply/{operationId}`) and Administration UI controls for apply execution, status refresh, and forced-failure rollback simulation.
+- Added backend authorization/integration coverage for OTA apply re-auth token enforcement and apply status retrieval.
+- 5 out of 5) slices complete for OTA + configurable Wi-Fi dashboard access implementation.
+- Started Phase 2 privileged-host path with a new companion service scaffold at `plc-service/` (Windows-service-capable local HTTP agent for Wi-Fi operations).
+- Added backend privileged-agent client and new admin Wi-Fi endpoints (`GET /api/admin/system/wifi/status`, `GET /api/admin/system/wifi/scan`, `POST /api/admin/system/wifi/connect`, `POST /api/admin/system/wifi/disconnect`) with `wifi-manage` re-auth token enforcement on connect/disconnect.
+- Extended Administration connectivity panel with Wi-Fi scan/status/connect/disconnect controls and re-auth integration for sensitive network changes.
+- Added backend authorization coverage for Wi-Fi endpoint role and token guard behavior.
+- 6 out of 6) slices complete for OTA + Wi-Fi management foundation implementation.
+- Replaced privileged-agent simulated Wi-Fi behavior with real Windows `netsh` execution for status, scan, connect, and disconnect flows.
+- Added profile-generation path in the privileged agent for SSID/passphrase connect operations and post-command connection-state verification.
+- Hardened backend privileged-agent proxy handling to return `502` ProblemDetails for agent-unreachable and command-failure paths instead of masking failures behind generic success payloads.
+- Extended release publishing and installer build scripts to publish/package both backend and privileged agent artifacts in one deployable payload.
+- Extended LAN install/uninstall/test scripts to manage both services (`PlantMonitor-LAN` + `PlantMonitor-PrivilegedAgent`), enforce backend dependency on privileged agent, and verify agent health during validation.
+- Extended release packaging script to emit SHA-256 checksum and manifest metadata files alongside the release zip.
+- 7 out of 7) slices complete for OTA + Wi-Fi management + dual-service deployment foundation implementation.
+- Fixed Playwright smoke assertion drift by aligning dashboard header checks with current DataGrid column labels (`Line`, `Status`), restoring full E2E smoke pass.
+- Verified full release validation gate set: backend tests, frontend tests, frontend E2E, vulnerability scans, publish/install/test scripts, and package manifest/checksum generation.
+- Executed live OTA forced-health-failure apply flow against installed LAN host service and validated rollback result (`status=rolled_back`, `rolledBack=true`).
+- 8 out of 8) slices complete for OTA + Wi-Fi management + dual-service deployment + release-validation closure.
 
 ## Production Readiness Pass (2026-07-29)
 - Verified the frontend publish/runtime path by serving `frontend/dist` through backend `wwwroot` and checking referenced JS/CSS assets by real HTTP request.
@@ -316,10 +347,10 @@ Status update:
 
 ## Next Implementation Slice
 Immediate next coding slice:
-1. Break up ProductionRuntimeService into smaller units by responsibility to reduce maintenance cost.
-2. Add focused tests around offline transitions, machine-state decoding, and report event persistence.
-3. Expand reports with preset date ranges and optional aggregation views.
-4. Continue replacing remaining outdated assumptions in docs and log files with current runtime behavior.
+1. Run integrated commissioning scenario across Wi-Fi connect/disconnect, OTA stage/apply, and operator/runtime continuity checks as one signed evidence pass.
+2. Add E2E coverage for Administration Wi-Fi actions with explicit error-contract assertions for privileged-agent failure paths.
+3. Expand release artifact evidence capture by storing structured command outputs under `artifacts/release/` for repeatable audit trails.
+4. Continue runtime service decomposition after deployment validation milestone closure.
 
 ---
 Last updated: 2026-08-11

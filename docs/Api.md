@@ -326,7 +326,240 @@ Response codes:
 
 - 200, 400, 401, 500
 
-### 6.6 PLC Protocol Administration (M1)
+### 6.6 System Admin (Factory Access + OTA)
+
+GET /api/admin/system/connectivity
+
+- Admin only.
+- Returns host/interface diagnostics used to onboard tablets, phones, and laptops over factory Wi-Fi.
+
+Response 200 (shape):
+
+{
+	"hostname": "PLANT-HOST-01",
+	"accessMode": "LanCompatible",
+	"serviceBind": "http://0.0.0.0:5050",
+	"allowedHosts": "*",
+	"lanDeploymentEnabled": true,
+	"recommendedUrls": ["http://PLANT-HOST-01:5050", "http://192.168.1.50:5050"],
+	"activeInterfaces": [
+		{
+			"name": "Ethernet",
+			"type": "Ethernet",
+			"ipAddress": "192.168.1.50",
+			"isWireless": false,
+			"isPrivateAddress": true
+		}
+	],
+	"warnings": [],
+	"generatedAtUtc": "2026-08-11T13:40:00Z"
+}
+
+GET /api/admin/system/wifi/status
+
+- Admin only.
+- Returns current Wi-Fi link state from the local privileged host agent.
+
+Response 200 (shape):
+
+{
+	"isConnected": true,
+	"ssid": "Factory-Wifi-A",
+	"bssid": "00:11:22:33:44:55",
+	"signalQualityPercent": 78,
+	"interfaceName": "Wi-Fi",
+	"ipAddress": "192.168.1.250",
+	"message": "Connected.",
+	"errorCode": null,
+	"checkedAtUtc": "2026-08-11T14:15:00Z"
+}
+
+GET /api/admin/system/wifi/scan
+
+- Admin only.
+- Requests available SSID list from the local privileged host agent.
+
+Response 200 (shape):
+
+{
+	"networks": [
+		{
+			"ssid": "Factory-Wifi-A",
+			"signalQualityPercent": 78,
+			"security": "WPA2",
+			"isConnected": true
+		}
+	],
+	"message": "Scan completed.",
+	"errorCode": null,
+	"scannedAtUtc": "2026-08-11T14:15:15Z"
+}
+
+POST /api/admin/system/wifi/connect
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `wifi-manage`.
+- Proxies Wi-Fi connect operation to the privileged host agent.
+- Returns `502` ProblemDetails when the privileged host agent is unavailable or command execution fails.
+
+Request:
+
+{
+	"ssid": "Factory-Wifi-A",
+	"passphrase": "string",
+	"reauthToken": "string"
+}
+
+POST /api/admin/system/wifi/disconnect
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `wifi-manage`.
+- Proxies Wi-Fi disconnect operation to the privileged host agent.
+- Returns `502` ProblemDetails when the privileged host agent is unavailable or command execution fails.
+
+Request:
+
+{
+	"reauthToken": "string"
+}
+
+GET /api/admin/system/ota/check
+
+- Admin only.
+- Read-only release check against configured GitHub repository.
+
+Response 200 (shape):
+
+{
+	"status": "ok",
+	"currentVersion": "0.1.0-alpha",
+	"latestVersion": "0.1.1-alpha",
+	"hasUpdate": true,
+	"releaseUrl": "https://github.com/GabeSymtegra/PlantMonitor/releases/tag/v0.1.1-alpha",
+	"publishedAtUtc": "2026-08-10T12:00:00Z",
+	"summary": "Release highlights...",
+	"message": "A newer release is available.",
+	"checkedAtUtc": "2026-08-11T13:41:00Z"
+}
+
+POST /api/admin/system/reauth
+
+- Admin only.
+- Re-confirms admin password and issues a short-lived token for sensitive OTA actions.
+
+Request:
+
+{
+	"password": "string",
+	"scope": "ota-apply"
+}
+
+Response 200:
+
+{
+	"scope": "ota-apply",
+	"token": "string",
+	"expiresAtUtc": "2026-08-11T13:46:00Z",
+	"verifiedAtUtc": "2026-08-11T13:41:00Z"
+}
+
+POST /api/admin/system/ota/prepare-apply
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `ota-apply`.
+- Validates and records authorization intent for OTA apply execution.
+
+Request:
+
+{
+	"targetVersion": "0.1.1-alpha",
+	"reauthToken": "string"
+}
+
+Response 200:
+
+{
+	"status": "ready_for_apply",
+	"targetVersion": "0.1.1-alpha",
+	"message": "Re-authentication verified. OTA apply orchestration is authorized.",
+	"preparedAtUtc": "2026-08-11T13:41:20Z"
+}
+
+POST /api/admin/system/ota/stage
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `ota-stage`.
+- Downloads/copies package artifact into local OTA staging directory and computes SHA-256.
+
+Request:
+
+{
+	"targetVersion": "0.1.1-alpha",
+	"packageUrl": "https://example.com/PlantMonitor-0.1.1-alpha.zip",
+	"expectedSha256": "optional-hex-digest",
+	"reauthToken": "string"
+}
+
+Response 200:
+
+{
+	"operationId": "4c118c6a4ae04df28fdb0ddfd93f5d3f",
+	"status": "staged",
+	"targetVersion": "0.1.1-alpha",
+	"packagePath": "C:\\ProgramData\\PlantMonitor\\OtaStaging\\0.1.1-alpha\\20260811140110-PlantMonitor-0.1.1-alpha.zip",
+	"packageSizeBytes": 12500342,
+	"sha256": "6c4e...",
+	"isChecksumMatch": true,
+	"message": "Package downloaded and staged successfully.",
+	"startedAtUtc": "2026-08-11T14:01:10Z",
+	"completedAtUtc": "2026-08-11T14:01:12Z"
+}
+
+GET /api/admin/system/ota/stage/{operationId}
+
+- Admin only.
+- Returns latest known staging operation status.
+
+POST /api/admin/system/ota/apply
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `ota-apply`.
+- Applies a previously staged package, runs a health check, and auto-rolls back if health fails.
+
+Request:
+
+{
+	"stageOperationId": "4c118c6a4ae04df28fdb0ddfd93f5d3f",
+	"reauthToken": "string",
+	"forceHealthFailure": false
+}
+
+Response 200:
+
+{
+	"operationId": "b178b4f48fc34d34a5803d6e8fd6f9d1",
+	"status": "applied",
+	"targetVersion": "0.1.1-alpha",
+	"previousVersion": "0.1.0-alpha",
+	"currentVersion": "0.1.1-alpha",
+	"appliedPackagePath": "C:\\ProgramData\\PlantMonitor\\OtaApplied\\0.1.1-alpha\\PlantMonitor-0.1.1-alpha.zip",
+	"healthCheckStatus": "passed",
+	"rolledBack": false,
+	"message": "OTA apply completed and health check passed.",
+	"startedAtUtc": "2026-08-11T14:05:00Z",
+	"completedAtUtc": "2026-08-11T14:05:04Z"
+}
+
+GET /api/admin/system/ota/apply/{operationId}
+
+- Admin only.
+- Returns latest known apply/rollback operation status.
+
+Response codes for system admin endpoints:
+
+- 200, 400, 401, 403, 500, 502
+
+### 6.7 PLC Protocol Administration (M1)
 
 All endpoints in this section are Admin only.
 

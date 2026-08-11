@@ -40,6 +40,7 @@ Services:
 
 - frontend static build served by backend static files + SPA fallback
 - backend API process
+- privileged host agent process for Wi-Fi and host-level operations
 - sqlite database file in ProgramData
 
 Network assumptions:
@@ -247,6 +248,9 @@ and uses development-style `test` / `test` credentials.
 This creates an admin account with username `admin` using the provided
 bootstrap admin password.
 
+The installer script also installs and starts the local privileged agent
+service used by backend Wi-Fi management APIs.
+
 4. Optional: enable convenience test account for remote operator sign-in checks:
 
 ```powershell
@@ -266,6 +270,8 @@ bootstrap admin password.
 ```
 
 This check succeeds only when the convenience account is enabled.
+
+Validation now also checks privileged-agent health and service status.
 
 7. Open the printed `http://<host-ip>:5050` URL from other PCs on the same
 wired network.

@@ -22,6 +22,10 @@ This document defines release gates for shipping PlantMonitor to a server-hosted
 5. Release checklist in docs/QA-Matrix.md marked complete.
 6. Server deployment runbook steps validated on a staging-like host.
 
+## Implementation Slice Tracking
+- Track modernization progress in `docs/QA-Matrix.md` under `Implementation Slice Checklist`.
+- Update slice status in the same pull request as code changes so implementation and documentation stay in sync.
+
 ## CI Required Checks Mapping
 - Workflow: .github/workflows/ci.yml
 - Job: build-test

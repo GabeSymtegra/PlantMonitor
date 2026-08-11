@@ -1,5 +1,8 @@
 using backend.DTOs.Plc;
+using backend.DTOs.System;
 using backend.Data;
+using backend.Interfaces;
+using backend.Interfaces.Authentication;
 using backend.Interfaces.Plc;
 using backend.Interfaces.Production;
 using backend.Models.Plc;
@@ -20,17 +23,38 @@ public sealed class PlcProtocolAdminController : ControllerBase
 {
     private readonly IPlcProtocolConfigService _protocolConfigService;
     private readonly IPlcConnectionService _connectionService;
+    private readonly ILocalUserAuthService _localUserAuthService;
+    private readonly IAdminReauthService _adminReauthService;
+    private readonly IConnectivityDiagnosticsService _connectivityDiagnosticsService;
+    private readonly IPrivilegedHostAgentClient _privilegedHostAgentClient;
+    private readonly IOtaReleaseService _otaReleaseService;
+    private readonly IOtaPackageStagingService _otaPackageStagingService;
+    private readonly IOtaApplyOrchestrationService _otaApplyOrchestrationService;
     private readonly PlantMonitorDbContext _dbContext;
     private readonly IProductionRuntimeService _runtimeService;
 
     public PlcProtocolAdminController(
         IPlcProtocolConfigService protocolConfigService,
         IPlcConnectionService connectionService,
+        ILocalUserAuthService localUserAuthService,
+        IAdminReauthService adminReauthService,
+        IConnectivityDiagnosticsService connectivityDiagnosticsService,
+        IPrivilegedHostAgentClient privilegedHostAgentClient,
+        IOtaReleaseService otaReleaseService,
+        IOtaPackageStagingService otaPackageStagingService,
+        IOtaApplyOrchestrationService otaApplyOrchestrationService,
         PlantMonitorDbContext dbContext,
         IProductionRuntimeService runtimeService)
     {
         _protocolConfigService = protocolConfigService;
         _connectionService = connectionService;
+        _localUserAuthService = localUserAuthService;
+        _adminReauthService = adminReauthService;
+        _connectivityDiagnosticsService = connectivityDiagnosticsService;
+        _privilegedHostAgentClient = privilegedHostAgentClient;
+        _otaReleaseService = otaReleaseService;
+        _otaPackageStagingService = otaPackageStagingService;
+        _otaApplyOrchestrationService = otaApplyOrchestrationService;
         _dbContext = dbContext;
         _runtimeService = runtimeService;
     }
@@ -281,6 +305,320 @@ public sealed class PlcProtocolAdminController : ControllerBase
 
         var result = await driver!.ReadTagsAsync(request.IpAddress.Trim(), request.Options, request.TagNames, cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("system/connectivity")]
+    public ActionResult<HostConnectivitySnapshotDto> GetConnectivitySnapshot()
+    {
+        var requestScheme = string.Equals(Request.Scheme, "https", StringComparison.OrdinalIgnoreCase)
+            ? "https"
+            : "http";
+        var requestPort = Request.Host.Port ?? (requestScheme == "https" ? 443 : 80);
+
+        var snapshot = _connectivityDiagnosticsService.BuildSnapshot(requestScheme, requestPort);
+        return Ok(snapshot);
+    }
+
+    [HttpGet("system/ota/check")]
+    public async Task<ActionResult<OtaReleaseCheckDto>> CheckOtaRelease(CancellationToken cancellationToken)
+    {
+        var result = await _otaReleaseService.CheckForUpdateAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("system/wifi/status")]
+    public async Task<ActionResult<WifiStatusDto>> GetWifiStatus(CancellationToken cancellationToken)
+    {
+        var status = await _privilegedHostAgentClient.GetWifiStatusAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(status.ErrorCode))
+        {
+            return GatewayProblem(status.Message ?? "Wi-Fi status request failed through privileged host agent.", status.ErrorCode);
+        }
+
+        return Ok(status);
+    }
+
+    [HttpGet("system/wifi/scan")]
+    public async Task<ActionResult<WifiScanResponseDto>> ScanWifiNetworks(CancellationToken cancellationToken)
+    {
+        var status = await _privilegedHostAgentClient.ScanWifiAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(status.ErrorCode))
+        {
+            return GatewayProblem(status.Message ?? "Wi-Fi scan request failed through privileged host agent.", status.ErrorCode);
+        }
+
+        return Ok(status);
+    }
+
+    [HttpPost("system/wifi/connect")]
+    public async Task<ActionResult<WifiActionResponseDto>> ConnectWifi(
+        [FromBody] WifiConnectRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var username = User.Identity?.Name;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Ssid))
+        {
+            return BadRequestProblem("Wi-Fi SSID is required.", "missing_wifi_ssid");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReauthToken))
+        {
+            return ForbiddenProblem("A valid re-auth token is required before Wi-Fi connect.", "reauth_required");
+        }
+
+        var isAuthorized = _adminReauthService.ValidateToken(
+            username,
+            scope: "wifi-manage",
+            token: request.ReauthToken,
+            consume: true);
+
+        if (!isAuthorized)
+        {
+            return ForbiddenProblem("The re-auth token is invalid or expired for Wi-Fi connect.", "reauth_invalid_or_expired");
+        }
+
+        var result = await _privilegedHostAgentClient.ConnectWifiAsync(
+            request.Ssid.Trim(),
+            request.Passphrase.Trim(),
+            cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(result.ErrorCode) || string.Equals(result.Status, "failed", StringComparison.OrdinalIgnoreCase) || string.Equals(result.Status, "unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return GatewayProblem(result.Message, result.ErrorCode ?? "wifi_connect_failed");
+        }
+
+        return Ok(result);
+    }
+
+    [HttpPost("system/wifi/disconnect")]
+    public async Task<ActionResult<WifiActionResponseDto>> DisconnectWifi(
+        [FromBody] WifiDisconnectRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var username = User.Identity?.Name;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReauthToken))
+        {
+            return ForbiddenProblem("A valid re-auth token is required before Wi-Fi disconnect.", "reauth_required");
+        }
+
+        var isAuthorized = _adminReauthService.ValidateToken(
+            username,
+            scope: "wifi-manage",
+            token: request.ReauthToken,
+            consume: true);
+
+        if (!isAuthorized)
+        {
+            return ForbiddenProblem("The re-auth token is invalid or expired for Wi-Fi disconnect.", "reauth_invalid_or_expired");
+        }
+
+        var result = await _privilegedHostAgentClient.DisconnectWifiAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(result.ErrorCode) || string.Equals(result.Status, "failed", StringComparison.OrdinalIgnoreCase) || string.Equals(result.Status, "unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return GatewayProblem(result.Message, result.ErrorCode ?? "wifi_disconnect_failed");
+        }
+
+        return Ok(result);
+    }
+
+    [HttpPost("system/reauth")]
+    public async Task<ActionResult<AdminReauthResponseDto>> ReauthenticateAdmin(
+        [FromBody] AdminReauthRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var username = User.Identity?.Name;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Password))
+        {
+            return BadRequestProblem("Password is required.", "missing_password");
+        }
+
+        var scope = string.IsNullOrWhiteSpace(request.Scope)
+            ? "ota-apply"
+            : request.Scope.Trim();
+
+        var isValid = await _localUserAuthService.VerifyPasswordAsync(username, request.Password, cancellationToken);
+        if (!isValid)
+        {
+            return ForbiddenProblem("Password re-confirmation failed.", "invalid_reauth_credentials");
+        }
+
+        var lifetime = TimeSpan.FromMinutes(5);
+        var token = _adminReauthService.IssueToken(username, scope, lifetime);
+        var now = DateTime.UtcNow;
+
+        return Ok(new AdminReauthResponseDto
+        {
+            Scope = scope,
+            Token = token,
+            VerifiedAtUtc = now,
+            ExpiresAtUtc = now.Add(lifetime),
+        });
+    }
+
+    [HttpPost("system/ota/prepare-apply")]
+    public ActionResult<OtaPrepareApplyResponseDto> PrepareOtaApply(
+        [FromBody] OtaPrepareApplyRequestDto request)
+    {
+        var username = User.Identity?.Name;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TargetVersion))
+        {
+            return BadRequestProblem("Target version is required.", "missing_target_version");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReauthToken))
+        {
+            return ForbiddenProblem("A valid re-auth token is required before OTA apply actions.", "reauth_required");
+        }
+
+        var isAuthorized = _adminReauthService.ValidateToken(
+            username,
+            scope: "ota-apply",
+            token: request.ReauthToken,
+            consume: true);
+
+        if (!isAuthorized)
+        {
+            return ForbiddenProblem("The re-auth token is invalid or expired.", "reauth_invalid_or_expired");
+        }
+
+        return Ok(new OtaPrepareApplyResponseDto
+        {
+            Status = "ready_for_apply",
+            TargetVersion = request.TargetVersion.Trim(),
+            Message = "Re-authentication verified. OTA apply orchestration is authorized for the next slice.",
+            PreparedAtUtc = DateTime.UtcNow,
+        });
+    }
+
+    [HttpPost("system/ota/stage")]
+    public async Task<ActionResult<OtaStageOperationStatusDto>> StageOtaPackage(
+        [FromBody] OtaStagePackageRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var username = User.Identity?.Name;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TargetVersion))
+        {
+            return BadRequestProblem("Target version is required.", "missing_target_version");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.PackageUrl))
+        {
+            return BadRequestProblem("Package URL is required.", "missing_package_url");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReauthToken))
+        {
+            return ForbiddenProblem("A valid re-auth token is required before staging OTA packages.", "reauth_required");
+        }
+
+        var isAuthorized = _adminReauthService.ValidateToken(
+            username,
+            scope: "ota-stage",
+            token: request.ReauthToken,
+            consume: true);
+
+        if (!isAuthorized)
+        {
+            return ForbiddenProblem("The re-auth token is invalid or expired for OTA staging.", "reauth_invalid_or_expired");
+        }
+
+        var staged = await _otaPackageStagingService.StagePackageAsync(request, cancellationToken);
+        return Ok(staged);
+    }
+
+    [HttpGet("system/ota/stage/{operationId}")]
+    public ActionResult<OtaStageOperationStatusDto> GetOtaStageStatus(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+        {
+            return BadRequestProblem("Operation id is required.", "missing_operation_id");
+        }
+
+        var status = _otaPackageStagingService.GetStatus(operationId);
+        if (status is null)
+        {
+            return NotFoundProblem("Staging operation was not found.", "staging_operation_not_found");
+        }
+
+        return Ok(status);
+    }
+
+    [HttpPost("system/ota/apply")]
+    public async Task<ActionResult<OtaApplyOperationStatusDto>> ApplyOtaPackage(
+        [FromBody] OtaApplyRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var username = User.Identity?.Name;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.StageOperationId))
+        {
+            return BadRequestProblem("Stage operation id is required.", "missing_stage_operation_id");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReauthToken))
+        {
+            return ForbiddenProblem("A valid re-auth token is required before OTA apply.", "reauth_required");
+        }
+
+        var isAuthorized = _adminReauthService.ValidateToken(
+            username,
+            scope: "ota-apply",
+            token: request.ReauthToken,
+            consume: true);
+
+        if (!isAuthorized)
+        {
+            return ForbiddenProblem("The re-auth token is invalid or expired for OTA apply.", "reauth_invalid_or_expired");
+        }
+
+        var applied = await _otaApplyOrchestrationService.ApplyAsync(request, cancellationToken);
+        return Ok(applied);
+    }
+
+    [HttpGet("system/ota/apply/{operationId}")]
+    public ActionResult<OtaApplyOperationStatusDto> GetOtaApplyStatus(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+        {
+            return BadRequestProblem("Operation id is required.", "missing_operation_id");
+        }
+
+        var status = _otaApplyOrchestrationService.GetStatus(operationId);
+        if (status is null)
+        {
+            return NotFoundProblem("Apply operation was not found.", "apply_operation_not_found");
+        }
+
+        return Ok(status);
     }
 
     [HttpGet("lines/{lineId:int}/commissioning-check")]
@@ -828,6 +1166,32 @@ public sealed class PlcProtocolAdminController : ControllerBase
             detail: detail,
             statusCode: StatusCodes.Status409Conflict,
             type: "https://httpstatuses.com/409",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+    }
+
+    private ActionResult ForbiddenProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Access denied.",
+            detail: detail,
+            statusCode: StatusCodes.Status403Forbidden,
+            type: "https://httpstatuses.com/403",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+    }
+
+    private ActionResult GatewayProblem(string detail, string code)
+    {
+        return Problem(
+            title: "Upstream service unavailable.",
+            detail: detail,
+            statusCode: StatusCodes.Status502BadGateway,
+            type: "https://httpstatuses.com/502",
             extensions: new Dictionary<string, object?>
             {
                 ["code"] = code,

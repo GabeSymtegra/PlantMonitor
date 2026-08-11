@@ -12,8 +12,8 @@ This folder contains local development scripts.
 - `db-backup.ps1`: create timestamped SQLite backups with retention cleanup
 - `db-restore.ps1`: restore SQLite database from a selected or latest backup
 - `build-installer.ps1`: build backend release and compile Windows installer using Inno Setup
-- `package-release.ps1`: archive published release binaries into a timestamped zip package
-- `publish-host-release.ps1`: publish the backend-hosted frontend release without building the installer
+- `package-release.ps1`: archive published release binaries into a timestamped zip package and emit SHA-256 + manifest files
+- `publish-host-release.ps1`: publish backend host and privileged agent release payloads without building the installer
 - `test-host-release.ps1`: run smoke verification against the published backend-hosted release
 - `install-lan-service.ps1`: install the published backend-hosted app as a Windows service for same-network access
 - `test-lan-service.ps1`: validate the installed LAN Windows service and hosted SPA/API endpoints
@@ -121,7 +121,9 @@ Optional convenience account for remote operator testing (username `test`, passw
 Defaults:
 
 - service name: `PlantMonitor-LAN`
+- privileged agent service name: `PlantMonitor-PrivilegedAgent`
 - bind URL: `http://0.0.0.0:5050`
+- privileged agent bind URL (local only): `http://127.0.0.1:5075`
 - install directory: `C:\Program Files\PlantMonitor`
 - data directory: `C:\ProgramData\PlantMonitor`
 - LAN deployment mode enabled via `App__IsLanDeployment=true`
@@ -131,7 +133,7 @@ For first production-style LAN installs, provide both:
 - `BootstrapAdminPassword` for the initial administrator account
 - `BootstrapViewerPassword` for the shared Viewer account used by status-board displays
 
-The script verifies `/health/live` and `/health/ready`, opens the firewall on the chosen port for private profiles, and prints example LAN URLs for other PCs on the same wired network.
+The script installs and starts both Windows services (privileged agent first, backend second), verifies agent and backend health endpoints, opens the firewall on the backend port for private profiles, and prints example LAN URLs for other PCs on the same wired network.
 
 Validate the installed LAN service:
 
@@ -173,6 +175,11 @@ Defaults:
 
 - runtime identifier: `win-x64`
 - self-contained: `true`
+
+Publish output includes:
+
+- backend host binaries in `artifacts/release/backend`
+- privileged agent binaries in `artifacts/release/backend/privileged-agent`
 
 Smoke-test the published release locally in LAN mode:
 
