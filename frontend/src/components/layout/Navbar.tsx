@@ -13,7 +13,11 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import LoginIcon from "@mui/icons-material/Login";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LightModeIcon from "@mui/icons-material/LightMode";
-import PrecisionManufacturingIcon from "@mui/icons-material/PrecisionManufacturing";
+
+import logo from "../../assets/logo.png";
+
+
+
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
@@ -150,7 +154,17 @@ export default function Navbar() {
             minWidth: 0,
           }}
         >
-          <PrecisionManufacturingIcon sx={{ flexShrink: 0 }} />
+          <Box
+            component="img"
+            src={logo}
+            alt="Logo"
+            sx={{
+              height: 32,
+              width: 32,
+              flexShrink: 0,
+              objectFit: "contain",
+            }}
+          />
 
           <Typography
             variant="h6"
