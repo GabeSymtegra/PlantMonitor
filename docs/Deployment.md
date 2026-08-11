@@ -62,14 +62,16 @@ Required environment variables:
 - Jwt__SigningKey
 - App__CorsOrigins
 
-Required first production startup variable:
+Seeded credentials for first startup (set by `install-lan-service.ps1`):
 
-- Auth__BootstrapAdminPassword
+- `admin` / `test`
+- `operator` / `test`
+- `viewer` / `test`
 
 Recommended values by environment:
 
 - Local: ASPNETCORE_ENVIRONMENT=Development
-- Production: configure Jwt and Auth bootstrap secret, and set explicit App__CorsOrigins entries.
+- Production: configure Jwt signing key and set explicit App__CorsOrigins entries.
 
 ### 3.2 Frontend Settings
 
@@ -218,9 +220,9 @@ SignalR hub from the same IP address and port.
 
 Recommended credential plan for first LAN installation:
 
-- use the bootstrap admin account (username `admin` with supplied password) for management and configuration
-- use the shared Viewer account (username `viewer` with supplied password) for status-board screens on other PCs
-- optionally enable the test/Operator convenience account via `-EnableTestAccount` for remote credential validation testing
+- use admin (`admin` / `test`) for management and configuration
+- use viewer (`viewer` / `test`) for status-board screens on other PCs
+- use operator (`operator` / `test`) for non-admin operational checks
 
 Recommended operator flow:
 
@@ -242,34 +244,27 @@ and uses development-style `test` / `test` credentials.
 3. Install the published release as the LAN host Windows service:
 
 ```powershell
-.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>'
 ```
 
-This creates an admin account with username `admin` using the provided
-bootstrap admin password.
+This seeds the default LAN credentials: admin/operator/viewer with password `test` when the users are missing in the database.
 
 The installer script also installs and starts the local privileged agent
 service used by backend Wi-Fi management APIs.
 
-4. Optional: enable convenience test account for remote operator sign-in checks:
-
-```powershell
-.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>' -EnableTestAccount
-```
-
-5. Validate the installed service:
+4. Validate the installed service:
 
 ```powershell
 .\scripts\test-lan-service.ps1
 ```
 
-6. Optional: validate sign-in/session with convenience account:
+5. Optional: validate sign-in/session checks:
 
 ```powershell
 .\scripts\test-lan-service.ps1 -Username test -Password test
 ```
 
-This check succeeds only when the convenience account is enabled.
+Use one of the seeded accounts, for example `operator` / `test`.
 
 Validation now also checks privileged-agent health and service status.
 

@@ -32,6 +32,13 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
     public async Task EnsureBootstrapUsersAsync(CancellationToken cancellationToken = default)
     {
         var isDevelopmentLikeEnvironment = _environment.IsDevelopment() || string.Equals(_environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+        var isLanDeployment = _configuration.GetValue<bool>("App:IsLanDeployment");
+
+        if (isLanDeployment)
+        {
+            await EnsureLanTestUsersAsync(cancellationToken);
+            return;
+        }
 
         var seedUsers = new List<(string Username, string Password, string Role, bool MustChangePassword)>();
         var existingUsers = await _dbContext.LocalUsers
@@ -109,6 +116,64 @@ public sealed class LocalUserAuthService : ILocalUserAuthService
         {
             // Parallel startup races may attempt to seed the same bootstrap users.
             // If another host inserted first, uniqueness violations are safe to ignore.
+        }
+    }
+
+    private async Task EnsureLanTestUsersAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var existingUsers = await _dbContext.LocalUsers.ToListAsync(cancellationToken);
+        var requiredUsers = new[]
+        {
+            (Username: "admin", Role: "Admin"),
+            (Username: "operator", Role: "Operator"),
+            (Username: "viewer", Role: "Viewer"),
+        };
+
+        foreach (var required in requiredUsers)
+        {
+            var existing = existingUsers.FirstOrDefault(x => x.Username.Equals(required.Username, StringComparison.OrdinalIgnoreCase));
+
+            if (existing is null)
+            {
+                var created = new LocalUserEntity
+                {
+                    Username = required.Username,
+                    Role = required.Role,
+                    MustChangePassword = false,
+                    IsDisabled = false,
+                    FailedLoginCount = 0,
+                    LockoutEndUtc = null,
+                    CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                };
+                created.PasswordHash = _passwordHasher.HashPassword(created, "test");
+                _dbContext.LocalUsers.Add(created);
+                continue;
+            }
+
+            existing.Role = required.Role;
+            existing.MustChangePassword = false;
+            existing.IsDisabled = false;
+            existing.FailedLoginCount = 0;
+            existing.LockoutEndUtc = null;
+            existing.PasswordHash = _passwordHasher.HashPassword(existing, "test");
+            existing.UpdatedAtUtc = now;
+        }
+
+        if (!_dbContext.ChangeTracker.HasChanges())
+        {
+            return;
+        }
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is SqliteException sqlite && sqlite.SqliteErrorCode == 19)
+        {
+            // Parallel startup races may attempt to seed/update the same LAN users.
+            // If another host committed first, uniqueness violations are safe to ignore.
         }
     }
 

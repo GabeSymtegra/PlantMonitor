@@ -134,13 +134,7 @@ credentials configured during `install-lan-service.ps1`.
 Install the LAN Windows service:
 
 ```powershell
-.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
-```
-
-Optional convenience account for remote sign-in testing:
-
-```powershell
-.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>' -EnableTestAccount
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>'
 ```
 
 Validate the installed service:

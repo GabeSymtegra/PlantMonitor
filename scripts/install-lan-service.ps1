@@ -12,13 +12,7 @@ param(
     [string]$ExistingDatabasePath,
     [string]$EnvironmentName = "Production",
     [string]$AllowedHosts = "*",
-    [string]$JwtSigningKey,
-    [string]$BootstrapAdminPassword,
-    [string]$BootstrapViewerPassword,
-    [string]$BootstrapViewerUsername = "viewer",
-    [switch]$EnableTestAccount,
-    [string]$TestAccountUsername = "test",
-    [string]$TestAccountPassword
+    [string]$JwtSigningKey
 )
 
 Set-StrictMode -Version Latest
@@ -143,33 +137,6 @@ function New-GeneratedJwtSigningKey {
     return [Convert]::ToBase64String($bytes)
 }
 
-function Resolve-TestAccountBootstrap {
-    param(
-        [switch]$Enable,
-        [string]$Username,
-        [string]$Password
-    )
-
-    $requested = $Enable.IsPresent -or -not [string]::IsNullOrWhiteSpace($Password)
-    if (-not $requested) {
-        return $null
-    }
-
-    if ([string]::IsNullOrWhiteSpace($Username)) {
-        throw "TestAccountUsername must be provided when EnableTestAccount is enabled."
-    }
-
-    if ([string]::IsNullOrWhiteSpace($Password)) {
-        $Password = "test"
-    }
-
-    return [pscustomobject]@{
-        Username = $Username.Trim()
-        Password = $Password
-        UsesDefaultPassword = $Password -eq "test"
-    }
-}
-
 Assert-Administrator
 Assert-PortValid -Candidate $Port
 Assert-PortValid -Candidate $PrivilegedAgentPort
@@ -205,8 +172,6 @@ if ([string]::IsNullOrWhiteSpace($JwtSigningKey)) {
     $JwtSigningKey = New-GeneratedJwtSigningKey
 }
 
-$testAccountBootstrap = Resolve-TestAccountBootstrap -Enable:$EnableTestAccount -Username $TestAccountUsername -Password $TestAccountPassword
-
 $dataSubdirectories = @(
     (Join-Path $resolvedDataDirectory "Data"),
     (Join-Path $resolvedDataDirectory "Logs"),
@@ -229,6 +194,15 @@ if ($existingService) {
     }
     catch {
         throw "Service '$ServiceName' already exists and could not be stopped for upgrade. $_"
+    }
+}
+
+if ($existingPrivilegedAgentService) {
+    try {
+        Stop-Service -Name $PrivilegedAgentServiceName -Force -ErrorAction Stop
+    }
+    catch {
+        throw "Service '$PrivilegedAgentServiceName' already exists and could not be stopped for upgrade. $_"
     }
 }
 
@@ -316,19 +290,11 @@ if (-not [string]::IsNullOrWhiteSpace($JwtSigningKey)) {
     $serviceEnvironment += "Jwt__SigningKey=$JwtSigningKey"
 }
 
-if (-not [string]::IsNullOrWhiteSpace($BootstrapAdminPassword)) {
-    $serviceEnvironment += "Auth__BootstrapAdminPassword=$BootstrapAdminPassword"
-}
-
-if (-not [string]::IsNullOrWhiteSpace($BootstrapViewerPassword)) {
-    $serviceEnvironment += "Auth__BootstrapViewerPassword=$BootstrapViewerPassword"
-    $serviceEnvironment += "Auth__BootstrapViewerUsername=$BootstrapViewerUsername"
-}
-
-if ($testAccountBootstrap) {
-    $serviceEnvironment += "Auth__BootstrapOperatorPassword=$($testAccountBootstrap.Password)"
-    $serviceEnvironment += "Auth__BootstrapOperatorUsername=$($testAccountBootstrap.Username)"
-}
+$serviceEnvironment += "Auth__BootstrapAdminPassword=test"
+$serviceEnvironment += "Auth__BootstrapViewerPassword=test"
+$serviceEnvironment += "Auth__BootstrapViewerUsername=viewer"
+$serviceEnvironment += "Auth__BootstrapOperatorPassword=test"
+$serviceEnvironment += "Auth__BootstrapOperatorUsername=operator"
 
 Set-ServiceEnvironment -Name $ServiceName -EnvironmentRows $serviceEnvironment
 
@@ -391,16 +357,9 @@ foreach ($ip in $ipv4Addresses) {
 }
 Write-Host ""
 Write-Host "Expected login users after install:"
-Write-Host "- Admin: admin (uses BootstrapAdminPassword provided at install)"
-if (-not [string]::IsNullOrWhiteSpace($BootstrapViewerPassword)) {
-    Write-Host "- Viewer: $BootstrapViewerUsername (uses BootstrapViewerPassword provided at install)"
-}
-if ($testAccountBootstrap) {
-    Write-Host "- Test/Operator: $($testAccountBootstrap.Username)"
-    if ($testAccountBootstrap.UsesDefaultPassword) {
-        Write-Host "  Default password in use: test"
-    }
-}
+Write-Host "- Admin: admin / test"
+Write-Host "- Operator: operator / test"
+Write-Host "- Viewer: viewer / test"
 Write-Host "Note: bootstrap users are only created when missing in the existing database."
 Write-Host "Database path: $targetDatabasePath"
 if (Test-Path -LiteralPath $installedTestScript) {
@@ -410,11 +369,3 @@ if (Test-Path -LiteralPath $installedUninstallScript) {
     Write-Host "Uninstall service: powershell -ExecutionPolicy Bypass -File `"$installedUninstallScript`" -ServiceName `"$ServiceName`" -PrivilegedAgentServiceName `"$PrivilegedAgentServiceName`" -InstallDirectory `"$resolvedInstallDirectory`" -DataDirectory `"$resolvedDataDirectory`""
 }
 
-if ($existingPrivilegedAgentService) {
-    try {
-        Stop-Service -Name $PrivilegedAgentServiceName -Force -ErrorAction Stop
-    }
-    catch {
-        throw "Service '$PrivilegedAgentServiceName' already exists and could not be stopped for upgrade. $_"
-    }
-}

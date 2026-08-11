@@ -101,21 +101,15 @@ Example:
 
 ```powershell
 dotnet publish backend/backend.csproj -c Release -o artifacts/release/backend
-.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>'
 ```
 
 Canonical script-based flow:
 
 ```powershell
 .\scripts\publish-host-release.ps1
-.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>'
 .\scripts\test-lan-service.ps1
-```
-
-Optional convenience account for remote operator testing (username `test`, password defaults to `test`):
-
-```powershell
-.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>' -EnableTestAccount
 ```
 
 Defaults:
@@ -128,10 +122,11 @@ Defaults:
 - data directory: `C:\ProgramData\PlantMonitor`
 - LAN deployment mode enabled via `App__IsLanDeployment=true`
 
-For first production-style LAN installs, provide both:
+Current seeded credentials for first LAN installs:
 
-- `BootstrapAdminPassword` for the initial administrator account
-- `BootstrapViewerPassword` for the shared Viewer account used by status-board displays
+- Admin: `admin` / `test`
+- Operator: `operator` / `test`
+- Viewer: `viewer` / `test`
 
 The script installs and starts both Windows services (privileged agent first, backend second), verifies agent and backend health endpoints, opens the firewall on the backend port for private profiles, and prints example LAN URLs for other PCs on the same wired network.
 

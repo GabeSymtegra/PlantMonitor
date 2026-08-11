@@ -52,6 +52,14 @@ Primary operating model:
 - Verified full release validation gate set: backend tests, frontend tests, frontend E2E, vulnerability scans, publish/install/test scripts, and package manifest/checksum generation.
 - Executed live OTA forced-health-failure apply flow against installed LAN host service and validated rollback result (`status=rolled_back`, `rolledBack=true`).
 - 8 out of 8) slices complete for OTA + Wi-Fi management + dual-service deployment + release-validation closure.
+- Executed integrated commissioning evidence scenario in one scripted pass: admin login (`200`), operator login (`200`), operator admin-path denial (`403`), admin Wi-Fi status/scan checks (`200/200`, `scanCount=2`), OTA stage (`staged`), and forced-failure apply rollback (`rolled_back`, `rolledBack=true`).
+- Verified continuity after rollback in the same scenario pass (`/health/live=200`, `/health/ready=200`, `/api/dashboard=200`).
+- 9 out of 9) slices complete for OTA + Wi-Fi management + dual-service deployment + integrated commissioning evidence closure.
+- Moved all host network configuration surfaces from Administration to Settings, including connectivity diagnostics and Wi-Fi status/scan/connect/disconnect controls.
+- Kept Wi-Fi connect/disconnect actions gated by admin password re-authentication while leaving OTA flow in Administration.
+- Simplified LAN bootstrap account behavior so seeded credentials are fixed to `admin`/`test`, `operator`/`test`, and `viewer`/`test`.
+- Updated install/deployment runbook examples to remove bootstrap password arguments and `-EnableTestAccount` dependency.
+- 10 out of 10) slices complete for OTA + Wi-Fi management + dual-service deployment + network-settings relocation + fixed-seed credentials.
 
 ## Production Readiness Pass (2026-07-29)
 - Verified the frontend publish/runtime path by serving `frontend/dist` through backend `wwwroot` and checking referenced JS/CSS assets by real HTTP request.

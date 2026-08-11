@@ -12,9 +12,9 @@ PlantMonitor helps teams monitor production lines, review live status, inspect l
 
 Credentials available in a hosted LAN deployment:
 
-- Admin account (username `admin`) is created from the `BootstrapAdminPassword` provided during `install-lan-service.ps1`.
-- Viewer account (username `viewer`) is created from `BootstrapViewerPassword` during `install-lan-service.ps1`.
-- Optional test/Operator convenience account (username `test`, password defaults to `test`) is available only when `-EnableTestAccount` is used during installation.
+- Admin: `admin` / `test`
+- Operator: `operator` / `test`
+- Viewer: `viewer` / `test`
 
 Local development accounts (not used by LAN-hosted service deployment):
 
@@ -68,12 +68,14 @@ The Reports page provides historical visibility.
 
 ## Settings
 
-Settings control display preferences such as color mode, monitor name, and text readability.
+Settings control display preferences and host network configuration.
 
 - Default theme is light mode unless the user has already saved a different preference.
 - Settings are stored in the current browser.
 - Settings are scoped to the currently signed-in user in that browser.
 - Settings do not sync automatically across machines.
+- Network Settings in this page include host connectivity diagnostics and Wi-Fi status/scan/connect/disconnect controls.
+- Wi-Fi connect/disconnect actions require admin password re-authentication.
 
 ## Common Status Meanings
 
