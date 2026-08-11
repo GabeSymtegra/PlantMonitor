@@ -121,11 +121,15 @@ Publish the hosted release:
 .\scripts\publish-host-release.ps1
 ```
 
-Smoke-test the published release:
+Optional pre-install smoke test (development-only test credentials):
 
 ```powershell
 .\scripts\test-host-release.ps1
 ```
+
+Note: this smoke test runs the published release in `Development` environment
+and uses `test` / `test` credentials. LAN service sign-in uses bootstrap
+credentials configured during `install-lan-service.ps1`.
 
 Install the LAN Windows service:
 
@@ -133,10 +137,22 @@ Install the LAN Windows service:
 .\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
 ```
 
+Optional convenience account for remote sign-in testing:
+
+```powershell
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>' -EnableTestAccount
+```
+
 Validate the installed service:
 
 ```powershell
 .\scripts\test-lan-service.ps1
+```
+
+Validate service plus credential login/session checks (when test account is enabled):
+
+```powershell
+.\scripts\test-lan-service.ps1 -Username test -Password test
 ```
 
 This is the canonical path for multiple simultaneous Status Board displays and
@@ -161,6 +177,7 @@ manager/reporting access from other computers on the same wired network.
 - Disconnected PLC lines are reported as `Offline`.
 - Adding new EF entities requires a migration before app startup will succeed.
 - The runtime service is the source of truth for dashboard status, control mode, and report events.
+- UI theme defaults to light mode unless the user has already saved a different preference in browser storage.
 
 ## Quality Checks
 

@@ -21,13 +21,15 @@ Provide a repeatable pass/fail matrix for release readiness of PlantMonitor in a
 - Reconnect behavior recovers after temporary disconnect.
 
 ### Theme and Accessibility Behavior
-- Dark mode auto-applies Spec Ops preset.
+- Default theme is light mode unless the user has already saved a different preference in browser storage.
+- Dark mode applies the Spec Ops preset when selected.
 - Spec Ops surfaces keep readable text contrast.
 - Theme persists across reload.
 
 ### Server and Network Readiness
 - Backend service starts on target server host.
 - Frontend can reach backend API and hub.
+- LAN service credential validation passes (`test-lan-service.ps1 -Username test -Password test` when `-EnableTestAccount` was used during installation).
 - Server can reach configured PLC IP addresses over Ethernet.
 - PLC tag ingest pipeline reports valid freshness.
 - Stale-data detection and logs are visible.

@@ -9,9 +9,18 @@ Primary operating model:
 - PLC telemetry ingestion through adapter services (mock now, real adapters next)
 
 ## Current Status
-- Branch: export
-- Stage: Runtime integration, local launch reliability, and maintainability cleanup
-- Focus: Live PLC-driven dashboard behavior, reporting history, offline handling, local dev startup, and codebase documentation
+- Branch: siemens-support
+- Stage: LAN-hosted service hardening and deployment documentation alignment
+- Focus: Reliable same-network hosted rollout, credential/bootstrap validation, and production-like operator workflows
+
+## LAN Host Validation And Docs Alignment (2026-08-11)
+- Fixed strict-mode script failures in `install-lan-service.ps1` and `test-lan-service.ps1` by normalizing scalar/array handling for `.Count` access.
+- Fixed `install-lan-service.ps1` JWT key generation for Windows PowerShell compatibility.
+- Added optional convenience test account support to LAN install flow via `-EnableTestAccount` with configurable username/password.
+- Added credential login/session validation mode to `test-lan-service.ps1` (`-Username` / `-Password`) for direct remote sign-in troubleshooting.
+- Verified hosted LAN service and credential path with passing script executions after install.
+- Updated deployment and script runbooks to align with publish -> install -> test LAN workflow and current credential behavior.
+- Set frontend default theme mode to light unless a user-saved preference exists.
 
 ## Production Readiness Pass (2026-07-29)
 - Verified the frontend publish/runtime path by serving `frontend/dist` through backend `wwwroot` and checking referenced JS/CSS assets by real HTTP request.
@@ -313,4 +322,4 @@ Immediate next coding slice:
 4. Continue replacing remaining outdated assumptions in docs and log files with current runtime behavior.
 
 ---
-Last updated: 2026-07-29
+Last updated: 2026-08-11

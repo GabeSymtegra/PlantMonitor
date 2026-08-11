@@ -22,6 +22,16 @@ describe("ThemeContext", () => {
     sessionStorage.clear();
   });
 
+  it("defaults to light mode when no saved preference exists", () => {
+    render(
+      <AppThemeProvider>
+        <ThemeProbe />
+      </AppThemeProvider>
+    );
+
+    expect(screen.getByTestId("mode")).toHaveTextContent("light");
+  });
+
   it("forces Spec Ops colors when dark mode is active", async () => {
     localStorage.setItem("plantmonitor-theme-mode", "dark");
     localStorage.setItem(

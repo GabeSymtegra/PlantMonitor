@@ -9,9 +9,11 @@ This document defines the backend and frontend architecture for the current impl
 - Runtime data is sourced from configured line tag catalogs and PLC drivers.
 - System is monitor-only in this phase (no remote PLC write commands).
 - Realtime dashboard refresh signals are delivered via SignalR from day one.
+- Private LAN single-host deployment is supported using backend-hosted SPA delivery.
 
 Out of scope for this version:
 
+- Multi-host or cloud deployment architecture.
 - Full Siemens production read path verification (commissioning pending).
 - Worker and standalone PLC service process design (future phase).
 

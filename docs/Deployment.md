@@ -215,6 +215,12 @@ For the first hosted LAN rollout, use one backend-hosted origin on the host
 machine so browser clients on other wired-network PCs load the SPA, API, and
 SignalR hub from the same IP address and port.
 
+Recommended credential plan for first LAN installation:
+
+- use the bootstrap admin account (username `admin` with supplied password) for management and configuration
+- use the shared Viewer account (username `viewer` with supplied password) for status-board screens on other PCs
+- optionally enable the test/Operator convenience account via `-EnableTestAccount` for remote credential validation testing
+
 Recommended operator flow:
 
 1. Publish the backend-hosted release:
@@ -223,11 +229,14 @@ Recommended operator flow:
 .\scripts\publish-host-release.ps1
 ```
 
-2. Smoke-test the release locally before service install:
+2. Optional pre-install smoke test:
 
 ```powershell
 .\scripts\test-host-release.ps1
 ```
+
+This optional check runs the published release in `Development` environment
+and uses development-style `test` / `test` credentials.
 
 3. Install the published release as the LAN host Windows service:
 
@@ -235,13 +244,31 @@ Recommended operator flow:
 .\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
 ```
 
-4. Open the printed `http://<host-ip>:5050` URL from other PCs on the same
+This creates an admin account with username `admin` using the provided
+bootstrap admin password.
+
+4. Optional: enable convenience test account for remote operator sign-in checks:
+
+```powershell
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>' -EnableTestAccount
+```
+
+5. Validate the installed service:
+
+```powershell
+.\scripts\test-lan-service.ps1
+```
+
+6. Optional: validate sign-in/session with convenience account:
+
+```powershell
+.\scripts\test-lan-service.ps1 -Username test -Password test
+```
+
+This check succeeds only when the convenience account is enabled.
+
+7. Open the printed `http://<host-ip>:5050` URL from other PCs on the same
 wired network.
-
-Recommended first-install account plan:
-
-- use the bootstrap admin account for management and configuration
-- use the shared Viewer account for status-board screens on other PCs
 
 This hosted mode uses backend configuration overrides that enable LAN delivery
 without relying on the Vite development server path.

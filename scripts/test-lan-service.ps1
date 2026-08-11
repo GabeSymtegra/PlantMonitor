@@ -3,11 +3,19 @@ param(
     [string]$ServiceName = "PlantMonitor-LAN",
     [string]$HostNameOrIp = "localhost",
     [int]$Port = 5050,
-    [string]$ExpectedDatabasePath = "C:\ProgramData\PlantMonitor\Data\plantmonitor.db"
+    [string]$ExpectedDatabasePath = "C:\ProgramData\PlantMonitor\Data\plantmonitor.db",
+    [string]$Username,
+    [string]$Password
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+try {
+    Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
+}
+catch {
+}
 
 $baseUrl = "http://$HostNameOrIp`:$Port"
 $isLocalHost = $HostNameOrIp -in @("localhost", "127.0.0.1", ".", $env:COMPUTERNAME)
@@ -17,22 +25,43 @@ function Invoke-Http {
     param(
         [string]$Url,
         [string]$Method = "GET",
-        [string]$Body = ""
+        [string]$Body = "",
+        [hashtable]$Headers = @{},
+        [System.Net.CookieContainer]$CookieContainer = $null
     )
 
     $handler = [System.Net.Http.HttpClientHandler]::new()
+    if ($CookieContainer) {
+        $handler.CookieContainer = $CookieContainer
+        $handler.UseCookies = $true
+    }
     $client = [System.Net.Http.HttpClient]::new($handler)
     try {
         $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::new($Method), $Url)
+
+        foreach ($headerName in $Headers.Keys) {
+            $request.Headers.TryAddWithoutValidation($headerName, [string]$Headers[$headerName]) | Out-Null
+        }
+
         if ($Method -ne "GET" -and $Body) {
             $request.Content = [System.Net.Http.StringContent]::new($Body, [System.Text.Encoding]::UTF8, "application/json")
         }
 
         $response = $client.SendAsync($request).GetAwaiter().GetResult()
         $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+        $setCookieValues = @()
+        try {
+            $setCookieValues = @($response.Headers.GetValues("Set-Cookie"))
+        }
+        catch {
+            $setCookieValues = @()
+        }
+
         return [pscustomobject]@{
             StatusCode = [int]$response.StatusCode
             Content = $content
+            SetCookieValues = $setCookieValues
         }
     }
     finally {
@@ -115,7 +144,7 @@ foreach ($match in $assetMatches) {
         $assetUrls += "$baseUrl$relative"
     }
 }
-$assetUrls = $assetUrls | Select-Object -Unique
+$assetUrls = @($assetUrls | Select-Object -Unique)
 
 $allAssetsAccessible = $true
 $assetFailures = New-Object System.Collections.Generic.List[string]
@@ -136,6 +165,30 @@ Add-Result -Name "/api/auth/session responds without server error" -Pass ($sessi
 $negotiate = Invoke-Http -Url "$baseUrl/hubs/lines/negotiate?negotiateVersion=1" -Method "POST" -Body "{}"
 $signalRReachable = $negotiate.StatusCode -ne 404 -and $negotiate.StatusCode -lt 500
 Add-Result -Name "SignalR negotiation endpoint is reachable" -Pass $signalRReachable -Detail "HTTP $($negotiate.StatusCode)"
+
+$hasAnyCredentialInput = -not [string]::IsNullOrWhiteSpace($Username) -or -not [string]::IsNullOrWhiteSpace($Password)
+if ($hasAnyCredentialInput) {
+    if ([string]::IsNullOrWhiteSpace($Username) -or [string]::IsNullOrWhiteSpace($Password)) {
+        Add-Result -Name "Credential check input is complete" -Pass $false -Detail "Provide both -Username and -Password to run login validation."
+    }
+    else {
+        $cookieContainer = New-Object System.Net.CookieContainer
+        $loginRequest = @{ username = $Username; password = $Password; rememberMe = $true } | ConvertTo-Json -Compress
+        $loginResponse = Invoke-Http -Url "$baseUrl/api/auth/login" -Method "POST" -Body $loginRequest -CookieContainer $cookieContainer
+        $loginSucceeded = $loginResponse.StatusCode -eq 200
+        Add-Result -Name "Credential check login succeeds" -Pass $loginSucceeded -Detail "HTTP $($loginResponse.StatusCode)"
+
+        $pmAuthCookie = @($loginResponse.SetCookieValues | Where-Object { $_ -like "pm_auth=*" } | Select-Object -First 1)
+        $hasPmAuthCookie = $pmAuthCookie.Count -gt 0
+        Add-Result -Name "Credential check login sets pm_auth cookie" -Pass $hasPmAuthCookie -Detail ($(if ($hasPmAuthCookie) { "pm_auth cookie present" } else { "pm_auth cookie missing" }))
+
+        if ($hasPmAuthCookie) {
+            $sessionAfterLogin = Invoke-Http -Url "$baseUrl/api/auth/session" -Method "GET" -CookieContainer $cookieContainer
+            $sessionHealthy = $sessionAfterLogin.StatusCode -eq 200
+            Add-Result -Name "Credential check session endpoint works with pm_auth cookie" -Pass $sessionHealthy -Detail "HTTP $($sessionAfterLogin.StatusCode)"
+        }
+    }
+}
 
 if ($isLocalHost) {
     $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
@@ -185,7 +238,7 @@ else {
     Add-Result -Name "Database/config remains present after restart" -Pass $true -Detail "Skipped for remote host" -Required $false
 }
 
-$requiredFailures = $results | Where-Object { $_.Required -and -not $_.Pass }
+$requiredFailures = @($results | Where-Object { $_.Required -and -not $_.Pass })
 
 Write-Host ""
 Write-Host "PlantMonitor LAN Service Verification"

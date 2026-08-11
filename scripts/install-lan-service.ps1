@@ -12,7 +12,10 @@ param(
     [string]$JwtSigningKey,
     [string]$BootstrapAdminPassword,
     [string]$BootstrapViewerPassword,
-    [string]$BootstrapViewerUsername = "viewer"
+    [string]$BootstrapViewerUsername = "viewer",
+    [switch]$EnableTestAccount,
+    [string]$TestAccountUsername = "test",
+    [string]$TestAccountPassword
 )
 
 Set-StrictMode -Version Latest
@@ -35,15 +38,15 @@ function Assert-PortValid {
 }
 
 function Assert-PrivateNetworkProfile {
-    $profiles = Get-NetConnectionProfile -ErrorAction Stop | Where-Object {
+    $profiles = @(Get-NetConnectionProfile -ErrorAction Stop | Where-Object {
         $_.IPv4Connectivity -ne "Disconnected" -or $_.IPv6Connectivity -ne "Disconnected"
-    }
+    })
 
     if ($profiles.Count -eq 0) {
         throw "Unable to detect an active network profile. Connect to the wired private LAN and retry."
     }
 
-    $publicProfiles = $profiles | Where-Object { $_.NetworkCategory -eq "Public" }
+    $publicProfiles = @($profiles | Where-Object { $_.NetworkCategory -eq "Public" })
     if ($publicProfiles.Count -gt 0) {
         $names = ($publicProfiles | ForEach-Object { $_.Name }) -join ", "
         throw "Active network profile is Public ($names). Change the host network profile to Private before installing."
@@ -123,7 +126,45 @@ function Configure-Recovery {
 }
 
 function New-GeneratedJwtSigningKey {
-    return [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(64))
+    $bytes = New-Object byte[] 64
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    }
+    finally {
+        if ($rng) {
+            $rng.Dispose()
+        }
+    }
+
+    return [Convert]::ToBase64String($bytes)
+}
+
+function Resolve-TestAccountBootstrap {
+    param(
+        [switch]$Enable,
+        [string]$Username,
+        [string]$Password
+    )
+
+    $requested = $Enable.IsPresent -or -not [string]::IsNullOrWhiteSpace($Password)
+    if (-not $requested) {
+        return $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Username)) {
+        throw "TestAccountUsername must be provided when EnableTestAccount is enabled."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Password)) {
+        $Password = "test"
+    }
+
+    return [pscustomobject]@{
+        Username = $Username.Trim()
+        Password = $Password
+        UsesDefaultPassword = $Password -eq "test"
+    }
 }
 
 Assert-Administrator
@@ -153,6 +194,8 @@ if (-not (Test-Path -LiteralPath $sourceExe)) {
 if ([string]::IsNullOrWhiteSpace($JwtSigningKey)) {
     $JwtSigningKey = New-GeneratedJwtSigningKey
 }
+
+$testAccountBootstrap = Resolve-TestAccountBootstrap -Enable:$EnableTestAccount -Username $TestAccountUsername -Password $TestAccountPassword
 
 $dataSubdirectories = @(
     (Join-Path $resolvedDataDirectory "Data"),
@@ -251,6 +294,11 @@ if (-not [string]::IsNullOrWhiteSpace($BootstrapViewerPassword)) {
     $serviceEnvironment += "Auth__BootstrapViewerUsername=$BootstrapViewerUsername"
 }
 
+if ($testAccountBootstrap) {
+    $serviceEnvironment += "Auth__BootstrapOperatorPassword=$($testAccountBootstrap.Password)"
+    $serviceEnvironment += "Auth__BootstrapOperatorUsername=$($testAccountBootstrap.Username)"
+}
+
 Set-ServiceEnvironment -Name $ServiceName -EnvironmentRows $serviceEnvironment
 
 $existingRule = Get-NetFirewallRule -DisplayName $firewallRuleName -ErrorAction SilentlyContinue
@@ -292,6 +340,19 @@ Write-Host "Local URL: http://localhost:$Port"
 foreach ($ip in $ipv4Addresses) {
     Write-Host "LAN URL example: http://$ip`:$Port"
 }
+Write-Host ""
+Write-Host "Expected login users after install:"
+Write-Host "- Admin: admin (uses BootstrapAdminPassword provided at install)"
+if (-not [string]::IsNullOrWhiteSpace($BootstrapViewerPassword)) {
+    Write-Host "- Viewer: $BootstrapViewerUsername (uses BootstrapViewerPassword provided at install)"
+}
+if ($testAccountBootstrap) {
+    Write-Host "- Test/Operator: $($testAccountBootstrap.Username)"
+    if ($testAccountBootstrap.UsesDefaultPassword) {
+        Write-Host "  Default password in use: test"
+    }
+}
+Write-Host "Note: bootstrap users are only created when missing in the existing database."
 Write-Host "Database path: $targetDatabasePath"
 if (Test-Path -LiteralPath $installedTestScript) {
     Write-Host "Validate service: powershell -ExecutionPolicy Bypass -File `"$installedTestScript`" -ServiceName `"$ServiceName`" -Port $Port"

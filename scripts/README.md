@@ -92,7 +92,7 @@ Defaults:
 The script prints LAN-access URLs and runs the same startup verification checks
 as `dev.ps1`.
 
-## Hosted LAN Service
+## LAN Hosted Service
 
 Use this for the first production-like same-network rollout on one host machine.
 Publish the backend-hosted release first, then install it as a Windows service.
@@ -102,6 +102,20 @@ Example:
 ```powershell
 dotnet publish backend/backend.csproj -c Release -o artifacts/release/backend
 .\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+```
+
+Canonical script-based flow:
+
+```powershell
+.\scripts\publish-host-release.ps1
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>'
+.\scripts\test-lan-service.ps1
+```
+
+Optional convenience account for remote operator testing (username `test`, password defaults to `test`):
+
+```powershell
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>' -BootstrapAdminPassword '<initial-admin-password>' -BootstrapViewerPassword '<viewer-password>' -EnableTestAccount
 ```
 
 Defaults:
@@ -124,6 +138,14 @@ Validate the installed LAN service:
 ```powershell
 .\scripts\test-lan-service.ps1
 ```
+
+Validate LAN service plus credential login/session behavior:
+
+```powershell
+.\scripts\test-lan-service.ps1 -Username test -Password test
+```
+
+Use credential checks when you need to verify remote sign-in behavior end-to-end.
 
 Remove the LAN service but preserve data by default:
 
@@ -157,6 +179,11 @@ Smoke-test the published release locally in LAN mode:
 ```powershell
 .\scripts\test-host-release.ps1
 ```
+
+Note: `test-host-release.ps1` runs a temporary local instance of the published
+release in `Development` environment. It is intended for pre-install binary
+verification and uses development test credentials, which differ from LAN
+bootstrap accounts configured by `install-lan-service.ps1`.
 
 This verifies:
 
