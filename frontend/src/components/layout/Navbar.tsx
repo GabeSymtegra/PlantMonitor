@@ -24,6 +24,7 @@ import { useAuth } from "../../context/useAuth";
 import { useDashboard } from "../../context/useDashboard";
 import { useThemeMode } from "../../context/useThemeMode";
 import { LineStatus } from "../../types/LineStatus";
+import { Rectangle } from "@mui/icons-material";
 
 const statusColors: Record<LineStatus, string> = {
   [LineStatus.Running]: "#2E7D32",
@@ -154,13 +155,13 @@ export default function Navbar() {
             minWidth: 0,
           }}
         >
-          <Box
+          <Rectangle
             component="img"
             src={logo}
             alt="Logo"
             sx={{
-              height: 128,
-              width: 128,
+              height: 32,
+              width: 256,
               flexShrink: 0,
               objectFit: "contain",
             }}
