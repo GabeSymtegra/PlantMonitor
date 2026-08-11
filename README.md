@@ -2,6 +2,57 @@
 
 PlantMonitor is a manufacturing line monitoring application with a React frontend and an ASP.NET Core backend. It supports authenticated administration, live PLC connectivity, line runtime tracking, status dashboards, and reporting for completed runs plus mode and status transitions.
 
+## Startup Procedure
+
+Use this sequence for real host startup, service verification, and wireless user access.
+
+1. Boot the PlantMonitor host computer and connect it to the plant wired network.
+2. Sign in to Windows with an account that can run elevated PowerShell commands.
+3. Open PowerShell as Administrator and go to the repository root.
+4. Publish the current host release payload:
+
+```powershell
+.\scripts\publish-host-release.ps1
+```
+
+5. Install or refresh the LAN-hosted services (backend + privileged agent):
+
+```powershell
+.\scripts\install-lan-service.ps1
+```
+
+6. Verify service health and hosted frontend availability:
+
+```powershell
+.\scripts\test-lan-service.ps1
+```
+
+7. Verify credential login flow with a seeded account:
+
+```powershell
+.\scripts\test-lan-service.ps1 -Username operator -Password test
+```
+
+8. From the host browser, open the Settings page and confirm Network Settings shows:
+- Connectivity diagnostics
+- Recommended dashboard URLs
+- Wi-Fi status and scan results
+
+9. Connect wireless client devices (tablets/laptops/phones) to plant Wi-Fi and open one of the recommended host URLs, for example:
+- http://<host-ip>:5050
+
+10. Sign in from wireless clients and validate role access:
+- Admin: admin / test
+- Operator: operator / test
+- Viewer: viewer / test
+
+11. Confirm live operation on wireless clients:
+- Dashboard loads
+- SignalR updates continue
+- Status Board opens when needed
+
+If any step fails, run [scripts/test-lan-service.ps1](scripts/test-lan-service.ps1) again and review [docs/Deployment.md](docs/Deployment.md) for remediation.
+
 ## Start Here
 
 - User guide: [docs/User-Guide.md](docs/User-Guide.md)
@@ -128,8 +179,7 @@ Optional pre-install smoke test (development-only test credentials):
 ```
 
 Note: this smoke test runs the published release in `Development` environment
-and uses `test` / `test` credentials. LAN service sign-in uses bootstrap
-credentials configured during `install-lan-service.ps1`.
+and uses `test` / `test` credentials.
 
 Install the LAN Windows service:
 
@@ -143,10 +193,10 @@ Validate the installed service:
 .\scripts\test-lan-service.ps1
 ```
 
-Validate service plus credential login/session checks (when test account is enabled):
+Validate service plus credential login/session checks:
 
 ```powershell
-.\scripts\test-lan-service.ps1 -Username test -Password test
+.\scripts\test-lan-service.ps1 -Username operator -Password test
 ```
 
 This is the canonical path for multiple simultaneous Status Board displays and
