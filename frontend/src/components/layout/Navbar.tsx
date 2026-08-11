@@ -159,8 +159,8 @@ export default function Navbar() {
             src={logo}
             alt="Logo"
             sx={{
-              height: 32,
-              width: 32,
+              height: 128,
+              width: 128,
               flexShrink: 0,
               objectFit: "contain",
             }}
