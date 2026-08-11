@@ -3,8 +3,7 @@ name: PlantMonitor CI
 on:
   push:
     branches:
-      - main
-      - copilothelpbranch
+      - '**'
   pull_request:
 
 jobs:
@@ -30,15 +29,19 @@ jobs:
       - name: Restore backend dependencies
         run: dotnet restore backend/backend.csproj
 
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
       - name: Build backend
         run: dotnet build backend/backend.csproj --configuration Release --no-restore
 
       - name: Run backend tests
-        run: dotnet test backend.Tests/backend.Tests.csproj --configuration Release --no-build
+        run: dotnet test backend.Tests/backend.Tests.csproj --configuration Release
 
-      - name: Install frontend dependencies
+      - name: Lint frontend
         working-directory: frontend
-        run: npm ci
+        run: npm run lint
 
       - name: Run frontend unit tests
         working-directory: frontend

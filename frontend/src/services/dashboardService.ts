@@ -1,172 +1,135 @@
+import { API_ENDPOINTS } from "../constants/api";
 import type { DashboardModel } from "../models/DashboardModel";
-import type { LineDetailModel } from "../models/LineDetailModel";
+import type { GaugeDetail, LineDetailModel } from "../models/LineDetailModel";
 import type { ProductionLine } from "../types/ProductionLine";
 import { LineStatus } from "../types/LineStatus";
+import { apiDelete, apiGet, apiPost, apiPut } from "./api/client";
 
-const STORAGE_KEY = "plantmonitor-lines";
-const MOCK_START_MS = Date.now();
+// -----------------------------------------------------------------------------
+// Backend DTOs used only by the frontend data layer
+// -----------------------------------------------------------------------------
 
-const defaultLines: ProductionLine[] = [
-  {
-    id: 1,
-    lineNumber: 1,
-    lineName: "North Extruder",
-    product: "401-883-52-1",
-    startDateTime: "2026-07-01T06:00:00",
-    status: LineStatus.Running,
-    timeInStatus: "02:12:14",
-    controlMode: "Auto",
-    percentAutoMode: 94.2,
-    autoVariance: 1.8,
-    percentManualMode: 5.8,
-    manualVariance: 0.6,
-    totalVariance: 2.4,
-    totalLength: 15200,
-    runtime: "12:43:18",
-    plcIp: "192.168.1.101",
-    manufacturer: "AllenBradley",
-    isActive: true,
-  },
-  {
-    id: 2,
-    lineNumber: 2,
-    lineName: "South Extruder",
-    product: "993-102-75-4",
-    startDateTime: "2026-07-01T07:20:00",
-    status: LineStatus.Stopped,
-    timeInStatus: "00:18:09",
-    controlMode: "Manual",
-    percentAutoMode: 58.3,
-    autoVariance: 3.2,
-    percentManualMode: 41.7,
-    manualVariance: 2.8,
-    totalVariance: 6.0,
-    totalLength: 9840,
-    runtime: "08:15:44",
-    plcIp: "192.168.1.102",
-    manufacturer: "AllenBradley",
-    isActive: true,
-  },
-  {
-    id: 3,
-    lineNumber: 3,
-    lineName: "Main Puller",
-    product: "550-214-87-2",
-    startDateTime: "2026-07-01T05:45:00",
-    status: LineStatus.Faulted,
-    timeInStatus: "00:04:12",
-    controlMode: "Auto",
-    percentAutoMode: 88.1,
-    autoVariance: 4.1,
-    percentManualMode: 11.9,
-    manualVariance: 1.7,
-    totalVariance: 5.8,
-    totalLength: 12350,
-    runtime: "15:22:09",
-    plcIp: "192.168.1.103",
-    manufacturer: "Siemens",
-    isActive: true,
-  },
-  {
-    id: 4,
-    lineNumber: 4,
-    lineName: "Reserve Line",
-    product: "120-997-61-8",
-    startDateTime: "2026-07-01T00:00:00",
-    status: LineStatus.Offline,
-    timeInStatus: "03:02:10",
-    controlMode: "Auto",
-    percentAutoMode: 0,
-    autoVariance: 0,
-    percentManualMode: 0,
-    manualVariance: 0,
-    totalVariance: 0,
-    totalLength: 0,
-    runtime: "00:00:00",
-    plcIp: "192.168.1.104",
-    manufacturer: "Siemens",
-    isActive: true,
-  },
-];
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+interface RuntimeDashboardLineDto {
+  id: number;
+  lineNumber: number;
+  lineName: string;
+  productId: string;
+  startTimeUtc?: string;
+  status: string;
+  controlMode: "Auto" | "Manual";
+  totalLength: number;
+  runtimeSeconds: number;
+  plcIp: string;
+  manufacturer: string;
+  updatedAtUtc: string;
+  percentAutoMode: number;
+  percentManualMode: number;
+  autoModeVariance?: number;
+  manualModeVariance?: number;
+  totalVariance?: number;
+  bareAverageDeviation?: number;
+  hotAverageDeviation?: number;
+  coldAverageDeviation?: number;
 }
 
-function toFixedNumber(value: number, decimals = 1): number {
-  return Number(value.toFixed(decimals));
+interface RuntimeDashboardSnapshotDto {
+  lines: RuntimeDashboardLineDto[];
+  lastUpdatedUtc: string;
 }
 
-function normalizeLine(line: Partial<ProductionLine>, fallbackId: number): ProductionLine {
-  const normalizedLineNumber = line.lineNumber ?? fallbackId;
-  const normalizedManufacturer =
-    typeof line.manufacturer === "string" && line.manufacturer.trim().toLowerCase() === "ab"
-      ? "AllenBradley"
-      : line.manufacturer ?? "AllenBradley";
-
-  return {
-    id: line.id ?? fallbackId,
-    lineNumber: normalizedLineNumber,
-    lineName: line.lineName?.trim() || `Line ${normalizedLineNumber}`,
-    product: line.product ?? "Unassigned",
-    startDateTime: line.startDateTime ?? new Date().toISOString(),
-    status: line.status ?? LineStatus.Offline,
-    timeInStatus: line.timeInStatus ?? "00:00:00",
-    controlMode: line.controlMode ?? "Auto",
-    percentAutoMode: line.percentAutoMode ?? 0,
-    autoVariance: line.autoVariance ?? 0,
-    percentManualMode: line.percentManualMode ?? 0,
-    manualVariance: line.manualVariance ?? 0,
-    totalVariance: line.totalVariance ?? 0,
-    totalLength: line.totalLength ?? 0,
-    runtime: line.runtime ?? "00:00:00",
-    plcIp: line.plcIp ?? "0.0.0.0",
-    manufacturer: normalizedManufacturer,
-    isActive: line.isActive ?? true,
-  };
+interface RuntimeSensorDetailDto {
+  zone: string;
+  currentSetpoint: number;
+  currentActual: number;
+  currentPercentDeviation: number;
+  overallMeasurementCount: number;
+  overallAverageAbsoluteDeviation: number;
+  overallMaxPositiveDeviation: number;
+  overallMaxNegativeDeviation: number;
+  autoMeasurementCount: number;
+  autoAverageAbsoluteDeviation: number;
+  autoMaxPositiveDeviation: number;
+  autoMaxNegativeDeviation: number;
+  manualMeasurementCount: number;
+  manualAverageAbsoluteDeviation: number;
+  manualMaxPositiveDeviation: number;
+  manualMaxNegativeDeviation: number;
 }
 
-function getStoredLines(): ProductionLine[] {
-  const serialized = localStorage.getItem(STORAGE_KEY);
+interface RuntimeLineDetailDto {
+  id: number;
+  lineNumber: number;
+  lineName: string;
+  productId: string;
+  recipeId: string;
+  machineId: string;
+  operatorName: string;
+  plcIp: string;
+  manufacturer: string;
+  status: string;
+  controlMode: "Auto" | "Manual";
+  lastUpdatedUtc: string;
+  startTimeUtc: string;
+  currentProductionLength: number;
+  runtimeSeconds: number;
+  autoTimeSeconds: number;
+  manualTimeSeconds: number;
+  autoPercentage: number;
+  manualPercentage: number;
+  sensors: RuntimeSensorDetailDto[];
+}
 
-  if (!serialized) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultLines));
-    return [...defaultLines];
+interface LineConfigDto {
+  id: number;
+  lineNumber: number;
+  lineName: string;
+  productId: string;
+  recipeId: string;
+  machineId: string;
+  operatorName: string;
+  plcIp: string;
+  manufacturer: string;
+  pollIntervalMs: number;
+  isActive: boolean;
+  lineLifecycleState: "Draft" | "Commissioning" | "Active" | "CommissioningFailed" | "Disabled";
+  updatedAtUtc: string;
+}
+
+interface UpsertLineConfigRequestDto {
+  lineNumber: number;
+  lineName: string;
+  productId: string;
+  recipeId: string;
+  machineId: string;
+  operatorName: string;
+  plcIp: string;
+  manufacturer: string;
+  pollIntervalMs: number;
+  isActive: boolean;
+  lineLifecycleState?: "Draft" | "Commissioning" | "Active" | "CommissioningFailed" | "Disabled";
+}
+
+// -----------------------------------------------------------------------------
+// DTO -> UI model mapping helpers
+// -----------------------------------------------------------------------------
+
+function toLineStatus(value: string): LineStatus {
+  switch (value) {
+    case LineStatus.Running:
+      return LineStatus.Running;
+    case LineStatus.Stopped:
+      return LineStatus.Stopped;
+    case LineStatus.Bleedout:
+      return LineStatus.Bleedout;
+    case LineStatus.Startup:
+      return LineStatus.Startup;
+    case LineStatus.Faulted:
+      return LineStatus.Faulted;
+    case LineStatus.Maintenance:
+      return LineStatus.Maintenance;
+    default:
+      return LineStatus.Offline;
   }
-
-  try {
-    const parsed = JSON.parse(serialized) as Partial<ProductionLine>[];
-
-    if (!Array.isArray(parsed)) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultLines));
-      return [...defaultLines];
-    }
-
-    const normalizedLines = parsed.map((line, index) =>
-      normalizeLine(line, index + 1)
-    );
-
-    setStoredLines(normalizedLines);
-
-    return normalizedLines;
-  } catch {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultLines));
-    return [...defaultLines];
-  }
-}
-
-function setStoredLines(lines: ProductionLine[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(lines));
-}
-
-function parseRuntime(runtime: string): number {
-  const parts = runtime.split(":").map((part) => Number(part));
-
-  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
-    return 0;
-  }
-
-  return parts[0] * 3600 + parts[1] * 60 + parts[2];
 }
 
 function formatRuntime(seconds: number): string {
@@ -182,151 +145,272 @@ function formatRuntime(seconds: number): string {
   return `${hours}:${minutes}:${secs}`;
 }
 
-function applyMockTelemetry(lines: ProductionLine[]): ProductionLine[] {
-  const elapsedSeconds = Math.floor((Date.now() - MOCK_START_MS) / 2);
+function toProductionLine(line: RuntimeDashboardLineDto): ProductionLine {
+  const startDateTime = line.startTimeUtc ?? line.updatedAtUtc;
+  const autoVariance = line.autoModeVariance ?? line.bareAverageDeviation ?? 0;
+  const manualVariance = line.manualModeVariance ?? line.hotAverageDeviation ?? 0;
+  const totalVariance = line.totalVariance ?? line.coldAverageDeviation ?? 0;
 
-  return lines.map((line) => {
-    const timeInStatusSeconds = parseRuntime(line.timeInStatus);
-    const timeInStatusIncrement = line.status === LineStatus.Running ? elapsedSeconds : 0;
-    const runtimeSeconds = parseRuntime(line.runtime);
-    const runtimeIncrement = line.status === LineStatus.Running ? elapsedSeconds : 0;
-    const lengthIncrement = line.status === LineStatus.Running ? elapsedSeconds * 8 : 0;
-
-    const controlModePulse = Math.sin((Date.now() + line.id * 3000) / 12000);
-
-    const percentAutoMode =
-      line.controlMode === "Auto"
-        ? clamp(90 + controlModePulse * 6, 75, 100)
-        : clamp(35 + controlModePulse * 8, 0, 60);
-
-    const percentManualMode = clamp(100 - percentAutoMode, 0, 100);
-    const autoVariance = clamp(1.5 + Math.abs(controlModePulse) * 2.4, 0, 10);
-    const manualVariance = clamp(0.9 + Math.abs(controlModePulse) * 2.1, 0, 10);
-    const totalVariance = clamp(autoVariance + manualVariance, 0, 20);
-
-    return {
-      ...line,
-      timeInStatus: formatRuntime(timeInStatusSeconds + timeInStatusIncrement),
-      runtime: formatRuntime(runtimeSeconds + runtimeIncrement),
-      totalLength: line.totalLength + lengthIncrement,
-      percentAutoMode: toFixedNumber(percentAutoMode, 1),
-      autoVariance: toFixedNumber(autoVariance, 2),
-      percentManualMode: toFixedNumber(percentManualMode, 1),
-      manualVariance: toFixedNumber(manualVariance, 2),
-      totalVariance: toFixedNumber(totalVariance, 2),
-    };
-  });
+  return {
+    id: line.id,
+    lineNumber: line.lineNumber,
+    lineName: line.lineName,
+    product: line.productId,
+    recipeId: "Unknown",
+    machineId: "Unknown",
+    operatorName: "Unknown",
+    startDateTime,
+    status: toLineStatus(line.status),
+    timeInStatus: formatRuntime(line.runtimeSeconds),
+    controlMode: line.controlMode,
+    percentAutoMode: line.percentAutoMode,
+    autoVariance,
+    percentManualMode: line.percentManualMode,
+    manualVariance,
+    totalVariance,
+    totalLength: line.totalLength,
+    runtime: formatRuntime(line.runtimeSeconds),
+    plcIp: line.plcIp,
+    manufacturer:
+      line.manufacturer === "Siemens" ? "Siemens" : "AllenBradley",
+    isActive: line.status !== "Offline",
+    lineLifecycleState: "Active",
+  };
 }
 
+// Configured lines are used as a fallback so the dashboard can still show a
+// known line definition even when runtime data is not available yet.
+function toConfiguredLine(line: LineConfigDto): ProductionLine {
+  return {
+    id: line.id,
+    lineNumber: line.lineNumber,
+    lineName: line.lineName,
+    product: line.productId,
+    recipeId: line.recipeId,
+    machineId: line.machineId,
+    operatorName: line.operatorName,
+    startDateTime: "??",
+    status: LineStatus.Offline,
+    timeInStatus: "??",
+    controlMode: "Manual",
+    percentAutoMode: Number.NaN,
+    autoVariance: Number.NaN,
+    percentManualMode: Number.NaN,
+    manualVariance: Number.NaN,
+    totalVariance: Number.NaN,
+    totalLength: Number.NaN,
+    runtime: "??",
+    plcIp: line.plcIp,
+    manufacturer: line.manufacturer === "Siemens" ? "Siemens" : "AllenBradley",
+    isActive: line.lineLifecycleState === "Active",
+    lineLifecycleState: line.lineLifecycleState,
+  };
+}
+
+export function toConfiguredFallbackLine(line: ProductionLine): ProductionLine {
+  return {
+    ...line,
+    startDateTime: "??",
+    status: LineStatus.Offline,
+    timeInStatus: "??",
+    controlMode: line.controlMode ?? "Manual",
+    percentAutoMode: Number.NaN,
+    autoVariance: Number.NaN,
+    percentManualMode: Number.NaN,
+    manualVariance: Number.NaN,
+    totalVariance: Number.NaN,
+    totalLength: Number.NaN,
+    runtime: "??",
+    lineLifecycleState: line.lineLifecycleState,
+  };
+}
+
+function toGaugeDetail(sensor: RuntimeSensorDetailDto): GaugeDetail {
+  return {
+    zone: sensor.zone,
+    currentSetpoint: sensor.currentSetpoint,
+    currentActual: sensor.currentActual,
+    currentPercentDeviation: sensor.currentPercentDeviation,
+    overallMeasurementCount: sensor.overallMeasurementCount,
+    overallAverageAbsoluteDeviation: sensor.overallAverageAbsoluteDeviation,
+    overallMaxPositiveDeviation: sensor.overallMaxPositiveDeviation,
+    overallMaxNegativeDeviation: sensor.overallMaxNegativeDeviation,
+    autoMeasurementCount: sensor.autoMeasurementCount,
+    autoAverageAbsoluteDeviation: sensor.autoAverageAbsoluteDeviation,
+    autoMaxPositiveDeviation: sensor.autoMaxPositiveDeviation,
+    autoMaxNegativeDeviation: sensor.autoMaxNegativeDeviation,
+    manualMeasurementCount: sensor.manualMeasurementCount,
+    manualAverageAbsoluteDeviation: sensor.manualAverageAbsoluteDeviation,
+    manualMaxPositiveDeviation: sensor.manualMaxPositiveDeviation,
+    manualMaxNegativeDeviation: sensor.manualMaxNegativeDeviation,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// CRUD and runtime query functions
+// -----------------------------------------------------------------------------
+
 export async function getAllLines(): Promise<ProductionLine[]> {
-  return getStoredLines();
+  const dto = await apiGet<LineConfigDto[]>(API_ENDPOINTS.lines);
+  return dto
+    .filter((line) => line.lineLifecycleState !== "Disabled")
+    .map(toConfiguredLine);
 }
 
 export async function addLine(
-  line: Omit<ProductionLine, "id">
+  line: Omit<ProductionLine, "id">,
+  options?: { overwriteExisting?: boolean }
 ): Promise<ProductionLine> {
-  const lines = getStoredLines();
-  const nextId = lines.length ? Math.max(...lines.map((item) => item.id)) + 1 : 1;
-
-  const createdLine: ProductionLine = {
-    ...line,
-    id: nextId,
+  const request: UpsertLineConfigRequestDto = {
+    lineNumber: line.lineNumber,
+    lineName: line.lineName,
+    productId: line.product,
+    recipeId: line.recipeId,
+    machineId: line.machineId,
+    operatorName: line.operatorName,
+    plcIp: line.plcIp,
+    manufacturer: line.manufacturer,
+    pollIntervalMs: 2000,
+    isActive: line.lineLifecycleState === "Active",
+    lineLifecycleState: line.lineLifecycleState,
   };
 
-  setStoredLines([...lines, createdLine]);
+  const endpoint = options?.overwriteExisting
+    ? `${API_ENDPOINTS.lines}?overwriteExisting=true`
+    : API_ENDPOINTS.lines;
 
-  return createdLine;
+  const created = await apiPost<LineConfigDto, UpsertLineConfigRequestDto>(endpoint, request);
+
+  return toConfiguredLine(created);
 }
 
 export async function updateLine(
   id: number,
   updates: Partial<ProductionLine>
 ): Promise<ProductionLine> {
-  const lines = getStoredLines();
-  const existingLine = lines.find((line) => line.id === id);
+  const current = await getAllLines();
+  const existingLine = current.find((line) => line.id === id);
 
   if (!existingLine) {
     throw new Error("Line not found");
   }
 
-  const updatedLine: ProductionLine = {
-    ...existingLine,
-    ...updates,
-    id,
+  const request: UpsertLineConfigRequestDto = {
+    lineNumber: updates.lineNumber ?? existingLine.lineNumber,
+    lineName: updates.lineName ?? existingLine.lineName,
+    productId: updates.product ?? existingLine.product,
+    recipeId: updates.recipeId ?? existingLine.recipeId,
+    machineId: updates.machineId ?? existingLine.machineId,
+    operatorName: updates.operatorName ?? existingLine.operatorName,
+    plcIp: updates.plcIp ?? existingLine.plcIp,
+    manufacturer: updates.manufacturer ?? existingLine.manufacturer,
+    pollIntervalMs: 2000,
+    isActive: (updates.lineLifecycleState ?? existingLine.lineLifecycleState) === "Active",
+    lineLifecycleState: updates.lineLifecycleState ?? existingLine.lineLifecycleState,
   };
 
-  setStoredLines(lines.map((line) => (line.id === id ? updatedLine : line)));
+  const updated = await apiPut<LineConfigDto, UpsertLineConfigRequestDto>(API_ENDPOINTS.line(id), request);
+  return toConfiguredLine(updated);
+}
 
-  return updatedLine;
+export async function deleteLine(id: number): Promise<void> {
+  await apiDelete(API_ENDPOINTS.line(id));
+}
+
+function mergeConfiguredMetadata(
+  runtimeLine: ProductionLine,
+  configuredLine: ProductionLine
+): ProductionLine {
+  const hasRuntimeMetadata =
+    runtimeLine.recipeId !== "Unknown" &&
+    runtimeLine.machineId !== "Unknown" &&
+    runtimeLine.operatorName !== "Unknown";
+
+  return {
+    ...runtimeLine,
+    recipeId: hasRuntimeMetadata
+      ? runtimeLine.recipeId
+      : configuredLine.recipeId,
+    machineId: hasRuntimeMetadata
+      ? runtimeLine.machineId
+      : configuredLine.machineId,
+    operatorName: hasRuntimeMetadata
+      ? runtimeLine.operatorName
+      : configuredLine.operatorName,
+    product: runtimeLine.product || configuredLine.product,
+    plcIp: runtimeLine.plcIp || configuredLine.plcIp,
+    manufacturer: runtimeLine.manufacturer || configuredLine.manufacturer,
+    lineLifecycleState: runtimeLine.lineLifecycleState || configuredLine.lineLifecycleState,
+    isActive: runtimeLine.isActive || configuredLine.isActive,
+  };
 }
 
 export async function getDashboard(): Promise<DashboardModel> {
-  const activeLines = getStoredLines().filter((line) => line.isActive);
-  const lines = applyMockTelemetry(activeLines);
+  const dto = await apiGet<RuntimeDashboardSnapshotDto>(API_ENDPOINTS.dashboard);
+  const runtimeLines = dto.lines.map(toProductionLine);
+  const runtimeById = new Map(runtimeLines.map((line) => [line.id, line]));
+
+  // Active configured lines still appear in the UI even if they have not yet
+  // produced a live runtime snapshot.
+  const configuredActiveLines = (await getAllLines()).filter((line) => line.isActive);
+
+  for (const configuredLine of configuredActiveLines) {
+    const existingRuntimeLine = runtimeById.get(configuredLine.id);
+
+    if (existingRuntimeLine) {
+      const mergedLine = mergeConfiguredMetadata(existingRuntimeLine, configuredLine);
+      runtimeById.set(configuredLine.id, mergedLine);
+
+      const runtimeIndex = runtimeLines.findIndex((line) => line.id === configuredLine.id);
+      if (runtimeIndex >= 0) {
+        runtimeLines[runtimeIndex] = mergedLine;
+      }
+      continue;
+    }
+
+    runtimeLines.push(toConfiguredFallbackLine(configuredLine));
+  }
+
+  runtimeLines.sort((left, right) => left.lineNumber - right.lineNumber);
 
   return {
-    lines,
-    lastUpdated: new Date(),
+    lines: runtimeLines,
+    lastUpdated: new Date(dto.lastUpdatedUtc),
   };
 }
 
 export async function getLineById(id: number): Promise<ProductionLine | null> {
-  const lines = applyMockTelemetry(getStoredLines());
-  return lines.find((line) => line.id === id) ?? null;
-}
-
-function buildDiameterSensors(line: ProductionLine): LineDetailModel["diameterSensors"] {
-  return Array.from({ length: 6 }, (_, index) => {
-    const sensorId = index + 1;
-    const pulse = Math.sin((Date.now() + line.id * 1400 + sensorId * 600) / 6500);
-    const deviationMm = Number((pulse * 0.6).toFixed(3));
-    const absoluteDeviation = Math.abs(deviationMm);
-
-    let status: "Normal" | "Warning" | "Fault" = "Normal";
-
-    if (absoluteDeviation > 0.5) {
-      status = "Fault";
-    } else if (absoluteDeviation > 0.25) {
-      status = "Warning";
-    }
-
-    return {
-      id: `DIA-${line.id}-${sensorId}`,
-      label: `Diameter Sensor ${sensorId}`,
-      diameterMm: Number((45 + sensorId * 0.4 + pulse * 0.2).toFixed(3)),
-      status,
-      deviationMm,
-    };
-  });
+  const dashboard = await getDashboard();
+  return dashboard.lines.find((line) => line.id === id) ?? null;
 }
 
 export async function getLineDetail(id: number): Promise<LineDetailModel | null> {
-  const line = await getLineById(id);
+  try {
+    const dto = await apiGet<RuntimeLineDetailDto>(API_ENDPOINTS.lineDetails(id));
 
-  if (!line) {
+    return {
+      id: dto.id,
+      lineNumber: dto.lineNumber,
+      lineName: dto.lineName,
+      productId: dto.productId,
+      recipeId: dto.recipeId,
+      machineId: dto.machineId,
+      operatorName: dto.operatorName,
+      plcIp: dto.plcIp,
+      manufacturer: dto.manufacturer,
+      status: toLineStatus(dto.status),
+      controlMode: dto.controlMode,
+      lastUpdated: dto.lastUpdatedUtc,
+      startTime: dto.startTimeUtc,
+      currentProductionLength: dto.currentProductionLength,
+      runtimeSeconds: dto.runtimeSeconds,
+      autoTimeSeconds: dto.autoTimeSeconds,
+      manualTimeSeconds: dto.manualTimeSeconds,
+      autoPercentage: dto.autoPercentage,
+      manualPercentage: dto.manualPercentage,
+      gauges: dto.sensors.map(toGaugeDetail),
+    };
+  } catch {
     return null;
   }
-
-  const phase = (Date.now() + line.id * 1000) / 5000;
-
-  return {
-    line,
-    pressuresPsi: {
-      extruder: Number((168 + Math.sin(phase) * 7).toFixed(1)),
-      dieHead: Number((142 + Math.cos(phase * 0.9) * 6).toFixed(1)),
-      cooling: Number((78 + Math.sin(phase * 1.2) * 4).toFixed(1)),
-    },
-    temperaturesC: {
-      zone1: Number((188 + Math.sin(phase * 0.8) * 3).toFixed(1)),
-      zone2: Number((194 + Math.cos(phase * 0.7) * 3).toFixed(1)),
-      zone3: Number((201 + Math.sin(phase * 0.6) * 2.5).toFixed(1)),
-      die: Number((206 + Math.cos(phase * 0.65) * 2).toFixed(1)),
-    },
-    motorSpeedsRpm: {
-      puller: Number((1200 + Math.sin(phase) * 65).toFixed(0)),
-      cutter: Number((980 + Math.cos(phase * 1.1) * 55).toFixed(0)),
-    },
-    diameterSensors: buildDiameterSensors(line),
-    updatedAt: new Date().toISOString(),
-  };
 }

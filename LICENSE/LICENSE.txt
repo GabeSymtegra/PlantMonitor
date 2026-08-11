@@ -1,0 +1,8 @@
+PlantMonitor License
+
+Copyright (c) 2026 PlantMonitor contributors.
+
+This repository currently does not grant an open-source redistribution license.
+All rights are reserved unless a separate written license agreement is provided.
+
+For commercial or redistribution licensing requests, contact the repository owner.

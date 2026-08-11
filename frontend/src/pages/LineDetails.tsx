@@ -1,24 +1,230 @@
 import {
   Alert,
-  Box,
   Button,
   Chip,
+  Divider,
+  Grid,
   Paper,
   Stack,
   Typography,
 } from "@mui/material";
-import { useEffect, useMemo, useState } from "react";
+import { alpha, getContrastRatio, useTheme } from "@mui/material/styles";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import StatusChip from "../components/common/StatusChip";
-import type { LineDetailModel, DiameterSensor } from "../models/LineDetailModel";
+import type { GaugeDetail, LineDetailModel } from "../models/LineDetailModel";
 import { getLineDetail } from "../services/dashboardService";
+
+function formatDuration(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safeSeconds / 3600)
+    .toString()
+    .padStart(2, "0");
+  const minutes = Math.floor((safeSeconds % 3600) / 60)
+    .toString()
+    .padStart(2, "0");
+  const secs = (safeSeconds % 60).toString().padStart(2, "0");
+
+  return `${hours}:${minutes}:${secs}`;
+}
+
+const gaugeCardColors = {
+  Bare: {
+    light: {
+      background: "#FFF7D6",
+      border: "#E6CB69",
+      accent: "#9A7A00",
+    },
+    dark: {
+      background: "#4B3B05",
+      border: "#D4AF37",
+      accent: "#FFE082",
+    },
+  },
+  Hot: {
+    light: {
+      background: "#FDECEC",
+      border: "#E9A5A5",
+      accent: "#C75B5B",
+    },
+    dark: {
+      background: "#4A1F1F",
+      border: "#D98282",
+      accent: "#FFB4B4",
+    },
+  },
+  Cold: {
+    light: {
+      background: "#EAF4FF",
+      border: "#9FC7F5",
+      accent: "#2F6DB2",
+    },
+    dark: {
+      background: "#142D4C",
+      border: "#6EA8E5",
+      accent: "#B7D7F7",
+    },
+  },
+  Default: {
+    light: {
+      background: "#F5F5F5",
+      border: "#D0D0D0",
+      accent: "#4B5563",
+    },
+    dark: {
+      background: "#24303D",
+      border: "#526173",
+      accent: "#E2E8F0",
+    },
+  },
+} as const;
+
+function getReadableTextColor(background: string) {
+  const whiteContrast = getContrastRatio(background, "#FFFFFF");
+  const darkContrast = getContrastRatio(background, "#0F172A");
+
+  return whiteContrast >= darkContrast ? "#FFFFFF" : "#0F172A";
+}
+
+function MetricRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" spacing={2}>
+      <Typography sx={{ color: "inherit", opacity: 0.78 }}>{label}</Typography>
+      <Typography sx={{ fontWeight: 600, textAlign: "right" }}>{value}</Typography>
+    </Stack>
+  );
+}
+
+function GaugeSection({
+  gauge,
+}: {
+  gauge: GaugeDetail;
+}) {
+  const theme = useTheme();
+  const zonePalette = gaugeCardColors[gauge.zone as keyof typeof gaugeCardColors] ?? gaugeCardColors.Default;
+  const palette = theme.palette.mode === "dark" ? zonePalette.dark : zonePalette.light;
+  const textColor = getReadableTextColor(palette.background);
+  const nestedPanelBackground = theme.palette.mode === "dark"
+    ? alpha("#FFFFFF", 0.08)
+    : alpha("#FFFFFF", 0.58);
+
+  return (
+    <Paper
+      sx={{
+        p: 2.5,
+        height: "100%",
+        backgroundColor: palette.background,
+        border: `1px solid ${palette.border}`,
+        borderRadius: 3,
+        color: textColor,
+      }}
+    >
+      <Typography variant="h6" sx={{ mb: 0.75, fontWeight: 800, color: palette.accent }}>
+        {gauge.zone} Gauge
+      </Typography>
+
+      <Stack spacing={1}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700, letterSpacing: 0.2 }}>
+          Current Gauge Readings
+        </Typography>
+        <MetricRow label="Setpoint" value={gauge.currentSetpoint.toFixed(3)} />
+        <MetricRow label="Actual" value={gauge.currentActual.toFixed(3)} />
+        <MetricRow
+          label="Deviation"
+          value={`${gauge.currentPercentDeviation.toFixed(3)}%`}
+        />
+      </Stack>
+
+      <Divider sx={{ my: 2.25, borderColor: palette.border }} />
+
+      <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700, letterSpacing: 0.2 }}>
+        Overall Quality Metrics
+      </Typography>
+      <Stack spacing={1}>
+        <MetricRow
+          label="Avg Abs Deviation"
+          value={`${gauge.overallAverageAbsoluteDeviation.toFixed(3)}%`}
+        />
+        <MetricRow
+          label="Max Positive"
+          value={`${gauge.overallMaxPositiveDeviation.toFixed(3)}%`}
+        />
+        <MetricRow
+          label="Max Negative"
+          value={`${gauge.overallMaxNegativeDeviation.toFixed(3)}%`}
+        />
+      </Stack>
+
+      <Divider sx={{ my: 2.25, borderColor: palette.border }} />
+
+      <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700, letterSpacing: 0.2 }}>
+        Mode Breakdown
+      </Typography>
+
+      <Stack spacing={1.5}>
+        <Paper
+          sx={{
+            p: 1.5,
+            backgroundColor: nestedPanelBackground,
+            borderRadius: 2,
+            color: textColor,
+          }}
+        >
+          <Typography variant="body2" sx={{ mb: 1, fontWeight: 700 }}>
+            Auto Mode Quality
+          </Typography>
+          <Stack spacing={0.75}>
+            <MetricRow
+              label="Avg Abs Deviation"
+              value={`${gauge.autoAverageAbsoluteDeviation.toFixed(3)}%`}
+            />
+            <MetricRow
+              label="Max Positive"
+              value={`${gauge.autoMaxPositiveDeviation.toFixed(3)}%`}
+            />
+            <MetricRow
+              label="Max Negative"
+              value={`${gauge.autoMaxNegativeDeviation.toFixed(3)}%`}
+            />
+          </Stack>
+        </Paper>
+
+        <Paper
+          sx={{
+            p: 1.5,
+            backgroundColor: nestedPanelBackground,
+            borderRadius: 2,
+            color: textColor,
+          }}
+        >
+          <Typography variant="body2" sx={{ mb: 1, fontWeight: 700 }}>
+            Manual Mode Quality
+          </Typography>
+          <Stack spacing={0.75}>
+            <MetricRow
+              label="Avg Abs Deviation"
+              value={`${gauge.manualAverageAbsoluteDeviation.toFixed(3)}%`}
+            />
+            <MetricRow
+              label="Max Positive"
+              value={`${gauge.manualMaxPositiveDeviation.toFixed(3)}%`}
+            />
+            <MetricRow
+              label="Max Negative"
+              value={`${gauge.manualMaxNegativeDeviation.toFixed(3)}%`}
+            />
+          </Stack>
+        </Paper>
+      </Stack>
+    </Paper>
+  );
+}
 
 export default function LineDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<LineDetailModel | null>(null);
-  const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
 
   const lineId = Number(id);
 
@@ -37,10 +243,6 @@ export default function LineDetails() {
       }
 
       setDetail(nextDetail);
-
-      setSelectedSensorId((previous) =>
-        previous ?? nextDetail.diameterSensors[0]?.id ?? null
-      );
     }
 
     void loadDetail();
@@ -54,17 +256,6 @@ export default function LineDetails() {
       clearInterval(timer);
     };
   }, [lineId]);
-
-  const selectedSensor = useMemo<DiameterSensor | null>(() => {
-    if (!detail || !selectedSensorId) {
-      return null;
-    }
-
-    return (
-      detail.diameterSensors.find((sensor) => sensor.id === selectedSensorId) ??
-      null
-    );
-  }, [detail, selectedSensorId]);
 
   if (!Number.isFinite(lineId)) {
     return <Alert severity="error">Invalid line id.</Alert>;
@@ -82,86 +273,72 @@ export default function LineDetails() {
         </Button>
 
         <Typography color="text.secondary">
-          Updated {new Date(detail.updatedAt).toLocaleTimeString()}
+          Updated {new Date(detail.lastUpdated).toLocaleTimeString()}
         </Typography>
       </Stack>
 
       <Paper sx={{ p: 2.5 }}>
         <Stack spacing={1}>
           <Typography variant="h4" sx={{ fontWeight: 700 }}>
-            Line #{detail.line.lineNumber} - {detail.line.lineName}
+            Line #{detail.lineNumber} - {detail.lineName}
           </Typography>
 
           <Stack direction="row" spacing={1} alignItems="center">
-            <StatusChip status={detail.line.status} />
-            <Chip label={`Serial ${detail.line.product}`} variant="outlined" />
-            <Chip label={`PLC ${detail.line.plcIp}`} variant="outlined" />
+            <StatusChip status={detail.status} />
+            <Chip label={`Product ${detail.productId}`} variant="outlined" />
+            <Chip label={`Recipe ${detail.recipeId}`} variant="outlined" />
+            <Chip label={`PLC ${detail.plcIp}`} variant="outlined" />
+          </Stack>
+
+          <Typography color="text.secondary">
+            Machine {detail.machineId} | Operator {detail.operatorName} | Mode {detail.controlMode}
+          </Typography>
+        </Stack>
+      </Paper>
+
+      <Paper sx={{ p: 2.5 }}>
+        <Stack spacing={1.75}>
+          <Typography variant="h5" sx={{ fontWeight: 800 }}>
+            General Runtime Statistics
+          </Typography>
+
+          <Divider />
+
+          <Stack spacing={1}>
+            <MetricRow
+              label="Production Length"
+              value={`${detail.currentProductionLength.toLocaleString()} ft`}
+            />
+            <MetricRow label="Runtime" value={formatDuration(detail.runtimeSeconds)} />
+            <MetricRow label="Auto Time" value={formatDuration(detail.autoTimeSeconds)} />
+            <MetricRow label="Manual Time" value={formatDuration(detail.manualTimeSeconds)} />
+          </Stack>
+
+          <Divider />
+
+          <Stack spacing={1}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, letterSpacing: 0.2 }}>
+              Mode Percentages
+            </Typography>
+            <MetricRow label="Auto %" value={`${detail.autoPercentage.toFixed(2)}%`} />
+            <MetricRow label="Manual %" value={`${detail.manualPercentage.toFixed(2)}%`} />
           </Stack>
         </Stack>
       </Paper>
 
-      <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
-        <Paper sx={{ p: 2, flex: 1 }}>
-          <Typography variant="h6" sx={{ mb: 1.5 }}>
-            Diameter Sensors
-          </Typography>
-
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {detail.diameterSensors.map((sensor) => (
-              <Button
-                key={sensor.id}
-                size="small"
-                variant={selectedSensorId === sensor.id ? "contained" : "outlined"}
-                onClick={() => setSelectedSensorId(sensor.id)}
-              >
-                {sensor.label}
-              </Button>
-            ))}
-          </Stack>
-
-          {selectedSensor ? (
-            <Box sx={{ mt: 2 }}>
-              <Typography sx={{ fontWeight: 700 }}>{selectedSensor.label}</Typography>
-              <Typography>
-                Diameter: {selectedSensor.diameterMm.toFixed(3)} mm
-              </Typography>
-              <Typography>
-                Deviation: {selectedSensor.deviationMm.toFixed(3)} mm
-              </Typography>
-              <Typography>Status: {selectedSensor.status}</Typography>
-            </Box>
-          ) : null}
-        </Paper>
-
-        <Paper sx={{ p: 2, flex: 1 }}>
-          <Typography variant="h6" sx={{ mb: 1.5 }}>
-            Pressure and Temperature
-          </Typography>
-
-          <Typography>Extruder Pressure: {detail.pressuresPsi.extruder} psi</Typography>
-          <Typography>Die Head Pressure: {detail.pressuresPsi.dieHead} psi</Typography>
-          <Typography>Cooling Pressure: {detail.pressuresPsi.cooling} psi</Typography>
-
-          <Box sx={{ mt: 2 }}>
-            <Typography>Zone 1 Temp: {detail.temperaturesC.zone1} C</Typography>
-            <Typography>Zone 2 Temp: {detail.temperaturesC.zone2} C</Typography>
-            <Typography>Zone 3 Temp: {detail.temperaturesC.zone3} C</Typography>
-            <Typography>Die Temp: {detail.temperaturesC.die} C</Typography>
-          </Box>
-        </Paper>
+      <Stack spacing={0.5}>
+        <Typography variant="h5" sx={{ fontWeight: 800 }}>
+          Gauge Quality Overview
+        </Typography>
       </Stack>
 
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" sx={{ mb: 1.5 }}>
-          Drive Speeds and Runtime
-        </Typography>
-
-        <Typography>Puller Speed: {detail.motorSpeedsRpm.puller} rpm</Typography>
-        <Typography>Cutter Speed: {detail.motorSpeedsRpm.cutter} rpm</Typography>
-        <Typography>Control Mode: {detail.line.controlMode}</Typography>
-        <Typography>Runtime: {detail.line.runtime}</Typography>
-        <Typography>Total Length: {detail.line.totalLength.toLocaleString()} ft</Typography>
-      </Paper>
+      <Grid container spacing={2}>
+        {detail.gauges.map((gauge) => (
+          <Grid key={gauge.zone} size={{ xs: 12, lg: 4 }}>
+            <GaugeSection gauge={gauge} />
+          </Grid>
+        ))}
+      </Grid>
     </Stack>
   );
 }

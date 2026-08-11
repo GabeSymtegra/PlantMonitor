@@ -28,7 +28,7 @@ public sealed class PlcConnectionService : IPlcConnectionService
             return CreateFailure(request, InvalidIpMessage);
         }
 
-        return await driver!.TestConnectionAsync(request.IpAddress.Trim(), cancellationToken);
+        return await driver!.TestConnectionAsync(request.IpAddress.Trim(), request.Options, cancellationToken);
     }
 
     public bool TryResolveDriver(string? driverName, out IPlcDriver? driver, out string? errorMessage)
@@ -53,7 +53,8 @@ public sealed class PlcConnectionService : IPlcConnectionService
 
     public bool IsValidIpAddress(string? ipAddress)
     {
-        return IPAddress.TryParse(ipAddress?.Trim(), out _);
+        return IPAddress.TryParse(ipAddress?.Trim(), out var parsed)
+            && parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
     }
 
     private static PlcConnectionResult CreateFailure(PlcConnectionRequest request, string message)

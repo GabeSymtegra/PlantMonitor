@@ -1,4 +1,4 @@
-import { Alert, Box, Button } from "@mui/material";
+import { Alert, Box, Button, Paper, Stack, Typography } from "@mui/material";
 import { useMemo, useState } from "react";
 
 import { useDashboard } from "../context/useDashboard";
@@ -159,28 +159,42 @@ export default function Dashboard() {
   }, [dashboard?.lines, searchTerm]);
 
   return (
-    <Box>
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: { xs: "stretch", sm: "center" },
-          flexDirection: { xs: "column", sm: "row" },
-          mb: 3,
-          gap: 2,
-          minWidth: 0,
-        }}
+    <Stack spacing={2.5}>
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", md: "center" }}
+        spacing={2}
       >
-        <Box sx={{ flex: 1, minWidth: 0, width: "100%" }}>
-          <SearchBar
-            value={searchTerm}
-            onChange={setSearchTerm}
-            suggestions={searchSuggestions}
-          />
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: 700 }}>
+            Production Dashboard
+          </Typography>
+          <Typography color="text.secondary">
+            Showing {visibleLines.length} line{visibleLines.length === 1 ? "" : "s"}
+            {searchTerm.trim() ? ` matching "${searchTerm.trim()}"` : " across the live runtime view"}.
+          </Typography>
         </Box>
+      </Stack>
 
-        <ViewToggle />
-      </Box>
+      <Paper sx={{ p: 2.5, borderRadius: 3 }}>
+        <Stack
+          direction={{ xs: "column", lg: "row" }}
+          spacing={2}
+          justifyContent="space-between"
+          alignItems={{ xs: "stretch", lg: "center" }}
+        >
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <SearchBar
+              value={searchTerm}
+              onChange={setSearchTerm}
+              suggestions={searchSuggestions}
+            />
+          </Box>
+
+          <ViewToggle />
+        </Stack>
+      </Paper>
 
       {error ? (
         <Alert
@@ -197,6 +211,6 @@ export default function Dashboard() {
       ) : null}
 
       {view === "table" ? <LineTable lines={visibleLines} /> : <LineCards lines={visibleLines} />}
-    </Box>
+    </Stack>
   );
 }

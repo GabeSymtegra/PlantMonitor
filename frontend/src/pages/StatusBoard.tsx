@@ -8,7 +8,7 @@ import {
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import LogoutIcon from "@mui/icons-material/Logout";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/useAuth";
@@ -19,6 +19,8 @@ import { LineStatus } from "../types/LineStatus";
 const statusColorMap: Record<LineStatus, string> = {
   [LineStatus.Running]: "#2E7D32",
   [LineStatus.Stopped]: "#ED6C02",
+  [LineStatus.Bleedout]: "#0F766E",
+  [LineStatus.Startup]: "#7C3AED",
   [LineStatus.Faulted]: "#D32F2F",
   [LineStatus.Offline]: "#616161",
   [LineStatus.Maintenance]: "#1565C0",
@@ -30,9 +32,25 @@ function formatNumber(value: number) {
 
 export default function StatusBoard() {
   const navigate = useNavigate();
-  const { logout, isAuthenticated } = useAuth();
+  const { logout, isAuthenticated, refreshSession } = useAuth();
   const { dashboard, loading } = useDashboard();
   const { appearance } = useThemeMode();
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    void refreshSession();
+
+    const keepAliveTimer = window.setInterval(() => {
+      void refreshSession();
+    }, 15 * 60 * 1000);
+
+    return () => {
+      window.clearInterval(keepAliveTimer);
+    };
+  }, [isAuthenticated, refreshSession]);
 
   const monitorName = appearance.monitorName.trim() || "Plant";
 
@@ -162,30 +180,32 @@ export default function StatusBoard() {
                   gridTemplateColumns:
                     "1fr 1fr 1.1fr 1fr 1fr 0.9fr 0.9fr 0.95fr 0.95fr 0.95fr 1.15fr",
                   alignItems: "center",
+                  textAlign: "center",
                   px: 1.4,
                   py: 1,
                   borderTop: (theme) => `1px solid ${theme.palette.divider}`,
                 }}
               >
-                <Typography fontWeight={700}>
+                <Typography fontWeight={700} textAlign="center">
                   #{line.lineNumber} {line.lineName}
                 </Typography>
 
-                <Chip
-                  label={line.status}
-                  size="small"
-                  sx={{
-                    justifySelf: "start",
-                    color: "#fff",
-                    bgcolor: statusColorMap[line.status],
-                    fontWeight: 700,
-                  }}
-                />
+                <Box sx={{ display: "flex", justifyContent: "center" }}>
+                  <Chip
+                    label={line.status}
+                    size="small"
+                    sx={{
+                      color: "#fff",
+                      bgcolor: statusColorMap[line.status],
+                      fontWeight: 700,
+                    }}
+                  />
+                </Box>
 
-                <Typography>{line.product}</Typography>
-                <Typography>{line.timeInStatus}</Typography>
-                <Typography fontWeight={700}>{line.controlMode}</Typography>
-                <Typography fontWeight={700}>
+                <Typography textAlign="center">{line.product}</Typography>
+                <Typography textAlign="center">{line.timeInStatus}</Typography>
+                <Typography fontWeight={700} textAlign="center">{line.controlMode}</Typography>
+                <Typography fontWeight={700} textAlign="center">
                   {formatNumber(line.totalLength)} ft
                 </Typography>
                 <Typography align="center">{line.percentAutoMode.toFixed(1)}%</Typography>

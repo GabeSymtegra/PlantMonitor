@@ -1,11 +1,12 @@
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ??
-  "http://localhost:5265/api";
+  "/api";
 
-const TOKEN_STORAGE_KEY = "plantmonitor-auth-token";
+// -----------------------------------------------------------------------------
+// Exported API error type and auth-expiry event contract
+// -----------------------------------------------------------------------------
+
 export const AUTH_EXPIRED_EVENT = "plantmonitor-auth-expired";
-
-let currentAccessToken: string | null = null;
 
 export class ApiRequestError extends Error {
   public readonly method: string;
@@ -29,12 +30,29 @@ export class ApiRequestError extends Error {
   }
 }
 
-function buildUrl(endpoint: string): string {
-  return `${API_BASE}${endpoint}`;
-}
+// -----------------------------------------------------------------------------
+// Request construction helpers
+// -----------------------------------------------------------------------------
 
-export function setApiAccessToken(token: string | null) {
-  currentAccessToken = token;
+function buildUrl(endpoint: string): string {
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint
+    : `/${endpoint}`;
+
+  const baseHasApiSuffix = /\/api$/i.test(API_BASE);
+  const endpointHasApiPrefix = /^\/api(\/|$)/i.test(normalizedEndpoint);
+
+  let resolvedEndpoint = normalizedEndpoint;
+
+  if (baseHasApiSuffix && endpointHasApiPrefix) {
+    resolvedEndpoint = normalizedEndpoint.replace(/^\/api/i, "");
+  }
+
+  if (!baseHasApiSuffix && !endpointHasApiPrefix) {
+    resolvedEndpoint = `/api${normalizedEndpoint}`;
+  }
+
+  return `${API_BASE}${resolvedEndpoint}`;
 }
 
 function buildRequestTrace(
@@ -52,32 +70,26 @@ function buildRequestTrace(
   return lines.join("\n");
 }
 
-function getAuthHeaders(): HeadersInit {
-  const token =
-    currentAccessToken ??
-    localStorage.getItem(TOKEN_STORAGE_KEY) ??
-    sessionStorage.getItem(TOKEN_STORAGE_KEY);
-
-  if (!token) {
-    return {};
-  }
-
-  return {
-    Authorization: `Bearer ${token}`,
-  };
-}
-
+// Unauthorized responses outside the login endpoint trigger a global auth
+// expiry event so the auth context can clear stale sessions.
 function dispatchAuthExpiredIfNeeded(url: string, status: number) {
-  if (status !== 401 || url.endsWith("/auth/login")) {
+  if (status !== 401) {
     return;
   }
 
-  currentAccessToken = null;
+  const isAuthEndpoint = /\/auth\/(login|session|logout)(\/|$)/i.test(url);
+  if (isAuthEndpoint) {
+    return;
+  }
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
   }
 }
+
+// -----------------------------------------------------------------------------
+// Shared response and request pipeline
+// -----------------------------------------------------------------------------
 
 async function handleResponse<T>(
   response: Response,
@@ -105,18 +117,38 @@ async function handleResponse<T>(
     });
   }
 
-  return response.json() as Promise<T>;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const contentLengthHeader = response.headers?.get?.("Content-Length");
+  if (contentLengthHeader?.trim() === "0") {
+    return undefined as T;
+  }
+
+  const responseBody = await response.text();
+  if (!responseBody.trim()) {
+    return undefined as T;
+  }
+
+  return JSON.parse(responseBody) as T;
 }
 
-export async function apiGet<T>(endpoint: string): Promise<T> {
-  const method = "GET";
+async function request<T>(
+  method: string,
+  endpoint: string,
+  body?: unknown
+): Promise<T> {
   const url = buildUrl(endpoint);
 
   try {
     const response = await fetch(url, {
+      method,
+      credentials: "include",
       headers: {
-        ...getAuthHeaders(),
+        ...(body ? { "Content-Type": "application/json" } : {}),
       },
+      body: body ? JSON.stringify(body) : undefined,
     });
 
     return handleResponse<T>(response, method, url);
@@ -130,34 +162,56 @@ export async function apiGet<T>(endpoint: string): Promise<T> {
     throw new ApiRequestError({
       method,
       url,
-      message: buildRequestTrace(
-        method,
-        url,
-        "failed: no response returned",
-        details
-      ),
+      message: buildRequestTrace(method, url, "failed: no response returned", details),
     });
   }
+}
+
+// Public convenience helpers keep API usage readable at the call site while all
+// header, auth, and error behavior stays centralized here.
+export async function apiGet<T>(endpoint: string): Promise<T> {
+  return request<T>("GET", endpoint);
 }
 
 export async function apiPost<TResponse, TBody = unknown>(
   endpoint: string,
   body: TBody
 ): Promise<TResponse> {
-  const method = "POST";
+  return request<TResponse>("POST", endpoint, body);
+}
+
+export async function apiPut<TResponse, TBody = unknown>(
+  endpoint: string,
+  body: TBody
+): Promise<TResponse> {
+  return request<TResponse>("PUT", endpoint, body);
+}
+
+export async function apiDelete(endpoint: string): Promise<void> {
+  const method = "DELETE";
   const url = buildUrl(endpoint);
 
   try {
     const response = await fetch(url, {
       method,
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeaders(),
-      },
-      body: JSON.stringify(body),
+      credentials: "include",
     });
 
-    return handleResponse<TResponse>(response, method, url);
+    if (!response.ok) {
+      const errorText = await response.text();
+      const statusText = response.statusText || "Request failed";
+      const responseDetails = errorText || statusText;
+
+      dispatchAuthExpiredIfNeeded(url, response.status);
+
+      throw new ApiRequestError({
+        method,
+        url,
+        status: response.status,
+        responseBody: errorText || undefined,
+        message: buildRequestTrace(method, url, `failed: HTTP ${response.status} ${statusText}`, responseDetails),
+      });
+    }
   } catch (error) {
     if (error instanceof ApiRequestError) {
       throw error;
@@ -168,12 +222,7 @@ export async function apiPost<TResponse, TBody = unknown>(
     throw new ApiRequestError({
       method,
       url,
-      message: buildRequestTrace(
-        method,
-        url,
-        "failed: no response returned",
-        details
-      ),
+      message: buildRequestTrace(method, url, "failed: no response returned", details),
     });
   }
 }

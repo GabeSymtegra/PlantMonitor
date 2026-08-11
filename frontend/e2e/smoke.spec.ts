@@ -77,7 +77,18 @@ test.describe("PlantMonitor smoke", () => {
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("grid")).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Line #" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Line Name" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Line" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Status" })).toBeVisible();
+  });
+
+  test("shows network settings controls in Settings page", async ({ page }) => {
+    await loginAsAdmin(page);
+
+    await page.goto("/settings");
+
+    await expect(page.getByRole("heading", { name: "Network Settings" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh Status" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Scan SSIDs" })).toBeVisible();
   });
 });

@@ -8,6 +8,8 @@ import { LineStatus } from "../types/LineStatus";
 const statusOrder: LineStatus[] = [
   LineStatus.Running,
   LineStatus.Stopped,
+  LineStatus.Bleedout,
+  LineStatus.Startup,
   LineStatus.Faulted,
   LineStatus.Offline,
   LineStatus.Maintenance,
@@ -108,6 +110,10 @@ export default function Lines() {
               ? "success"
               : line.status === LineStatus.Stopped
                 ? "warning"
+                : line.status === LineStatus.Bleedout
+                  ? "info"
+                  : line.status === LineStatus.Startup
+                    ? "secondary"
                 : line.status === LineStatus.Faulted
                   ? "error"
                   : line.status === LineStatus.Maintenance

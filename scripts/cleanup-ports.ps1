@@ -11,14 +11,14 @@ foreach ($port in $Ports) {
         continue
     }
 
-    $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
-    foreach ($pid in $pids) {
+    $processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($processId in $processIds) {
         try {
-            Stop-Process -Id $pid -Force -ErrorAction Stop
-            Write-Host "Stopped process $pid on port $port"
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+            Write-Host "Stopped process $processId on port $port"
         }
         catch {
-            Write-Warning "Could not stop process $pid on port $port: $($_.Exception.Message)"
+            Write-Warning "Could not stop process $processId on port $($port): $($_.Exception.Message)"
         }
     }
 }

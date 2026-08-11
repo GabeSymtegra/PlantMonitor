@@ -9,7 +9,7 @@ function renderWithAuth(
   path: string,
   options: {
     user: User | null;
-    accessToken: string | null;
+    isAuthenticated: boolean;
     requiredRoles?: User["role"][];
   }
 ) {
@@ -17,12 +17,14 @@ function renderWithAuth(
     <AuthContext.Provider
       value={{
         user: options.user,
-        accessToken: options.accessToken,
         authError: null,
-        isAuthenticated: Boolean(options.user && options.accessToken),
+        initializing: false,
+        isAuthenticated: options.isAuthenticated,
+        mustChangePassword: false,
         isAdmin: options.user?.role === "Admin",
         canConfigure: options.user?.role === "Admin",
-        login: async () => true,
+        login: async () => ({ authenticated: true, mustChangePassword: false }),
+        refreshSession: async () => undefined,
         logout: () => undefined,
       }}
     >
@@ -47,7 +49,7 @@ describe("ProtectedRoute", () => {
   it("redirects unauthenticated users to login", () => {
     renderWithAuth("/settings", {
       user: null,
-      accessToken: null,
+      isAuthenticated: false,
     });
 
     expect(screen.getByText("login page")).toBeInTheDocument();
@@ -56,7 +58,7 @@ describe("ProtectedRoute", () => {
   it("redirects authenticated non-admin users to forbidden when role required", () => {
     renderWithAuth("/settings", {
       user: { username: "operator", role: "Operator" },
-      accessToken: "token",
+      isAuthenticated: true,
       requiredRoles: ["Admin"],
     });
 
@@ -66,7 +68,7 @@ describe("ProtectedRoute", () => {
   it("allows authenticated admin users through", () => {
     renderWithAuth("/settings", {
       user: { username: "test", role: "Admin" },
-      accessToken: "token",
+      isAuthenticated: true,
       requiredRoles: ["Admin"],
     });
 
@@ -76,7 +78,7 @@ describe("ProtectedRoute", () => {
   it("redirects operator users to status board for non-status-board routes", () => {
     renderWithAuth("/", {
       user: { username: "operator", role: "Operator" },
-      accessToken: "token",
+      isAuthenticated: true,
     });
 
     expect(screen.getByText("status board page")).toBeInTheDocument();
@@ -85,7 +87,7 @@ describe("ProtectedRoute", () => {
   it("allows operator users on status board route", () => {
     renderWithAuth("/status-board", {
       user: { username: "operator", role: "Operator" },
-      accessToken: "token",
+      isAuthenticated: true,
     });
 
     expect(screen.getByText("status board page")).toBeInTheDocument();

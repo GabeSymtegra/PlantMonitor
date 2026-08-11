@@ -3,6 +3,8 @@ import Chip from "@mui/material/Chip";
 type Status =
   | "Running"
   | "Stopped"
+  | "Bleedout"
+  | "Startup"
   | "Faulted"
   | "Offline"
   | "Maintenance";
@@ -21,6 +23,16 @@ export default function StatusChip({ status }: Props) {
     Stopped: {
       label: "Stopped",
       color: "warning" as const,
+    },
+
+    Bleedout: {
+      label: "Bleedout",
+      color: "info" as const,
+    },
+
+    Startup: {
+      label: "Startup",
+      color: "secondary" as const,
     },
 
     Faulted: {

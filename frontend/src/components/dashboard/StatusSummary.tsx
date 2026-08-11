@@ -16,6 +16,8 @@ export default function StatusSummary() {
     {
       [LineStatus.Running]: 0,
       [LineStatus.Stopped]: 0,
+      [LineStatus.Bleedout]: 0,
+      [LineStatus.Startup]: 0,
       [LineStatus.Faulted]: 0,
       [LineStatus.Offline]: 0,
       [LineStatus.Maintenance]: 0,
@@ -45,6 +47,16 @@ export default function StatusSummary() {
       title: "Faulted",
       value: statusCounts[LineStatus.Faulted],
       color: "#D32F2F",
+    },
+    {
+      title: "Bleedout",
+      value: statusCounts[LineStatus.Bleedout],
+      color: "#0F766E",
+    },
+    {
+      title: "Startup",
+      value: statusCounts[LineStatus.Startup],
+      color: "#7C3AED",
     },
     {
       title: "Offline",

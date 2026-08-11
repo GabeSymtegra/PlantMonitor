@@ -3,6 +3,7 @@ using backend.DTOs.Plc;
 using backend.Interfaces.Plc;
 using backend.Models.Plc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 
 namespace backend.Services.Plc;
 
@@ -17,13 +18,18 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         "control_mode",
     ];
 
-    private static readonly HashSet<string> AllowedDataTypes =
+    private static readonly HashSet<string> AllowedAllenBradleyProcessorTypes =
     [
-        "bool",
-        "int",
-        "dint",
-        "real",
-        "string",
+        "controllogix",
+        "compactlogix",
+        "micro800",
+    ];
+
+    private static readonly HashSet<string> AllowedSiemensProcessorTypes =
+    [
+        "s7-1217c",
+        "s7-1200",
+        "s7-1500",
     ];
 
     private readonly PlantMonitorDbContext _dbContext;
@@ -59,6 +65,11 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         return presets.Select(MapPreset).ToList();
     }
 
+    public IReadOnlyCollection<TagSlotDefinitionDto> GetRequiredTagSlots()
+    {
+        return PlcTagCatalogContract.RequiredTagSlots;
+    }
+
     public LineProtocolAssignmentDto? GetAssignment(int lineId)
     {
         var assignment = _dbContext.LineProtocolAssignments
@@ -66,6 +77,183 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             .SingleOrDefault(a => a.LineId == lineId);
 
         return assignment is null ? null : MapAssignment(assignment);
+    }
+
+    public IReadOnlyCollection<LineTagCatalogEntryDto> GetTagCatalog(int lineId)
+    {
+        return _dbContext.LineTagCatalogEntries
+            .AsNoTracking()
+            .Where(x => x.LineId == lineId)
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.LogicalKey)
+            .Select(MapCatalogEntry)
+            .ToList();
+    }
+
+    public bool TryReplaceTagCatalog(
+        int lineId,
+        UpdateLineTagCatalogRequestDto request,
+        out IReadOnlyCollection<LineTagCatalogEntryDto>? tags,
+        out string? error)
+    {
+        tags = null;
+        error = null;
+
+        if (lineId <= 0)
+        {
+            error = "Line id must be greater than 0.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Driver))
+        {
+            error = "Driver is required.";
+            return false;
+        }
+
+        var normalizedDriver = NormalizeManufacturer(request.Driver);
+        var allowedKeys = PlcTagCatalogContract.RequiredTagSlots
+            .Select(x => x.LogicalKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var requiredKeys = PlcTagCatalogContract.RequiredTagSlots.Where(x => x.IsRequired)
+            .Select(x => x.LogicalKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var catalog = request.Tags ?? [];
+        var duplicateKeys = catalog
+            .GroupBy(x => x.LogicalKey, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (duplicateKeys.Count > 0)
+        {
+            error = $"Duplicate logical keys detected: {string.Join(", ", duplicateKeys)}";
+            return false;
+        }
+
+        var unknownKeys = catalog
+            .Select(x => x.LogicalKey?.Trim() ?? string.Empty)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Where(key => !allowedKeys.Contains(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (unknownKeys.Count > 0)
+        {
+            error = $"Unknown logical keys are not allowed: {string.Join(", ", unknownKeys)}";
+            return false;
+        }
+
+        var missingRequired = requiredKeys
+            .Where(required => !catalog.Any(x => x.LogicalKey.Equals(required, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (missingRequired.Count > 0)
+        {
+            error = $"Missing required logical keys: {string.Join(", ", missingRequired)}";
+            return false;
+        }
+
+        var duplicateAddresses = catalog
+            .Where(x => !string.IsNullOrWhiteSpace(x.PlcAddress))
+            .GroupBy(x => x.PlcAddress.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToList();
+
+        if (duplicateAddresses.Count > 0)
+        {
+            error = $"Each PLC address can only be assigned once per line. Duplicate addresses: {string.Join(", ", duplicateAddresses)}";
+            return false;
+        }
+
+        foreach (var entry in catalog)
+        {
+            if (string.IsNullOrWhiteSpace(entry.LogicalKey))
+            {
+                error = "Logical key is required for every catalog entry.";
+                return false;
+            }
+
+            var normalizedKey = entry.LogicalKey.Trim();
+            var requiredSlot = PlcTagCatalogContract.RequiredTagSlots.FirstOrDefault(x => x.LogicalKey.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase));
+            if (requiredSlot is null)
+            {
+                error = $"Unknown logical key '{normalizedKey}'.";
+                return false;
+            }
+
+            if (requiredSlot.IsRequired && (!entry.IsRequired || !entry.IsEnabled))
+            {
+                error = $"Logical key '{normalizedKey}' must remain enabled and required.";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.Driver)
+                && !entry.Driver.Trim().Equals(normalizedDriver, StringComparison.OrdinalIgnoreCase))
+            {
+                error = $"Logical key '{entry.LogicalKey}' has driver '{entry.Driver}' but request driver is '{normalizedDriver}'.";
+                return false;
+            }
+
+            if (!PlcTagCatalogContract.IsAllowedCatalogDataType(entry.DataType))
+            {
+                error = $"Data type for logical key '{entry.LogicalKey}' must be one of: {PlcTagCatalogContract.AllowedCatalogTypeListForMessages}.";
+                return false;
+            }
+
+            if (entry.ReadFrequencyMs is < 250 or > 60000)
+            {
+                error = $"Read frequency for logical key '{entry.LogicalKey}' must be between 250 and 60000 milliseconds.";
+                return false;
+            }
+
+            if (entry.Scale <= 0)
+            {
+                error = $"Scale for logical key '{entry.LogicalKey}' must be greater than 0.";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.PlcAddress)
+                && !_addressValidator.IsValidAddress(normalizedDriver, entry.PlcAddress, out var addressMessage))
+            {
+                error = $"Logical key '{entry.LogicalKey}' has invalid PLC address: {addressMessage}";
+                return false;
+            }
+        }
+
+        var existing = _dbContext.LineTagCatalogEntries
+            .Where(x => x.LineId == lineId)
+            .ToList();
+
+        _dbContext.LineTagCatalogEntries.RemoveRange(existing);
+
+        var utcNow = DateTime.UtcNow;
+        var entities = catalog.Select((x, index) => new LineTagCatalogEntryEntity
+        {
+            LineId = lineId,
+            LogicalKey = x.LogicalKey.Trim(),
+            DisplayName = string.IsNullOrWhiteSpace(x.DisplayName) ? x.LogicalKey.Trim() : x.DisplayName.Trim(),
+            Driver = normalizedDriver,
+            PlcAddress = x.PlcAddress?.Trim() ?? string.Empty,
+            DataType = PlcTagCatalogContract.NormalizeDataType(x.DataType),
+            Unit = x.Unit,
+            Scale = x.Scale,
+            Description = x.Description,
+            IsEnabled = x.IsEnabled,
+            SortOrder = x.SortOrder == 0 ? index : x.SortOrder,
+            ReadFrequencyMs = x.ReadFrequencyMs <= 0 ? 1000 : x.ReadFrequencyMs,
+            IsRequired = x.IsRequired,
+            CreatedAtUtc = utcNow,
+            UpdatedAtUtc = utcNow,
+        }).ToList();
+
+        _dbContext.LineTagCatalogEntries.AddRange(entities);
+        _dbContext.SaveChanges();
+
+        tags = GetTagCatalog(lineId);
+        return true;
     }
 
     public bool TryUpsertAssignment(int lineId, UpdateLineProtocolAssignmentRequestDto request, out string? error)
@@ -97,18 +285,74 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             return false;
         }
 
+        var normalizedManufacturer = NormalizeManufacturer(request.Manufacturer);
+        var isAllenBradley = IsAllenBradley(normalizedManufacturer);
+        var isSiemens = IsSiemens(normalizedManufacturer);
+
+        if (!isAllenBradley && !isSiemens)
+        {
+            error = "Manufacturer must be AllenBradley or Siemens.";
+            return false;
+        }
+
+        var routePath = ResolveRoutePath(request, normalizedManufacturer, out var routePathError);
+        if (routePathError is not null)
+        {
+            error = routePathError;
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ProcessorType)
+            || !IsAllowedProcessorType(normalizedManufacturer, request.ProcessorType))
+        {
+            error = isAllenBradley
+                ? "Processor type must be one of: ControlLogix, CompactLogix, Micro800."
+                : "Processor type must be one of: S7-1217C, S7-1200, S7-1500.";
+            return false;
+        }
+
+        if (request.ConnectionTimeoutMs is < 500 or > 30000)
+        {
+            error = "Connection timeout must be between 500 and 30000 milliseconds.";
+            return false;
+        }
+
+        if (request.ReadTimeoutMs is < 500 or > 30000)
+        {
+            error = "Read timeout must be between 500 and 30000 milliseconds.";
+            return false;
+        }
+
+        if (request.RetryCount is < 0 or > 5)
+        {
+            error = "Retry count must be between 0 and 5.";
+            return false;
+        }
+
+        if (request.RetryDelayMs is < 0 or > 10000)
+        {
+            error = "Retry delay must be between 0 and 10000 milliseconds.";
+            return false;
+        }
+
         var assignment = _dbContext.LineProtocolAssignments.SingleOrDefault(a => a.LineId == lineId);
 
         if (assignment is null)
         {
-            assignment = new LineProtocolAssignmentEntity { LineId = lineId };
-            _dbContext.LineProtocolAssignments.Add(assignment);
+            error = "Line configuration not found.";
+            return false;
         }
 
-        assignment.Manufacturer = request.Manufacturer.Trim();
+        assignment.Manufacturer = normalizedManufacturer;
         assignment.PresetName = request.PresetName.Trim();
         assignment.PresetVersion = request.PresetVersion;
         assignment.PollIntervalMs = request.PollIntervalMs;
+        assignment.RoutePath = routePath!;
+        assignment.ProcessorType = NormalizeProcessorType(request.ProcessorType, normalizedManufacturer);
+        assignment.ConnectionTimeoutMs = request.ConnectionTimeoutMs;
+        assignment.ReadTimeoutMs = request.ReadTimeoutMs;
+        assignment.RetryCount = request.RetryCount;
+        assignment.RetryDelayMs = request.RetryDelayMs;
         assignment.UpdatedAtUtc = DateTime.UtcNow;
 
         _dbContext.SaveChanges();
@@ -179,9 +423,7 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             });
         }
 
-        if (!request.Manufacturer.Equals("AB", StringComparison.OrdinalIgnoreCase)
-            && !request.Manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase)
-            && !request.Manufacturer.Equals("Siemens", StringComparison.OrdinalIgnoreCase))
+        if (!IsAllenBradley(request.Manufacturer) && !IsSiemens(request.Manufacturer))
         {
             issues.Add(new TagValidationIssueDto
             {
@@ -225,13 +467,12 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
                 seenKeys.Add(tag.TagKey);
             }
 
-            if (string.IsNullOrWhiteSpace(tag.DataType)
-                || !AllowedDataTypes.Contains(tag.DataType.Trim(), StringComparer.OrdinalIgnoreCase))
+            if (!PlcTagCatalogContract.IsAllowedCatalogDataType(tag.DataType))
             {
                 issues.Add(new TagValidationIssueDto
                 {
                     Field = $"{prefix}.dataType",
-                    Message = "Data type must be one of: bool, int, dint, real, string.",
+                    Message = $"Data type must be one of: {PlcTagCatalogContract.AllowedCatalogTypeListForMessages}.",
                 });
             }
 
@@ -336,14 +577,49 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
 
     private static LineProtocolAssignmentDto MapAssignment(LineProtocolAssignmentEntity assignment)
     {
+        var manufacturer = NormalizeManufacturer(assignment.Manufacturer);
+        var hasRackSlot = TryParseRackSlot(assignment.RoutePath, out var rack, out var slot);
+
         return new LineProtocolAssignmentDto
         {
             LineId = assignment.LineId,
-            Manufacturer = NormalizeManufacturer(assignment.Manufacturer),
+            Manufacturer = manufacturer,
             PresetName = assignment.PresetName,
             PresetVersion = assignment.PresetVersion,
             PollIntervalMs = assignment.PollIntervalMs,
+            RoutePath = string.IsNullOrWhiteSpace(assignment.RoutePath) ? "1,0" : assignment.RoutePath,
+            ProcessorType = NormalizeProcessorType(assignment.ProcessorType, manufacturer),
+            Rack = hasRackSlot ? rack : null,
+            Slot = hasRackSlot ? slot : null,
+            ConnectionTimeoutMs = assignment.ConnectionTimeoutMs <= 0 ? 3000 : assignment.ConnectionTimeoutMs,
+            ReadTimeoutMs = assignment.ReadTimeoutMs <= 0 ? 3000 : assignment.ReadTimeoutMs,
+            RetryCount = assignment.RetryCount < 0 ? 0 : assignment.RetryCount,
+            RetryDelayMs = assignment.RetryDelayMs < 0 ? 0 : assignment.RetryDelayMs,
             UpdatedAtUtc = assignment.UpdatedAtUtc,
+        };
+    }
+
+    private static string NormalizeProcessorType(string? processorType, string manufacturer)
+    {
+        var normalized = processorType?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (IsSiemens(manufacturer))
+        {
+            return normalized switch
+            {
+                "s7-1200" => "S7-1200",
+                "s7-1500" => "S7-1500",
+                "s71200" => "S7-1200",
+                "s71500" => "S7-1500",
+                _ => "S7-1217C",
+            };
+        }
+
+        return normalized switch
+        {
+            "compactlogix" => "CompactLogix",
+            "micro800" => "Micro800",
+            _ => "ControlLogix",
         };
     }
 
@@ -352,6 +628,111 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
         return manufacturer.Trim().Equals("AB", StringComparison.OrdinalIgnoreCase)
             ? "AllenBradley"
             : manufacturer.Trim();
+    }
+
+    private static bool IsAllowedProcessorType(string manufacturer, string processorType)
+    {
+        var normalized = processorType.Trim().ToLowerInvariant();
+        return IsSiemens(manufacturer)
+            ? AllowedSiemensProcessorTypes.Contains(normalized)
+            : AllowedAllenBradleyProcessorTypes.Contains(normalized);
+    }
+
+    private static bool IsAllenBradley(string manufacturer)
+    {
+        return manufacturer.Equals("AllenBradley", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("AB", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSiemens(string manufacturer)
+    {
+        return manufacturer.Equals("Siemens", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7-1200", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7-1217C", StringComparison.OrdinalIgnoreCase)
+            || manufacturer.Equals("S7-1500", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ResolveRoutePath(
+        UpdateLineProtocolAssignmentRequestDto request,
+        string manufacturer,
+        out string? error)
+    {
+        error = null;
+
+        if (IsSiemens(manufacturer))
+        {
+            var rack = request.Rack;
+            var slot = request.Slot;
+
+            if (!rack.HasValue || !slot.HasValue)
+            {
+                if (TryParseRackSlot(request.RoutePath, out var parsedRack, out var parsedSlot))
+                {
+                    rack = parsedRack;
+                    slot = parsedSlot;
+                }
+            }
+
+            if (!rack.HasValue || !slot.HasValue)
+            {
+                error = "Rack and slot are required for Siemens assignments.";
+                return null;
+            }
+
+            if (rack.Value is < 0 or > 7 || slot.Value is < 0 or > 31)
+            {
+                error = "Rack must be between 0 and 7 and slot must be between 0 and 31.";
+                return null;
+            }
+
+            return $"{rack.Value},{slot.Value}";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.RoutePath))
+        {
+            error = "Route path is required.";
+            return null;
+        }
+
+        if (request.RoutePath.Length > 64)
+        {
+            error = "Route path must be 64 characters or fewer.";
+            return null;
+        }
+
+        var routePath = request.RoutePath.Trim();
+        if (!Regex.IsMatch(routePath, "^\\d+(,\\d+)*$"))
+        {
+            error = "Route path must be a comma-separated list of integers (example: 1,0).";
+            return null;
+        }
+
+        return routePath;
+    }
+
+    private static bool TryParseRackSlot(string? routePath, out int rack, out int slot)
+    {
+        rack = 0;
+        slot = 1;
+
+        if (string.IsNullOrWhiteSpace(routePath))
+        {
+            return false;
+        }
+
+        var segments = routePath.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(segments[^2], out rack) || !int.TryParse(segments[^1], out slot))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static EffectiveTagMappingDto MapTag(PlcProtocolPresetTagEntity tag)
@@ -375,6 +756,25 @@ public sealed class EfPlcProtocolConfigService : IPlcProtocolConfigService
             DataType = tag.DataType,
             Scale = tag.Scale,
             IsRequired = tag.IsRequired,
+        };
+    }
+
+    private static LineTagCatalogEntryDto MapCatalogEntry(LineTagCatalogEntryEntity entity)
+    {
+        return new LineTagCatalogEntryDto
+        {
+            LogicalKey = entity.LogicalKey,
+            DisplayName = entity.DisplayName,
+            Driver = entity.Driver,
+            PlcAddress = entity.PlcAddress,
+            DataType = entity.DataType,
+            Unit = entity.Unit,
+            Scale = entity.Scale,
+            Description = entity.Description,
+            IsEnabled = entity.IsEnabled,
+            SortOrder = entity.SortOrder,
+            ReadFrequencyMs = entity.ReadFrequencyMs,
+            IsRequired = entity.IsRequired,
         };
     }
 }

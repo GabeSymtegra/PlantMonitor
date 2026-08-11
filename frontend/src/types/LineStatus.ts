@@ -1,6 +1,8 @@
 export const LineStatus = {
   Running: "Running",
   Stopped: "Stopped",
+  Bleedout: "Bleedout",
+  Startup: "Startup",
   Faulted: "Faulted",
   Offline: "Offline",
   Maintenance: "Maintenance",

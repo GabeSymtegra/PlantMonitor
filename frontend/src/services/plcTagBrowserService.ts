@@ -1,17 +1,24 @@
-import { apiPost } from "./api/client";
-import type { PlcDriver } from "./plcConnectionService";
+import { apiGet, apiPost, apiPut } from "./api/client";
+import type {
+  PlcConnectionOptions,
+  PlcDriver,
+  PlcProcessorType,
+} from "./plcConnectionService";
 
 export interface PlcTagBrowseRequest {
   driver: PlcDriver;
   ipAddress: string;
+  options?: PlcConnectionOptions;
   search?: string;
 }
 
 export interface PlcTagBrowseItem {
   name: string;
+  displayName?: string | null;
   dataType: string;
   isFolder: boolean;
   parentPath?: string | null;
+  description?: string | null;
   canRead?: boolean | null;
   canWrite?: boolean | null;
 }
@@ -19,7 +26,15 @@ export interface PlcTagBrowseItem {
 export interface PlcTagReadRequest {
   driver: PlcDriver;
   ipAddress: string;
+  options?: PlcConnectionOptions;
   tagName: string;
+}
+
+export interface PlcTagReadManyRequest {
+  driver: PlcDriver;
+  ipAddress: string;
+  options?: PlcConnectionOptions;
+  tagNames: string[];
 }
 
 export interface PlcTagReadResult {
@@ -30,6 +45,100 @@ export interface PlcTagReadResult {
   canRead?: boolean | null;
   canWrite?: boolean | null;
   error?: string | null;
+}
+
+export interface TagSlotDefinition {
+  logicalKey: string;
+  displayName: string;
+  isRequired: boolean;
+  description?: string | null;
+}
+
+export interface LineTagCatalogEntry {
+  logicalKey: string;
+  displayName: string;
+  driver: string;
+  plcAddress: string;
+  dataType: string;
+  unit?: string | null;
+  scale: number;
+  description?: string | null;
+  isEnabled: boolean;
+  sortOrder: number;
+  readFrequencyMs: number;
+  isRequired: boolean;
+}
+
+export interface AutoMapTagCatalogRequest {
+  driver: PlcDriver;
+  ipAddress: string;
+  options?: PlcConnectionOptions;
+  search?: string;
+}
+
+export interface AutoMapTagSuggestion {
+  logicalKey: string;
+  plcAddress: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface LineProtocolAssignment {
+  lineId: number;
+  manufacturer: PlcDriver;
+  presetName: string;
+  presetVersion: number;
+  pollIntervalMs: number;
+  routePath: string;
+  processorType: PlcProcessorType;
+  rack?: number | null;
+  slot?: number | null;
+  connectionTimeoutMs: number;
+  readTimeoutMs: number;
+  retryCount: number;
+  retryDelayMs: number;
+  updatedAtUtc: string;
+}
+
+export interface UpdateLineProtocolAssignmentRequest {
+  manufacturer: PlcDriver;
+  presetName: string;
+  presetVersion: number;
+  pollIntervalMs: number;
+  routePath: string;
+  processorType: PlcProcessorType;
+  rack?: number;
+  slot?: number;
+  connectionTimeoutMs: number;
+  readTimeoutMs: number;
+  retryCount: number;
+  retryDelayMs: number;
+}
+
+export interface AutoMapTagCatalogResult {
+  driver: string;
+  scannedTagCount: number;
+  suggestedMappings: LineTagCatalogEntry[];
+  suggestionDetails: AutoMapTagSuggestion[];
+  missingLogicalKeys: string[];
+}
+
+export interface CommissioningReadinessResult {
+  lineId: number;
+  manufacturer: string;
+  presetName: string;
+  presetVersion: number;
+  isReady: boolean;
+  requiredTagCount: number;
+  mappedRequiredTagCount: number;
+  missingRequiredTagKeys: string[];
+  issues: string[];
+  checkedAtUtc: string;
+}
+
+export interface CommissioningActivateResult {
+  lineId: number;
+  lineLifecycleState: "Active";
 }
 
 export async function browsePlcTags(
@@ -46,6 +155,65 @@ export async function readPlcTag(
 ): Promise<PlcTagReadResult> {
   return apiPost<PlcTagReadResult, PlcTagReadRequest>(
     "/admin/plc/read-tag",
+    request
+  );
+}
+
+export async function getTagSlots(): Promise<TagSlotDefinition[]> {
+  return apiGet<TagSlotDefinition[]>("/admin/plc/tag-slots");
+}
+
+export async function getLineTagCatalog(lineId: number): Promise<LineTagCatalogEntry[]> {
+  return apiGet<LineTagCatalogEntry[]>(`/admin/lines/${lineId}/tag-catalog`);
+}
+
+export async function replaceLineTagCatalog(
+  lineId: number,
+  driver: PlcDriver,
+  tags: LineTagCatalogEntry[]
+): Promise<LineTagCatalogEntry[]> {
+  return apiPut<LineTagCatalogEntry[], { driver: PlcDriver; tags: LineTagCatalogEntry[] }>(
+    `/admin/lines/${lineId}/tag-catalog`,
+    {
+      driver,
+      tags,
+    }
+  );
+}
+
+export async function autoMapTagCatalog(
+  request: AutoMapTagCatalogRequest
+): Promise<AutoMapTagCatalogResult> {
+  return apiPost<AutoMapTagCatalogResult, AutoMapTagCatalogRequest>(
+    "/admin/plc/auto-map-tags",
+    request
+  );
+}
+
+export async function getCommissioningReadiness(
+  lineId: number
+): Promise<CommissioningReadinessResult> {
+  return apiGet<CommissioningReadinessResult>(`/admin/lines/${lineId}/commissioning-check`);
+}
+
+export async function activateCommissionedLine(
+  lineId: number
+): Promise<CommissioningActivateResult> {
+  return apiPost<CommissioningActivateResult, object>(`/admin/lines/${lineId}/commissioning-activate`, {});
+}
+
+export async function getLineProtocolAssignment(
+  lineId: number
+): Promise<LineProtocolAssignment> {
+  return apiGet<LineProtocolAssignment>(`/admin/lines/${lineId}/protocol-assignment`);
+}
+
+export async function upsertLineProtocolAssignment(
+  lineId: number,
+  request: UpdateLineProtocolAssignmentRequest
+): Promise<LineProtocolAssignment> {
+  return apiPut<LineProtocolAssignment, UpdateLineProtocolAssignmentRequest>(
+    `/admin/lines/${lineId}/protocol-assignment`,
     request
   );
 }

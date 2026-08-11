@@ -5,4 +5,5 @@ public sealed class PlcTagBrowseRequestDto
     public string Driver { get; set; } = string.Empty;
     public string IpAddress { get; set; } = string.Empty;
     public string? Search { get; set; }
+    public PlcConnectionOptionsDto? Options { get; set; }
 }

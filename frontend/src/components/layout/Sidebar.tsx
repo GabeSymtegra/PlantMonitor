@@ -86,7 +86,7 @@ export default function Sidebar() {
         ) : null}
 
         {!isOperator ? (
-          <Tooltip title="Reports" placement="right">
+          <Tooltip title="Completed Runs" placement="right">
             <ListItemButton component={NavLink} to="/reports" sx={itemSx}>
               <ListItemIcon sx={iconSx}>
                 <AssessmentIcon />

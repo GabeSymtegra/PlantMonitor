@@ -1,110 +1,11 @@
+import { Box, Chip, Paper, Stack, Typography } from "@mui/material";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
-import { getContrastRatio } from "@mui/material/styles";
 import { useNavigate } from "react-router-dom";
 
 import StatusChip from "../common/StatusChip";
 
 import { useDashboard } from "../../context/useDashboard";
-import { useThemeMode } from "../../context/useThemeMode";
-
-import type { LineStatus } from "../../types/LineStatus";
 import type { ProductionLine } from "../../types/ProductionLine";
-
-function formatDateTime(value: string): string {
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString();
-}
-
-const baseColumns: GridColDef[] = [
-  {
-    field: "lineNumber",
-    headerName: "Line #",
-    width: 85,
-  },
-  {
-    field: "lineName",
-    headerName: "Line Name",
-    minWidth: 165,
-    width: 185,
-  },
-  {
-    field: "product",
-    headerName: "Product Serial",
-    minWidth: 160,
-    width: 180,
-  },
-  {
-    field: "startDateTime",
-    headerName: "Start Date:Time",
-    minWidth: 210,
-    width: 230,
-    valueFormatter: (value) => formatDateTime(String(value ?? "")),
-  },
-  {
-    field: "status",
-    headerName: "Status",
-    width: 145,
-    renderCell: (params) => (
-      <StatusChip status={params.value as LineStatus} />
-    ),
-  },
-  {
-    field: "timeInStatus",
-    headerName: "Time",
-    width: 130,
-  },
-  {
-    field: "totalLength",
-    headerName: "Total Length",
-    width: 125,
-    valueFormatter: (value) => `${Number(value ?? 0).toLocaleString()} ft`,
-  },
-  {
-    field: "controlMode",
-    headerName: "Control Mode",
-    width: 120,
-  },
-  {
-    field: "percentAutoMode",
-    headerName: "%Auto Mode",
-    width: 115,
-    valueFormatter: (value) => `${Number(value ?? 0).toFixed(1)}%`,
-  },
-  {
-    field: "autoVariance",
-    headerName: "Auto Variance",
-    width: 120,
-    valueFormatter: (value) => Number(value ?? 0).toFixed(2),
-  },
-  {
-    field: "percentManualMode",
-    headerName: "%Man Mode",
-    width: 115,
-    valueFormatter: (value) => `${Number(value ?? 0).toFixed(1)}%`,
-  },
-  {
-    field: "manualVariance",
-    headerName: "Man Variance",
-    width: 120,
-    valueFormatter: (value) => Number(value ?? 0).toFixed(2),
-  },
-  {
-    field: "totalVariance",
-    headerName: "Total Variance",
-    width: 125,
-    valueFormatter: (value) => Number(value ?? 0).toFixed(2),
-  },
-];
-
-const columns: GridColDef[] = baseColumns.map((column) => ({
-  ...column,
-  headerAlign: "center",
-}));
 
 interface LineTableProps {
   lines?: ProductionLine[];
@@ -112,49 +13,211 @@ interface LineTableProps {
 
 export default function LineTable({ lines }: LineTableProps) {
   const { dashboard, loading } = useDashboard();
-  const { appearance } = useThemeMode();
   const rows = lines ?? dashboard?.lines ?? [];
   const navigate = useNavigate();
-  const tableHeaderTextColor =
-    getContrastRatio(appearance.tableColor, "#FFFFFF") >=
-    getContrastRatio(appearance.tableColor, "#0F172A")
-      ? "#FFFFFF"
-      : "#0F172A";
+
+  function displayOrUnknown(value: string | null | undefined): string {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : "Unknown";
+  }
+
+  function formatPercent(value: unknown): string {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? `${numberValue.toFixed(1)}%` : "??";
+  }
+
+  function formatVariance(value: unknown): string {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue.toFixed(2) : "??";
+  }
+
+  function formatLength(value: unknown): string {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? `${numberValue.toLocaleString()} ft` : "??";
+  }
+
+  const columns: GridColDef[] = [
+    {
+      field: "line",
+      headerName: "Line",
+      minWidth: 220,
+      width: 260,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "status",
+      headerName: "Status",
+      width: 140,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+      renderCell: (params) => (
+        <Box
+          sx={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: 1,
+          }}
+        >
+          <StatusChip status={params.value as "Running" | "Stopped" | "Bleedout" | "Startup" | "Faulted" | "Offline" | "Maintenance"} />
+        </Box>
+      ),
+    },
+    {
+      field: "serial",
+      headerName: "Serial",
+      minWidth: 190,
+      width: 210,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "time",
+      headerName: "Time",
+      width: 130,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "controlMode",
+      headerName: "Control",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+      renderCell: (params) => (
+        <Box
+          sx={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: 1,
+          }}
+        >
+          <Chip label={String(params.value)} variant="outlined" size="small" />
+        </Box>
+      ),
+    },
+    {
+      field: "length",
+      headerName: "Length",
+      width: 130,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "percentAuto",
+      headerName: "% Auto",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "autoVar",
+      headerName: "Auto Var",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "percentMan",
+      headerName: "% Man",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "manVar",
+      headerName: "Man Var",
+      width: 120,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+    {
+      field: "totalVar",
+      headerName: "Total Var",
+      width: 130,
+      sortable: false,
+      align: "center",
+      headerAlign: "center",
+    },
+  ];
+
+  const gridRows = rows.map((line) => ({
+    id: line.id,
+    line: `#${line.lineNumber} ${line.lineName}`,
+    status: line.status,
+    serial: displayOrUnknown(line.product),
+    time: line.timeInStatus,
+    controlMode: line.controlMode,
+    length: formatLength(line.totalLength),
+    percentAuto: formatPercent(line.percentAutoMode),
+    autoVar: formatVariance(line.autoVariance),
+    percentMan: formatPercent(line.percentManualMode),
+    manVar: formatVariance(line.manualVariance),
+    totalVar: formatVariance(line.totalVariance),
+  }));
 
   return (
-    <div
-      style={{
-        height: 550,
-        width: "100%",
-      }}
-    >
-      <DataGrid
-        rows={rows}
-        columns={columns}
-        loading={loading}
-        sx={{
-          border: (theme) => `1px solid ${theme.palette.divider}`,
-          backgroundColor: (theme) => theme.palette.background.paper,
-          "& .MuiDataGrid-columnHeaders": {
-            backgroundColor: appearance.tableColor,
-            color: tableHeaderTextColor,
-          },
-          "& .MuiDataGrid-columnHeaderTitle": {
-            fontWeight: appearance.boldText ? 700 : 600,
-          },
-        }}
-        pageSizeOptions={[10, 25, 50]}
-        initialState={{
-          pagination: {
-            paginationModel: {
-              pageSize: 10,
-              page: 0,
+    <Stack spacing={2}>
+      {loading && rows.length === 0 ? (
+        <Paper sx={{ p: 3 }}>
+          <Typography>Loading dashboard lines...</Typography>
+        </Paper>
+      ) : null}
+
+      <Box sx={{ height: 420, width: "100%" }}>
+        <DataGrid
+          rows={gridRows}
+          columns={columns}
+          autoHeight
+          disableRowSelectionOnClick
+          disableColumnMenu
+          onRowClick={(params) => navigate(`/lines/${params.row.id}`)}
+          initialState={{
+            pagination: {
+              paginationModel: { pageSize: 10, page: 0 },
             },
-          },
-        }}
-        onRowClick={(params) => navigate(`/lines/${params.row.id}`)}
-        disableRowSelectionOnClick
-      />
-    </div>
+          }}
+          pageSizeOptions={[10]}
+          sx={{
+            border: 0,
+            borderRadius: 2,
+            "& .MuiDataGrid-columnHeaders": {
+              backgroundColor: (theme) => theme.palette.mode === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+            },
+            "& .MuiDataGrid-columnHeaderTitleContainer": {
+              justifyContent: "center",
+            },
+            "& .MuiDataGrid-cell": {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+            },
+          }}
+        />
+      </Box>
+
+      {!loading && rows.length === 0 ? (
+        <Paper sx={{ p: 3 }}>
+          <Typography>No dashboard lines are available.</Typography>
+        </Paper>
+      ) : null}
+    </Stack>
   );
 }

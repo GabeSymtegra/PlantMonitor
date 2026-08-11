@@ -9,9 +9,119 @@ Primary operating model:
 - PLC telemetry ingestion through adapter services (mock now, real adapters next)
 
 ## Current Status
-- Branch: copilothelpbranch
-- Stage: Pre-release hardening and readiness
-- Focus: Items 1-6 (tests, runtime reliability, E2E smoke, security package cleanup, performance baseline, release governance)
+- Branch: siemens-support
+- Stage: LAN-hosted service hardening and deployment documentation alignment
+- Focus: Reliable same-network hosted rollout, credential/bootstrap validation, and production-like operator workflows
+
+## LAN Host Validation And Docs Alignment (2026-08-11)
+- Fixed strict-mode script failures in `install-lan-service.ps1` and `test-lan-service.ps1` by normalizing scalar/array handling for `.Count` access.
+- Fixed `install-lan-service.ps1` JWT key generation for Windows PowerShell compatibility.
+- Added optional convenience test account support to LAN install flow via `-EnableTestAccount` with configurable username/password.
+- Added credential login/session validation mode to `test-lan-service.ps1` (`-Username` / `-Password`) for direct remote sign-in troubleshooting.
+- Verified hosted LAN service and credential path with passing script executions after install.
+- Updated deployment and script runbooks to align with publish -> install -> test LAN workflow and current credential behavior.
+- Set frontend default theme mode to light unless a user-saved preference exists.
+- Added admin connectivity diagnostics endpoint (`GET /api/admin/system/connectivity`) and Administration UI panel for factory Wi-Fi client onboarding (recommended URLs, interface visibility, and warnings).
+- Added read-only OTA release check endpoint (`GET /api/admin/system/ota/check`) backed by GitHub Releases probe, plus Administration OTA status card showing current version, latest version, and release link/summary when available.
+- Added backend authorization coverage for connectivity and OTA endpoints (operator forbidden, admin allowed) and validated with targeted backend test run plus frontend production build.
+- Added admin re-authentication endpoint (`POST /api/admin/system/reauth`) issuing short-lived scoped tokens for sensitive OTA operations.
+- Added server-enforced OTA prepare gate (`POST /api/admin/system/ota/prepare-apply`) that requires a valid unexpired `ota-apply` re-auth token.
+- Added Administration OTA re-auth dialog and prepare-apply flow to validate sensitive-action authorization wiring before binary apply/rollback implementation.
+- Updated API docs and release tracking docs, including implementation slice checklist progress in `docs/QA-Matrix.md`.
+- Added OTA package staging endpoint (`POST /api/admin/system/ota/stage`) with SHA-256 computation and optional checksum verification, plus operation status lookup endpoint (`GET /api/admin/system/ota/stage/{operationId}`).
+- Added Administration OTA staging controls (package URL, optional expected SHA-256, re-auth gated stage action, and operation status/details refresh).
+- Added backend tests for OTA stage token enforcement and local-file staging success path with hash verification.
+- Marked Slice 4 complete in implementation checklist and updated API docs for staging contracts.
+- Added OTA apply orchestration endpoint (`POST /api/admin/system/ota/apply`) with staged-package apply simulation, post-apply health check, and automatic rollback behavior when health validation fails.
+- Added OTA apply operation status endpoint (`GET /api/admin/system/ota/apply/{operationId}`) and Administration UI controls for apply execution, status refresh, and forced-failure rollback simulation.
+- Added backend authorization/integration coverage for OTA apply re-auth token enforcement and apply status retrieval.
+- 5 out of 5) slices complete for OTA + configurable Wi-Fi dashboard access implementation.
+- Started Phase 2 privileged-host path with a new companion service scaffold at `plc-service/` (Windows-service-capable local HTTP agent for Wi-Fi operations).
+- Added backend privileged-agent client and new admin Wi-Fi endpoints (`GET /api/admin/system/wifi/status`, `GET /api/admin/system/wifi/scan`, `POST /api/admin/system/wifi/connect`, `POST /api/admin/system/wifi/disconnect`) with `wifi-manage` re-auth token enforcement on connect/disconnect.
+- Extended Administration connectivity panel with Wi-Fi scan/status/connect/disconnect controls and re-auth integration for sensitive network changes.
+- Added backend authorization coverage for Wi-Fi endpoint role and token guard behavior.
+- 6 out of 6) slices complete for OTA + Wi-Fi management foundation implementation.
+- Replaced privileged-agent simulated Wi-Fi behavior with real Windows `netsh` execution for status, scan, connect, and disconnect flows.
+- Added profile-generation path in the privileged agent for SSID/passphrase connect operations and post-command connection-state verification.
+- Hardened backend privileged-agent proxy handling to return `502` ProblemDetails for agent-unreachable and command-failure paths instead of masking failures behind generic success payloads.
+- Extended release publishing and installer build scripts to publish/package both backend and privileged agent artifacts in one deployable payload.
+- Extended LAN install/uninstall/test scripts to manage both services (`PlantMonitor-LAN` + `PlantMonitor-PrivilegedAgent`), enforce backend dependency on privileged agent, and verify agent health during validation.
+- Extended release packaging script to emit SHA-256 checksum and manifest metadata files alongside the release zip.
+- 7 out of 7) slices complete for OTA + Wi-Fi management + dual-service deployment foundation implementation.
+- Fixed Playwright smoke assertion drift by aligning dashboard header checks with current DataGrid column labels (`Line`, `Status`), restoring full E2E smoke pass.
+- Verified full release validation gate set: backend tests, frontend tests, frontend E2E, vulnerability scans, publish/install/test scripts, and package manifest/checksum generation.
+- Executed live OTA forced-health-failure apply flow against installed LAN host service and validated rollback result (`status=rolled_back`, `rolledBack=true`).
+- 8 out of 8) slices complete for OTA + Wi-Fi management + dual-service deployment + release-validation closure.
+- Executed integrated commissioning evidence scenario in one scripted pass: admin login (`200`), operator login (`200`), operator admin-path denial (`403`), admin Wi-Fi status/scan checks (`200/200`, `scanCount=2`), OTA stage (`staged`), and forced-failure apply rollback (`rolled_back`, `rolledBack=true`).
+- Verified continuity after rollback in the same scenario pass (`/health/live=200`, `/health/ready=200`, `/api/dashboard=200`).
+- 9 out of 9) slices complete for OTA + Wi-Fi management + dual-service deployment + integrated commissioning evidence closure.
+- Moved all host network configuration surfaces from Administration to Settings, including connectivity diagnostics and Wi-Fi status/scan/connect/disconnect controls.
+- Kept Wi-Fi connect/disconnect actions gated by admin password re-authentication while leaving OTA flow in Administration.
+- Simplified LAN bootstrap account behavior so seeded credentials are fixed to `admin`/`test`, `operator`/`test`, and `viewer`/`test`.
+- Updated install/deployment runbook examples to remove bootstrap password arguments and `-EnableTestAccount` dependency.
+- 10 out of 10) slices complete for OTA + Wi-Fi management + dual-service deployment + network-settings relocation + fixed-seed credentials.
+
+## Production Readiness Pass (2026-07-29)
+- Verified the frontend publish/runtime path by serving `frontend/dist` through backend `wwwroot` and checking referenced JS/CSS assets by real HTTP request.
+- Verified production-auth behavior in live browser flows, including login through the frontend origin and authenticated dashboard access after cookie-based sign-in.
+- Confirmed the current local production bootstrap path still requires the development accounts for local testing, while the production-only bootstrap guard remains a deployment concern.
+- Fixed the frontend dev proxy so `/api` and `/hubs` requests route to the backend during local development.
+- Fixed the PowerShell port cleanup helper used before local launches.
+- Deferred installer work until application correctness and publish/runtime validation are complete.
+- Verified backend test coverage for the fixed stop-ship slice, including mode-duration attribution, PLC preset cleanup, and PLC connection/config validation.
+- Extracted completed-run and runtime-event reporting queries into a dedicated reports service so ProductionRuntimeService now stays focused on live polling and snapshots.
+- Verified the backend test suite still passes after the reports-service split.
+- Standardized ProblemDetails responses for production/report query validation and not-found paths (`/api/lines/{id}/details`, `/api/production-runs`, `/api/production-runs/{id}`, `/api/reports/events`) with consistent status/title/detail/type and machine-readable `code` extension.
+- Added backend API test assertions for the new ProblemDetails payload contract and re-ran the full backend test suite.
+- Expanded ProblemDetails standardization across auth, lines, and admin PLC endpoints, replacing remaining ad-hoc `{ message }` payloads with consistent RFC7807 responses and stable error `code` extensions.
+- Implemented SignalR meaningful-change suppression so hub broadcast notifications fire on state-signature changes (with heartbeat fallback) instead of unconditional timer-only fan-out.
+- Hardened test reliability for auth/login by adding a test-only configuration switch that disables login rate-limiting in integration tests while preserving production behavior.
+- Improved readiness failure semantics by returning ProblemDetails for `/health/ready` database-unavailable responses.
+- Refreshed API and release docs to align with current cookie-auth and ProblemDetails behavior, including current integration-branch naming.
+- Validated backup and restore scripts end-to-end using test database artifacts (`db-backup.ps1`, `db-restore.ps1`) with successful backup creation and restore copy execution.
+- Expanded reports UX with preset date ranges and aggregate summary views for completed runs and runtime events.
+- Added backend API coverage for admin auto-map endpoint behavior and validated it in the backend integration suite.
+- Added Windows installer build automation (`scripts/build-installer.ps1`) plus Inno Setup definition (`installer/PlantMonitor.iss`) and successfully produced `artifacts/installer/PlantMonitor-Setup.exe`.
+- Added release packaging automation (`scripts/package-release.ps1`) and produced a versioned archive at `artifacts/packages/PlantMonitor-0.1.0-alpha-20260729-141034.zip`.
+- Added commissioning hardening endpoint `GET /api/admin/lines/{lineId}/commissioning-check` to validate required tag-slot readiness per line and surface missing logical keys/issue details.
+- Added backend integration coverage for commissioning readiness and validated end-to-end via admin assignment + commissioning-check flow.
+- Added runtime API correctness coverage for dashboard/detail contracts (`backend.Tests/RuntimeApiTests.cs`) and validated runtime endpoint ProblemDetails/shape behavior.
+- Performed live system verification with running frontend (`http://127.0.0.1:5173`) and backend (`http://127.0.0.1:5265`): root, health, login, dashboard, admin presets, production-runs, backend-served SPA assets, and SignalR `/hubs/lines/negotiate` all returned `200`.
+- Fixed frontend API success handling for empty responses (`204`, empty body, and `Content-Length: 0`) so successful no-content auth flows no longer throw JSON parse errors; updated change-password to `apiPost<void>()` and validated redirect behavior with new frontend tests.
+- Fixed admin auto-map first-attempt behavior by passing the fresh successful PLC connection result directly into auto-map/discovery flow instead of relying on same-tick React state, and added frontend test coverage for connection -> discovery -> auto-map orchestration.
+- Replaced line activation semantics with explicit lifecycle states (`Draft`, `Commissioning`, `Active`, `CommissioningFailed`, `Disabled`) including migration support, runtime polling restricted to `Active`, admin activation endpoint (`POST /api/admin/lines/{lineId}/commissioning-activate`), and integration tests validating draft default, reset-to-draft on active connection changes, and failed activation conflict behavior.
+- Added configurable per-line Allen-Bradley connection settings (`routePath`, `processorType`, connection/read timeout, retry count, retry delay, poll interval) with persistence, migration support, runtime usage, commissioning/read/browse/auto-map request wiring, and admin UI controls.
+- Corrected Allen-Bradley auto-map discovery to only consider directly readable primitive tags, enforce logical-key/data-type compatibility (including numeric-key protections against bool mapping), and return confidence/reason metadata for each suggested mapping.
+
+## Production Readiness Checklist Snapshot (2026-07-29)
+- Done: frontend publishing now builds and copies `frontend/dist` into backend publish output.
+- Done: published release assets were verified over HTTP, including `/`, `/health/live`, `/health/ready`, and referenced JS/CSS files.
+- Done: auth is cookie-only and login/session responses no longer return JWTs in JSON.
+- Done: forced password-change gating is enforced on protected API routes and returns ProblemDetails.
+- Done: backend auth and API tests were converted to cookie-based session requests and pass.
+- Done: frontend auth and route tests pass after the auth contract change.
+- Done: frontend login, change-password, and protected-route flows were updated to match the new session model.
+- Done: bootstrap admin seeding no longer blocks production restarts once an admin already exists.
+- Done: allowed hosts were tightened away from wildcard defaults.
+- Done: frontend dev proxy for `/api` and `/hubs` was fixed.
+- Done: PowerShell launch and cleanup helpers were repaired.
+- Done: runtime mode-duration attribution now credits elapsed time to the previously active mode.
+- Done: bundled Siemens PLC presets were removed from the seed and fallback config paths.
+- Done: PLC connection and tag-validation messaging now reflects Allen-Bradley-only production support.
+- Done: backend integration tests now use isolated test databases to avoid stale lock/schema collisions.
+- Done: completed-run and runtime-event queries were moved into a dedicated reports service.
+- Done: production/report validation and not-found responses now use standardized ProblemDetails payloads with stable error codes.
+- Done: remaining auth/admin/line validation failures now emit standardized ProblemDetails payloads with stable error codes.
+- Done: SignalR refresh notifications now suppress non-meaningful state churn via snapshot-signature change detection.
+- Done: health/readiness failure path now returns structured ProblemDetails (`503`) instead of an empty status body.
+- Done: documentation refresh for API auth/error contract and release branch strategy completed to match current implementation.
+- Done: backup/restore replacement is implemented and validated via `scripts/db-backup.ps1` and `scripts/db-restore.ps1` execution.
+- Done: admin auto-map workflow is covered by backend integration tests and validated through the admin PLC API test suite.
+- Done: reports expansion and cleanup implemented with date-range presets and aggregate run/event summaries.
+- Done: Windows installer build is automated and validated with generated installer artifact.
+- Done: repository cleanup and release packaging now has executable automation and validated packaged output.
+- Done: PLC configuration and commissioning hardening includes explicit per-line commissioning readiness validation and test coverage.
+- Done: runtime correctness beyond the auth gate now has explicit dashboard/detail API correctness tests and passing suite validation.
 
 ## Finalized Changes (Completed)
 
@@ -73,6 +183,60 @@ Primary operating model:
 - Stabilized local Playwright smoke execution with single-worker mode and deterministic login assertions.
 - Verified backend package graph no longer contains Microsoft.OpenApi; NU1903 warning path no longer appears in direct/transitive package listing.
 
+### Runtime and Dashboard Reliability
+- Stabilized ProductionRuntimeService so dashboard and line detail endpoints can continue serving snapshots even when the runtime engine is inactive or PLC reads fail.
+- Fixed save-to-dashboard behavior so configured line/tag state can surface without requiring a separate test-connection flow.
+- Added product ID normalization so unreadable PLC metadata payloads are shown as `N/A` instead of raw diagnostic JSON.
+- Corrected control mode persistence so manual and auto state remain visible while lines are stopped.
+- Fixed repeated stop-state persistence loops that were inserting duplicate completed-run records.
+- Changed disconnected PLC behavior so failed PLC polling marks the line `Offline` instead of generating simulated live statuses.
+- Updated the PLC failure path to emit runtime status transitions when moving into `Offline`.
+- Added persisted active runtime checkpoints so line state restores after restart instead of remaining memory-only.
+- Replaced synthetic runtime metadata with explicit line-configured `RecipeId`, `MachineId`, and `OperatorName` fields.
+- Fixed mode attribution in statistics so auto/manual intervals are credited from the sample mode instead of the previous cached mode.
+- Tightened lifecycle locking and checkpoint persistence in the runtime loop to reduce state races.
+
+### Local Launch and Live Validation
+- Fixed the frontend dev API path so `/api` and `/hubs` requests proxy to the backend during local development.
+- Fixed the PowerShell port cleanup helper so it can safely clear stale listeners before launching the stack.
+- Verified live browser login through the frontend origin using the built-in dev accounts.
+- Verified authenticated dashboard access through the frontend proxy after login.
+- Confirmed direct backend auth, frontend-proxied auth, and authenticated dashboard API access all return `200` in live checks.
+- Confirmed the dashboard route loads after sign-in and renders live line data in the browser.
+
+### PLC State Mapping and Runtime Semantics
+- Implemented explicit machine-state decoding for live PLC values:
+  - `0 => Stopped`
+  - `1 => Running`
+  - `2 => Bleedout`
+  - `3 => Startup`
+  - `4 => Faulted`
+  - `5 => Maintenance`
+- Extended frontend status handling so `Bleedout` and `Startup` render correctly across navbar summaries, dashboard tables, line lists, status chips, and the status board.
+- Changed time-in-status behavior to reset when the line status changes, so runtime reflects duration in the current state rather than total run age.
+
+### Reporting and Historical Data
+- Added completed production run persistence for historical reporting.
+- Added runtime event persistence for status switches and mode switches across all lines.
+- Added backend reporting API coverage for:
+  - completed runs
+  - runtime switch events
+- Added the frontend Reports page with:
+  - completed run history
+  - mode and status switch history
+  - line filtering
+  - date range filtering
+  - CSV export for both tables
+- Added EF migration support for the new runtime event persistence model.
+
+### Codebase Cleanup and Documentation
+- Performed a low-risk cleanup pass on PLC tag address validation to reduce duplication and make manufacturer-specific rules easier to read.
+- Replaced the placeholder frontend README with project-specific guidance.
+- Added folder-level READMEs to the main backend, frontend, docs, and scripts directories so the code layout is easier to understand.
+- Added a user guide in docs/User-Guide.md and linked it from the root README.
+- Updated the root README to reflect the current architecture, runtime behavior, reports support, and documentation map.
+- Updated the developer log with the latest runtime persistence, frontend proxy, and live-verification work.
+
 ## Release Readiness Roadmap (Items 1-6)
 
 ## 1) Automated Auth and Role Tests
@@ -98,6 +262,11 @@ Planned deliverables:
 Exit criteria:
 - One command boots local stack.
 - One command shuts down cleanly without lock artifacts.
+
+Status update:
+- `scripts/dev.ps1` now starts the frontend and backend for local development.
+- `scripts/cleanup-ports.ps1` was fixed to clear stale listeners correctly.
+- The browser-login flow was verified end-to-end after the proxy fix.
 
 ## 3) End-to-End UI Smoke Tests
 Objective:
@@ -148,6 +317,10 @@ Planned deliverables:
 Exit criteria:
 - Pre-release checklist completed and signed off.
 
+Status update:
+- The remediation checklist was updated with the latest fixed runtime, frontend, and documentation items.
+- Live validation evidence was added through direct backend, frontend-proxy, and browser checks.
+
 ## Deployment Readiness for Server + PLC Ethernet
 
 ### Target Installation Model
@@ -182,10 +355,10 @@ Exit criteria:
 
 ## Next Implementation Slice
 Immediate next coding slice:
-1. Capture and log before/after bundle size metrics with threshold targets for release gate.
-2. Expand smoke coverage for status-board rendering and reconnect behavior under simulated backend interruption.
-3. Add release command references to README and script docs.
-4. Add release checklist completion evidence template for each deploy candidate.
+1. Run integrated commissioning scenario across Wi-Fi connect/disconnect, OTA stage/apply, and operator/runtime continuity checks as one signed evidence pass.
+2. Add E2E coverage for Administration Wi-Fi actions with explicit error-contract assertions for privileged-agent failure paths.
+3. Expand release artifact evidence capture by storing structured command outputs under `artifacts/release/` for repeatable audit trails.
+4. Continue runtime service decomposition after deployment validation milestone closure.
 
 ---
-Last updated: 2026-07-02
+Last updated: 2026-08-11

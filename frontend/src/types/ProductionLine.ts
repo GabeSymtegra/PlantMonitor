@@ -1,6 +1,12 @@
 import type { LineStatus } from "./LineStatus";
 
 export type PlcManufacturer = "AllenBradley" | "Siemens";
+export type LineLifecycleState =
+  | "Draft"
+  | "Commissioning"
+  | "Active"
+  | "CommissioningFailed"
+  | "Disabled";
 
 export interface ProductionLine {
   id: number;
@@ -10,6 +16,12 @@ export interface ProductionLine {
   lineName: string;
 
   product: string;
+
+  recipeId: string;
+
+  machineId: string;
+
+  operatorName: string;
 
   startDateTime: string;
 
@@ -38,4 +50,6 @@ export interface ProductionLine {
   manufacturer: PlcManufacturer;
 
   isActive: boolean;
+
+  lineLifecycleState: LineLifecycleState;
 }

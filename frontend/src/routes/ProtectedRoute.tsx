@@ -8,11 +8,19 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ requiredRoles }: ProtectedRouteProps) {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, initializing, mustChangePassword } = useAuth();
   const location = useLocation();
+
+  if (initializing) {
+    return null;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  if (mustChangePassword && location.pathname !== "/change-password") {
+    return <Navigate to="/change-password" replace state={{ from: location.pathname }} />;
   }
 
   if (requiredRoles && requiredRoles.length > 0) {
@@ -32,7 +40,12 @@ export default function ProtectedRoute({ requiredRoles }: ProtectedRouteProps) {
     }
   }
 
-  if (user?.role === "Operator" && location.pathname !== "/status-board") {
+  if (
+    user?.role === "Operator"
+    && location.pathname !== "/status-board"
+    && location.pathname !== "/forbidden"
+    && location.pathname !== "/change-password"
+  ) {
     return <Navigate to="/status-board" replace state={{ from: location.pathname }} />;
   }
 

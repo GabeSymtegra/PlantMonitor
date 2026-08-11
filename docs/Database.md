@@ -261,15 +261,42 @@ Purpose:
 Columns:
 
 - line_id bigint primary key
+- line_number int not null
+- line_name varchar(128) not null
+- product_id varchar(128) not null
+- recipe_id varchar(128) not null
+- machine_id varchar(128) not null
+- operator_name varchar(128) not null
+- plc_ip varchar(64) not null
 - manufacturer varchar(64) not null
 - preset_name varchar(128) not null
 - preset_version int not null
 - poll_interval_ms int not null
+- is_active boolean not null
 - updated_at_utc timestamptz not null
 
 Constraints:
 
 - poll_interval_ms between 500 and 60000
+
+### 4.12a active_line_runtime_states
+
+Purpose:
+
+- Persist active per-line runtime checkpoints so runtime state survives process restarts.
+
+Columns:
+
+- line_id bigint primary key
+- status varchar(32) not null
+- control_mode varchar(16) not null
+- current_product_id varchar(128) not null
+- run_start_time_utc timestamptz not null
+- last_tick_utc timestamptz not null
+- production_length double precision not null
+- has_seen_running_state boolean not null
+- has_persisted_current_stop boolean not null
+- updated_at_utc timestamptz not null
 
 ### 4.13 line_tag_overrides
 

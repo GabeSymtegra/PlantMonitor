@@ -7,11 +7,6 @@ public static class PlcPresetSeeder
 {
     public static async Task SeedAsync(PlantMonitorDbContext dbContext, CancellationToken cancellationToken = default)
     {
-        if (await dbContext.PlcProtocolPresets.AnyAsync(cancellationToken))
-        {
-            return;
-        }
-
         var presets = new List<PlcProtocolPresetEntity>
         {
             new()
@@ -34,19 +29,42 @@ public static class PlcPresetSeeder
                 Manufacturer = "Siemens",
                 PresetName = "BasicStatus",
                 PresetVersion = 1,
-                Description = "Siemens baseline telemetry preset.",
+                Description = "Siemens S7 baseline telemetry preset.",
                 Tags =
                 [
-                    new PlcProtocolPresetTagEntity { TagKey = "status", PlcAddress = "DB12.DBW0", DataType = "int", Scale = 1.0m, IsRequired = true },
-                    new PlcProtocolPresetTagEntity { TagKey = "product", PlcAddress = "DB12.DBD4", DataType = "string", Scale = 1.0m, IsRequired = true },
-                    new PlcProtocolPresetTagEntity { TagKey = "runtime_seconds", PlcAddress = "DB12.DBD12", DataType = "dint", Scale = 1.0m, IsRequired = true },
-                    new PlcProtocolPresetTagEntity { TagKey = "total_length", PlcAddress = "DB12.DBD20", DataType = "real", Scale = 1.0m, IsRequired = true },
-                    new PlcProtocolPresetTagEntity { TagKey = "control_mode", PlcAddress = "DB12.DBW24", DataType = "int", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "status", PlcAddress = "DB1.DBW0", DataType = "int", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "product", PlcAddress = "DB1.DBD4", DataType = "string", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "runtime_seconds", PlcAddress = "DB1.DBD8", DataType = "dint", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "total_length", PlcAddress = "DB1.DBD12", DataType = "real", Scale = 1.0m, IsRequired = true },
+                    new PlcProtocolPresetTagEntity { TagKey = "control_mode", PlcAddress = "DB1.DBW16", DataType = "int", Scale = 1.0m, IsRequired = true },
                 ],
             },
         };
 
-        dbContext.PlcProtocolPresets.AddRange(presets);
+        var existing = await dbContext.PlcProtocolPresets
+            .AsNoTracking()
+            .Select(x => new { x.Manufacturer, x.PresetName, x.PresetVersion })
+            .ToListAsync(cancellationToken);
+
+        var existingKeys = new HashSet<string>(
+            existing.Select(x => BuildKey(x.Manufacturer, x.PresetName, x.PresetVersion)),
+            StringComparer.OrdinalIgnoreCase);
+
+        var missing = presets
+            .Where(x => !existingKeys.Contains(BuildKey(x.Manufacturer, x.PresetName, x.PresetVersion)))
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        dbContext.PlcProtocolPresets.AddRange(missing);
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string BuildKey(string manufacturer, string presetName, int presetVersion)
+    {
+        return $"{manufacturer}::{presetName}::{presetVersion}";
     }
 }

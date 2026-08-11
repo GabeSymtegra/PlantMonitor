@@ -34,6 +34,8 @@ Allowed line status values:
 
 - Running
 - Stopped
+- Startup
+- Bleedout
 - Faulted
 - Offline
 - Maintenance
@@ -47,7 +49,8 @@ Allowed controlMode values:
 
 Auth method:
 
-- JWT Bearer token in Authorization header.
+- Cookie-based session auth using HttpOnly `pm_auth` token cookie.
+- SignalR hub connections may also use `access_token` query values during WebSocket negotiation.
 
 Roles:
 
@@ -62,21 +65,22 @@ Endpoint policy summary:
 
 ## 4. Error Contract
 
-All non-2xx responses use this envelope:
+Validation and domain failures use RFC7807 ProblemDetails payloads:
 
 {
-	"traceId": "string",
-	"code": "string",
-	"message": "string",
-	"details": {
-		"fieldName": ["error1", "error2"]
-	}
+	"type": "https://httpstatuses.com/400",
+	"title": "Invalid request parameters.",
+	"status": 400,
+	"detail": "lineId must be a positive integer.",
+	"instance": "/api/production-runs",
+	"code": "invalid_line_id"
 }
 
 Rules:
 
-- details is optional and used for validation errors.
-- code examples: ValidationError, Unauthorized, Forbidden, NotFound, ServerError.
+- `code` is a machine-readable extension for client logic.
+- `traceId` may be included for correlation depending on middleware path.
+- Authorization failures continue to use standard 401/403 semantics.
 
 ## 5. DTO Models
 
@@ -106,13 +110,16 @@ Rules:
 {
 	"id": 1,
 	"lineNumber": 1,
-	"displayName": "Line 1",
-	"plcFamily": "AllenBradley",
+	"lineName": "Line 1",
+	"productId": "PVC-PIPE",
+	"recipeId": "RCP-100",
+	"machineId": "MX-100",
+	"operatorName": "operator-100",
 	"plcIp": "192.168.1.101",
+	"manufacturer": "AllenBradley",
 	"pollIntervalMs": 2000,
-	"isActive": true,
-	"defaultProduct": "PVC Pipe",
-	"createdAtUtc": "2026-07-01T14:00:00Z",
+	"isActive": false,
+	"lineLifecycleState": "Draft",
 	"updatedAtUtc": "2026-07-01T14:10:00Z"
 }
 
@@ -157,19 +164,15 @@ Request:
 Response 200:
 
 {
-	"accessToken": "jwt",
+	"username": "test",
+	"role": "Admin",
 	"expiresAtUtc": "2026-07-01T20:00:00Z",
-	"user": {
-		"id": 1,
-		"username": "admin",
-		"role": "Admin",
-		"displayName": "Plant Admin"
-	}
+	"mustChangePassword": false
 }
 
 Response codes:
 
-- 200, 400, 401, 500
+- 200, 400, 401, 423
 
 ### 6.2 Dashboard
 
@@ -222,17 +225,22 @@ POST /api/lines
 
 - Creates a new line configuration.
 - Admin only.
+- Create requests default the lifecycle state to Draft and do not activate the line.
 
 Request:
 
 {
 	"lineNumber": 5,
-	"displayName": "Line 5",
-	"plcFamily": "Siemens",
+	"lineName": "Line 5",
+	"productId": "PEX-TUBING",
+	"recipeId": "RCP-200",
+	"machineId": "MX-200",
+	"operatorName": "operator-200",
 	"plcIp": "192.168.1.105",
+	"manufacturer": "AllenBradley",
 	"pollIntervalMs": 2000,
 	"isActive": true,
-	"defaultProduct": "PEX Tubing"
+	"lineLifecycleState": "Draft"
 }
 
 Response 201:
@@ -243,6 +251,8 @@ PUT /api/lines/{id}
 
 - Updates line configuration.
 - Admin only.
+- Explicit lifecycle state values such as Commissioning are honored on update.
+- If an active line's PLC connection settings change, the lifecycle is reset back to Draft.
 
 DELETE /api/lines/{id}
 
@@ -252,6 +262,14 @@ DELETE /api/lines/{id}
 Response codes for line config endpoints:
 
 - 200, 201, 204, 400, 401, 403, 404, 409, 500
+
+Lifecycle states:
+
+- Draft
+- Commissioning
+- Active
+- CommissioningFailed
+- Disabled
 
 ### 6.4 Tag Mappings
 
@@ -308,7 +326,240 @@ Response codes:
 
 - 200, 400, 401, 500
 
-### 6.6 PLC Protocol Administration (M1)
+### 6.6 System Admin (Factory Access + OTA)
+
+GET /api/admin/system/connectivity
+
+- Admin only.
+- Returns host/interface diagnostics used to onboard tablets, phones, and laptops over factory Wi-Fi.
+
+Response 200 (shape):
+
+{
+	"hostname": "PLANT-HOST-01",
+	"accessMode": "LanCompatible",
+	"serviceBind": "http://0.0.0.0:5050",
+	"allowedHosts": "*",
+	"lanDeploymentEnabled": true,
+	"recommendedUrls": ["http://PLANT-HOST-01:5050", "http://192.168.1.50:5050"],
+	"activeInterfaces": [
+		{
+			"name": "Ethernet",
+			"type": "Ethernet",
+			"ipAddress": "192.168.1.50",
+			"isWireless": false,
+			"isPrivateAddress": true
+		}
+	],
+	"warnings": [],
+	"generatedAtUtc": "2026-08-11T13:40:00Z"
+}
+
+GET /api/admin/system/wifi/status
+
+- Admin only.
+- Returns current Wi-Fi link state from the local privileged host agent.
+
+Response 200 (shape):
+
+{
+	"isConnected": true,
+	"ssid": "Factory-Wifi-A",
+	"bssid": "00:11:22:33:44:55",
+	"signalQualityPercent": 78,
+	"interfaceName": "Wi-Fi",
+	"ipAddress": "192.168.1.250",
+	"message": "Connected.",
+	"errorCode": null,
+	"checkedAtUtc": "2026-08-11T14:15:00Z"
+}
+
+GET /api/admin/system/wifi/scan
+
+- Admin only.
+- Requests available SSID list from the local privileged host agent.
+
+Response 200 (shape):
+
+{
+	"networks": [
+		{
+			"ssid": "Factory-Wifi-A",
+			"signalQualityPercent": 78,
+			"security": "WPA2",
+			"isConnected": true
+		}
+	],
+	"message": "Scan completed.",
+	"errorCode": null,
+	"scannedAtUtc": "2026-08-11T14:15:15Z"
+}
+
+POST /api/admin/system/wifi/connect
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `wifi-manage`.
+- Proxies Wi-Fi connect operation to the privileged host agent.
+- Returns `502` ProblemDetails when the privileged host agent is unavailable or command execution fails.
+
+Request:
+
+{
+	"ssid": "Factory-Wifi-A",
+	"passphrase": "string",
+	"reauthToken": "string"
+}
+
+POST /api/admin/system/wifi/disconnect
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `wifi-manage`.
+- Proxies Wi-Fi disconnect operation to the privileged host agent.
+- Returns `502` ProblemDetails when the privileged host agent is unavailable or command execution fails.
+
+Request:
+
+{
+	"reauthToken": "string"
+}
+
+GET /api/admin/system/ota/check
+
+- Admin only.
+- Read-only release check against configured GitHub repository.
+
+Response 200 (shape):
+
+{
+	"status": "ok",
+	"currentVersion": "0.1.0-alpha",
+	"latestVersion": "0.1.1-alpha",
+	"hasUpdate": true,
+	"releaseUrl": "https://github.com/GabeSymtegra/PlantMonitor/releases/tag/v0.1.1-alpha",
+	"publishedAtUtc": "2026-08-10T12:00:00Z",
+	"summary": "Release highlights...",
+	"message": "A newer release is available.",
+	"checkedAtUtc": "2026-08-11T13:41:00Z"
+}
+
+POST /api/admin/system/reauth
+
+- Admin only.
+- Re-confirms admin password and issues a short-lived token for sensitive OTA actions.
+
+Request:
+
+{
+	"password": "string",
+	"scope": "ota-apply"
+}
+
+Response 200:
+
+{
+	"scope": "ota-apply",
+	"token": "string",
+	"expiresAtUtc": "2026-08-11T13:46:00Z",
+	"verifiedAtUtc": "2026-08-11T13:41:00Z"
+}
+
+POST /api/admin/system/ota/prepare-apply
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `ota-apply`.
+- Validates and records authorization intent for OTA apply execution.
+
+Request:
+
+{
+	"targetVersion": "0.1.1-alpha",
+	"reauthToken": "string"
+}
+
+Response 200:
+
+{
+	"status": "ready_for_apply",
+	"targetVersion": "0.1.1-alpha",
+	"message": "Re-authentication verified. OTA apply orchestration is authorized.",
+	"preparedAtUtc": "2026-08-11T13:41:20Z"
+}
+
+POST /api/admin/system/ota/stage
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `ota-stage`.
+- Downloads/copies package artifact into local OTA staging directory and computes SHA-256.
+
+Request:
+
+{
+	"targetVersion": "0.1.1-alpha",
+	"packageUrl": "https://example.com/PlantMonitor-0.1.1-alpha.zip",
+	"expectedSha256": "optional-hex-digest",
+	"reauthToken": "string"
+}
+
+Response 200:
+
+{
+	"operationId": "4c118c6a4ae04df28fdb0ddfd93f5d3f",
+	"status": "staged",
+	"targetVersion": "0.1.1-alpha",
+	"packagePath": "C:\\ProgramData\\PlantMonitor\\OtaStaging\\0.1.1-alpha\\20260811140110-PlantMonitor-0.1.1-alpha.zip",
+	"packageSizeBytes": 12500342,
+	"sha256": "6c4e...",
+	"isChecksumMatch": true,
+	"message": "Package downloaded and staged successfully.",
+	"startedAtUtc": "2026-08-11T14:01:10Z",
+	"completedAtUtc": "2026-08-11T14:01:12Z"
+}
+
+GET /api/admin/system/ota/stage/{operationId}
+
+- Admin only.
+- Returns latest known staging operation status.
+
+POST /api/admin/system/ota/apply
+
+- Admin only.
+- Requires a valid unexpired re-auth token for scope `ota-apply`.
+- Applies a previously staged package, runs a health check, and auto-rolls back if health fails.
+
+Request:
+
+{
+	"stageOperationId": "4c118c6a4ae04df28fdb0ddfd93f5d3f",
+	"reauthToken": "string",
+	"forceHealthFailure": false
+}
+
+Response 200:
+
+{
+	"operationId": "b178b4f48fc34d34a5803d6e8fd6f9d1",
+	"status": "applied",
+	"targetVersion": "0.1.1-alpha",
+	"previousVersion": "0.1.0-alpha",
+	"currentVersion": "0.1.1-alpha",
+	"appliedPackagePath": "C:\\ProgramData\\PlantMonitor\\OtaApplied\\0.1.1-alpha\\PlantMonitor-0.1.1-alpha.zip",
+	"healthCheckStatus": "passed",
+	"rolledBack": false,
+	"message": "OTA apply completed and health check passed.",
+	"startedAtUtc": "2026-08-11T14:05:00Z",
+	"completedAtUtc": "2026-08-11T14:05:04Z"
+}
+
+GET /api/admin/system/ota/apply/{operationId}
+
+- Admin only.
+- Returns latest known apply/rollback operation status.
+
+Response codes for system admin endpoints:
+
+- 200, 400, 401, 403, 500, 502
+
+### 6.7 PLC Protocol Administration (M1)
 
 All endpoints in this section are Admin only.
 
@@ -344,10 +595,16 @@ Response 200:
 
 {
 	"lineId": 101,
-	"manufacturer": "AB",
+	"manufacturer": "AllenBradley",
 	"presetName": "BasicStatus",
 	"presetVersion": 1,
 	"pollIntervalMs": 1500,
+	"routePath": "1,0",
+	"processorType": "ControlLogix",
+	"connectionTimeoutMs": 3000,
+	"readTimeoutMs": 3000,
+	"retryCount": 1,
+	"retryDelayMs": 250,
 	"updatedAtUtc": "2026-07-02T15:30:00Z"
 }
 
@@ -362,10 +619,16 @@ PUT /api/admin/lines/{lineId}/protocol-assignment
 Request:
 
 {
-	"manufacturer": "AB",
+	"manufacturer": "AllenBradley",
 	"presetName": "BasicStatus",
 	"presetVersion": 1,
-	"pollIntervalMs": 1500
+	"pollIntervalMs": 1500,
+	"routePath": "1,0",
+	"processorType": "ControlLogix",
+	"connectionTimeoutMs": 3000,
+	"readTimeoutMs": 3000,
+	"retryCount": 1,
+	"retryDelayMs": 250
 }
 
 Response 200:
@@ -375,6 +638,46 @@ LineProtocolAssignmentDto
 Response codes:
 
 - 200, 400, 401, 403
+
+GET /api/admin/lines/{lineId}/commissioning-check
+
+- Evaluates whether all required logical tag slots are mapped for the line assignment.
+- Returns readiness state, missing required keys, and issue messages for commissioning handoff.
+
+Response 200:
+
+{
+	"lineId": 101,
+	"manufacturer": "AllenBradley",
+	"presetName": "BasicStatus",
+	"presetVersion": 1,
+	"isReady": false,
+	"requiredTagCount": 10,
+	"mappedRequiredTagCount": 8,
+	"missingRequiredTagKeys": ["machine_state", "control_mode"],
+	"issues": ["Missing required logical keys: machine_state, control_mode."],
+	"checkedAtUtc": "2026-07-29T18:10:00Z"
+}
+
+Response codes:
+
+- 200, 401, 403, 404
+
+POST /api/admin/lines/{lineId}/commissioning-activate
+
+- Explicitly promotes a line to `Active` only after a passing commissioning check.
+- Returns `409` and keeps the line non-active when readiness checks fail.
+
+Response 200:
+
+{
+	"lineId": 101,
+	"lineLifecycleState": "Active"
+}
+
+Response codes:
+
+- 200, 401, 403, 404, 409
 
 GET /api/admin/lines/{lineId}/effective-tags
 

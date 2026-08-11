@@ -11,7 +11,7 @@ This document defines release gates for shipping PlantMonitor to a server-hosted
 
 ## Release Branch Strategy
 - main: stable release branch
-- copilothelpbranch (current): active integration branch
+- export (current): active integration branch
 - release/*: staged hardening and final verification
 
 ## Required Gates Before Release
@@ -21,6 +21,10 @@ This document defines release gates for shipping PlantMonitor to a server-hosted
 4. Security advisories in release-critical dependencies are triaged and resolved or accepted with documented waiver.
 5. Release checklist in docs/QA-Matrix.md marked complete.
 6. Server deployment runbook steps validated on a staging-like host.
+
+## Implementation Slice Tracking
+- Track modernization progress in `docs/QA-Matrix.md` under `Implementation Slice Checklist`.
+- Update slice status in the same pull request as code changes so implementation and documentation stay in sync.
 
 ## CI Required Checks Mapping
 - Workflow: .github/workflows/ci.yml

@@ -6,11 +6,14 @@ import AppShell from "../layouts/AppShell";
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const Lines = lazy(() => import("../pages/Lines"));
 const Login = lazy(() => import("../pages/Login"));
+const ChangePassword = lazy(() => import("../pages/ChangePassword"));
 const Administration = lazy(() => import("../pages/Administration"));
 const LineDetails = lazy(() => import("../pages/LineDetails"));
+const CompletedRunDetails = lazy(() => import("../pages/CompletedRunDetails"));
 const Settings = lazy(() => import("../pages/Settings"));
 const StatusBoard = lazy(() => import("../pages/StatusBoard"));
 const Forbidden = lazy(() => import("../pages/Forbidden"));
+const Reports = lazy(() => import("../pages/Reports"));
 import ProtectedRoute from "./ProtectedRoute";
 
 function PagePlaceholder({ title }: { title: string }) {
@@ -30,6 +33,8 @@ export default function AppRoutes() {
 
                     <Route path="/status-board" element={<StatusBoard />} />
 
+                    <Route path="/change-password" element={<ChangePassword />} />
+
                     <Route element={<AppShell />}>
 
                         <Route path="/" element={<Dashboard />} />
@@ -37,6 +42,8 @@ export default function AppRoutes() {
                         <Route path="/lines" element={<Lines />} />
 
                         <Route path="/lines/:id" element={<LineDetails />} />
+
+                        <Route path="/reports/completed/:id" element={<CompletedRunDetails />} />
 
                         <Route path="/forbidden" element={<Forbidden />} />
 
@@ -47,7 +54,7 @@ export default function AppRoutes() {
 
                         <Route
                             path="/reports"
-                            element={<PagePlaceholder title="Reports" />}
+                            element={<Reports />}
                         />
 
                         <Route element={<ProtectedRoute requiredRoles={["Admin"]} />}>

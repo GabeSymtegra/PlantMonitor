@@ -28,7 +28,7 @@ Services:
 
 - frontend (Vite dev server)
 - backend (ASP.NET API + SignalR)
-- postgresql (local instance)
+- sqlite (local file, EF Core migrations on startup)
 
 ### 2.2 Private Production Server
 
@@ -38,9 +38,10 @@ Purpose:
 
 Services:
 
-- frontend static build served by reverse proxy or web server
+- frontend static build served by backend static files + SPA fallback
 - backend API process
-- postgresql database
+- privileged host agent process for Wi-Fi and host-level operations
+- sqlite database file in ProgramData
 
 Network assumptions:
 
@@ -55,17 +56,22 @@ Network assumptions:
 Required environment variables:
 
 - ASPNETCORE_ENVIRONMENT
-- ConnectionStrings__PlantMonitorDb
+- ConnectionStrings__PlantMonitor
 - Jwt__Issuer
 - Jwt__Audience
 - Jwt__SigningKey
 - App__CorsOrigins
-- App__MockTelemetryEnabled
+
+Seeded credentials for first startup (set by `install-lan-service.ps1`):
+
+- `admin` / `test`
+- `operator` / `test`
+- `viewer` / `test`
 
 Recommended values by environment:
 
-- Local: App__MockTelemetryEnabled=true
-- Production phase-1: App__MockTelemetryEnabled=true until real PLC adapters are validated
+- Local: ASPNETCORE_ENVIRONMENT=Development
+- Production: configure Jwt signing key and set explicit App__CorsOrigins entries.
 
 ### 3.2 Frontend Settings
 
@@ -83,19 +89,16 @@ Local example:
 
 Required:
 
-- Host
-- Port
-- Database name
-- Username
-- Password
-- TLS mode according to environment security standard
+- Writable local filesystem for ProgramData
+- Backup location for sqlite file snapshots
+- Service account permissions to read/write the database path
 
 ## 4. Local Startup Procedure
 
-1. Start PostgreSQL and ensure database exists.
+1. Ensure backend working directory and ProgramData paths are writable.
 2. Set backend environment variables.
 3. Run backend from backend directory.
-4. Apply EF Core migrations to local database.
+4. Verify migrations apply on startup.
 5. Set frontend environment variables.
 6. Run frontend from frontend directory.
 7. Open web app and verify dashboard loads line rows from backend.
@@ -106,6 +109,93 @@ Operational check after startup:
 - GET dashboard endpoint responds.
 - SignalR connection opens and receives updates.
 
+### 4.1 Clean Developer Startup Commands
+
+Preferred one-command startup from repository root:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+This command starts backend and frontend in separate terminals and verifies:
+
+- GET /health/live
+- GET /health/ready
+- POST /api/auth/login
+- GET /api/lines
+- GET /api/dashboard
+- frontend root URL
+
+Manual default backend:
+
+```powershell
+Set-Location backend
+dotnet run --launch-profile http
+```
+
+Default frontend:
+
+```powershell
+Set-Location frontend
+npm run dev
+```
+
+### 4.1.1 Startup Failure Triage
+
+If default startup fails:
+
+1. Check whether port 5265 is already in use:
+
+```powershell
+Get-NetTCPConnection -LocalPort 5265 -State Listen
+```
+
+2. Stop conflicting local listeners:
+
+```powershell
+.\scripts\dev-stop.ps1
+```
+
+3. Retry default startup:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+4. If shared database/service contention remains, run isolated startup:
+
+```powershell
+.\scripts\dev.ps1 -Isolated
+```
+
+### 4.2 Isolated Siemens Test Startup
+
+Use this when the default backend is already running, the Windows service is
+active, or the shared SQLite database is locked.
+
+Backend:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT='Development'
+$env:ASPNETCORE_URLS='http://localhost:5266'
+$env:ConnectionStrings__PlantMonitor='Data Source=C:\Users\Gabe\Desktop\PlantMonitor\backend\plantmonitor.dev.db'
+dotnet run --no-launch-profile --project C:\Users\Gabe\Desktop\PlantMonitor\backend\backend.csproj
+```
+
+Frontend:
+
+```powershell
+Set-Location frontend
+$env:VITE_DEV_BACKEND_ORIGIN='http://127.0.0.1:5266'
+npm run dev
+```
+
+Why this mode exists:
+
+- avoids port `5265` collisions
+- avoids single-instance database lock conflicts
+- keeps Siemens integration tests isolated from the installed/service-backed instance
+
 ## 5. Production Deployment Topology
 
 Recommended topology:
@@ -113,14 +203,76 @@ Recommended topology:
 - Reverse proxy terminates TLS.
 - Reverse proxy routes:
 	- /api and /hubs to backend service
-	- / to frontend static content
-- Backend and PostgreSQL run on private subnet.
+	- / to backend-hosted frontend static content
+- Backend runs on private subnet.
 
 Security controls:
 
 - Allowlist frontend origin in CORS.
 - Rotate JWT signing key by policy.
-- Restrict database port access to backend host only.
+- Restrict access to backend host and local sqlite storage path.
+
+## 5.1 Same-Wired-Network Hosted Mode
+
+For the first hosted LAN rollout, use one backend-hosted origin on the host
+machine so browser clients on other wired-network PCs load the SPA, API, and
+SignalR hub from the same IP address and port.
+
+Recommended credential plan for first LAN installation:
+
+- use admin (`admin` / `test`) for management and configuration
+- use viewer (`viewer` / `test`) for status-board screens on other PCs
+- use operator (`operator` / `test`) for non-admin operational checks
+
+Recommended operator flow:
+
+1. Publish the backend-hosted release:
+
+```powershell
+.\scripts\publish-host-release.ps1
+```
+
+2. Optional pre-install smoke test:
+
+```powershell
+.\scripts\test-host-release.ps1
+```
+
+This optional check runs the published release in `Development` environment
+and uses development-style `test` / `test` credentials.
+
+3. Install the published release as the LAN host Windows service:
+
+```powershell
+.\scripts\install-lan-service.ps1 -JwtSigningKey '<strong-32+-char-key>'
+```
+
+This seeds the default LAN credentials: admin/operator/viewer with password `test` when the users are missing in the database.
+
+The installer script also installs and starts the local privileged agent
+service used by backend Wi-Fi management APIs.
+
+4. Validate the installed service:
+
+```powershell
+.\scripts\test-lan-service.ps1
+```
+
+5. Optional: validate sign-in/session checks:
+
+```powershell
+.\scripts\test-lan-service.ps1 -Username test -Password test
+```
+
+Use one of the seeded accounts, for example `operator` / `test`.
+
+Validation now also checks privileged-agent health and service status.
+
+7. Open the printed `http://<host-ip>:5050` URL from other PCs on the same
+wired network.
+
+This hosted mode uses backend configuration overrides that enable LAN delivery
+without relying on the Vite development server path.
 
 ## 6. Build And Release Process
 
@@ -130,7 +282,7 @@ Release steps:
 
 1. Build backend in release mode.
 2. Run tests.
-3. Apply database migrations.
+3. Start backend once and verify migration output.
 4. Deploy backend binaries.
 5. Restart backend service.
 6. Validate health and logs.
@@ -141,7 +293,7 @@ Release steps:
 
 1. Install dependencies.
 2. Build production assets.
-3. Publish assets to web root.
+3. Publish assets to backend wwwroot.
 4. Purge cache if reverse proxy or CDN cache is enabled.
 5. Validate dashboard page and SignalR connectivity.
 
@@ -158,7 +310,7 @@ Readiness should validate:
 
 - Database connectivity.
 - SignalR subsystem registration.
-- Mock telemetry producer status.
+- Runtime service initialization.
 
 ### 7.2 Logging Requirements
 

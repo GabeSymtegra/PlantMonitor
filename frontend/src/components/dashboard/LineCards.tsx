@@ -42,10 +42,25 @@ interface LineCardsProps {
   lines?: ProductionLine[];
 }
 
+function formatNumberOrUnknown(value: unknown, decimals = 2): string {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue.toFixed(decimals) : "??";
+}
+
+function formatPercentOrUnknown(value: unknown, decimals = 1): string {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? `${numberValue.toFixed(decimals)}%` : "??";
+}
+
 export default function LineCards({ lines }: LineCardsProps) {
   const { dashboard } = useDashboard();
   const visibleLines = lines ?? dashboard?.lines ?? [];
   const navigate = useNavigate();
+
+  function displayOrUnknown(value: string | null | undefined): string {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : "Unknown";
+  }
 
   function formatStartDateTime(value: string): string {
     const parsed = new Date(value);
@@ -84,12 +99,10 @@ export default function LineCards({ lines }: LineCardsProps) {
         >
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              Line #{line.lineNumber} - {line.lineName}
+              {line.lineName}
             </Typography>
 
-            <Typography gutterBottom sx={{ mb: 2 }}>
-              Serial: {line.product}
-            </Typography>
+            <Box sx={{ mb: 2 }} />
 
             <Box sx={{ display: "grid", rowGap: 0.75, mb: 2 }}>
               <Typography
@@ -103,6 +116,12 @@ export default function LineCards({ lines }: LineCardsProps) {
                 label="Start Date:Time"
                 value={formatStartDateTime(line.startDateTime)}
               />
+              <MetricRow label="Product" value={displayOrUnknown(line.product)} />
+              <MetricRow label="Recipe" value={displayOrUnknown(line.recipeId)} />
+              <MetricRow label="Machine" value={displayOrUnknown(line.machineId)} />
+              <MetricRow label="Operator" value={displayOrUnknown(line.operatorName)} />
+              <MetricRow label="PLC IP" value={displayOrUnknown(line.plcIp)} />
+              <MetricRow label="Manufacturer" value={displayOrUnknown(line.manufacturer)} />
             </Box>
 
             <Divider sx={{ my: 1.5 }} />
@@ -131,10 +150,10 @@ export default function LineCards({ lines }: LineCardsProps) {
                 </Box>
               </Box>
 
-              <MetricRow label="Time" value={line.timeInStatus} />
+              <MetricRow label="Time in Status" value={line.timeInStatus} />
               <MetricRow
-                label="Total Length"
-                value={`${line.totalLength.toLocaleString()} ft`}
+                label="Total Length in Status"
+                value={Number.isFinite(Number(line.totalLength)) ? `${line.totalLength.toLocaleString()} ft` : "??"}
               />
               <MetricRow label="Control Mode" value={line.controlMode} />
             </Box>
@@ -146,28 +165,28 @@ export default function LineCards({ lines }: LineCardsProps) {
                 variant="overline"
                 sx={{ color: "text.secondary", letterSpacing: 0.8 }}
               >
-                Variance
+                Quality
               </Typography>
 
               <MetricRow
-                label="%Auto Mode"
-                value={`${line.percentAutoMode.toFixed(1)}%`}
+                label="% Auto"
+                value={formatPercentOrUnknown(line.percentAutoMode, 1)}
               />
               <MetricRow
-                label="Auto Variance"
-                value={line.autoVariance.toFixed(2)}
+                label="Var in Auto Mode"
+                value={formatNumberOrUnknown(line.autoVariance, 2)}
               />
               <MetricRow
-                label="%Man Mode"
-                value={`${line.percentManualMode.toFixed(1)}%`}
+                label="% Manual"
+                value={formatPercentOrUnknown(line.percentManualMode, 1)}
               />
               <MetricRow
-                label="Man Variance"
-                value={line.manualVariance.toFixed(2)}
+                label="% Manual Varience"
+                value={formatNumberOrUnknown(line.manualVariance, 2)}
               />
               <MetricRow
-                label="Total Variance"
-                value={line.totalVariance.toFixed(2)}
+                label="Total Varience"
+                value={formatNumberOrUnknown(line.totalVariance, 2)}
               />
             </Box>
           </CardContent>
