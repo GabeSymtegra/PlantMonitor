@@ -40,4 +40,4 @@ Name: "{autodesktop}\PlantMonitor"; Filename: "http://localhost:5050/"; Tasks: d
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\scripts\install-lan-service.ps1"" -UseInstalledFiles -InstallDirectory ""{app}"""; Description: "Install and start PlantMonitor LAN service"; Flags: runhidden waituntilterminated postinstall skipifsilent
-Filename: "http://localhost:5050/"; Description: "Open PlantMonitor"; Flags: postinstall skipifsilent unchecked
+Filename: "http://localhost:5050/"; Description: "Open PlantMonitor"; Flags: shellexec postinstall skipifsilent unchecked
